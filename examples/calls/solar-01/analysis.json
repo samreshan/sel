@@ -1,0 +1,26 @@
+{
+  "_note": "Hand-written stand-in for language-model output, used to exercise the pipeline. It deliberately contains three mistakes a model might make: an objection quoting words nobody said (f8), a 'supported' verdict citing a passage that isn't in the pack (c5), and a due date the call never fixed (k2). Sel should refuse or correct all three.",
+  "findings": [
+    {"id": "f1", "kind": "question", "summary": "Customer asked whether EMI is available.", "evidence": {"segment_ids": ["s06"], "quote": "EMI ko option cha?"}},
+    {"id": "f2", "kind": "question", "summary": "Customer asked how long net metering takes.", "evidence": {"segment_ids": ["s08"], "quote": "Net metering ko process kati time lagcha?"}},
+    {"id": "f3", "kind": "question", "summary": "Customer asked when the site visit will happen.", "evidence": {"segment_ids": ["s12"], "quote": "Site visit ko lagi kahile aunu huncha?"}},
+    {"id": "f4", "kind": "objection", "summary": "Price: a competitor quoted NPR 3,60,000.", "evidence": {"segment_ids": ["s04"], "quote": "Arko company le 3 lakh 60 ma dinchu bhaneko thiyo."}},
+    {"id": "f5", "kind": "coaching", "criterion": "discovery", "summary": "Price was quoted before learning the bill amount, roof space or load.", "suggestion": "Ask about the monthly bill and roof area first, then size the system before giving a price.", "evidence": {"segment_ids": ["s02", "s03"], "quote": "Mahina ko bill dherai aaucha."}},
+    {"id": "f6", "kind": "coaching", "criterion": "objection-handling", "summary": "The competitor's lower price was answered with warranty claims, without asking what that quote includes.", "suggestion": "Ask which panels, inverter and warranty the other quote covers before comparing.", "evidence": {"segment_ids": ["s04", "s05"]}},
+    {"id": "f7", "kind": "coaching", "criterion": "clear-next-step", "summary": "The site visit was left as 'sometime next week' with no day agreed.", "suggestion": "Offer two specific days for the engineer's visit before ending the call.", "evidence": {"segment_ids": ["s13"], "quote": "Sometime next week hamro engineer pathaula."}},
+    {"id": "f8", "kind": "objection", "summary": "Customer worried about low output during the monsoon.", "evidence": {"segment_ids": ["s02"], "quote": "barsat ma kam generate huncha"}}
+  ],
+  "claims": [
+    {"id": "c1", "claim": "The 3 kW grid-tie system costs NPR 4,20,000 including installation.", "verdict": "supported", "evidence": {"segment_ids": ["s03"], "quote": "3 kW grid-tie system installation sahit 4 lakh 20 hajar parcha"}, "sources": [{"source": "fact:price-3kw", "quote": "NPR 4,20,000 including installation"}]},
+    {"id": "c2", "claim": "Panels have a 25-year performance warranty.", "verdict": "supported", "evidence": {"segment_ids": ["s05"], "quote": "panel ma 25 years performance warranty cha"}, "sources": [{"source": "docs/warranty.md", "quote": "Panels carry a 25-year linear performance warranty"}]},
+    {"id": "c3", "claim": "The inverter has a 10-year warranty.", "verdict": "contradicted", "evidence": {"segment_ids": ["s05"], "quote": "inverter ma pani 10 years warranty cha"}, "sources": [{"source": "docs/warranty.md", "quote": "Inverters carry a 5-year manufacturer warranty. The paid Care Plan extends the inverter warranty to 10 years."}], "explanation": "The standard inverter warranty is 5 years; 10 years requires the paid Care Plan."},
+    {"id": "c4", "claim": "EMI is available through a partner bank.", "verdict": "supported", "evidence": {"segment_ids": ["s07"], "quote": "Partner bank through EMI milcha"}, "sources": [{"source": "fact:financing", "quote": "Financing is arranged through partner banks"}]},
+    {"id": "c5", "claim": "NEA net-metering approval normally takes two weeks.", "verdict": "supported", "evidence": {"segment_ids": ["s09"], "quote": "NEA approval chai normally duita hapta ma aaucha."}, "sources": [{"source": "docs/price-list.md", "quote": "net-metering approval is usually issued within two weeks"}]}
+  ],
+  "commitments": [
+    {"id": "k1", "owner": "S1", "action": "send the detailed quotation and EMI details by email", "channel": "email", "due_text": "bholi beluka samma", "evidence": {"segment_ids": ["s11"], "quote": "ma bholi beluka samma quotation ra EMI details email garchu"}},
+    {"id": "k2", "owner": "S1", "action": "send an engineer for a site visit", "channel": "visit", "due_text": "sometime next week", "due": {"status": "exact", "date": "2026-10-12"}, "evidence": {"segment_ids": ["s13"], "quote": "Sometime next week hamro engineer pathaula."}},
+    {"id": "k3", "owner": "S1", "action": "call to confirm the site-visit day", "channel": "call", "due_text": "pachhi", "evidence": {"segment_ids": ["s13"], "quote": "Ma pachhi call garera confirm garchu."}},
+    {"id": "k4", "owner": "S2", "action": "call back after discussing at home", "channel": "call", "due_text": "sukrabar", "evidence": {"segment_ids": ["s14"], "quote": "ghar ma kura garera sukrabar call garchu"}}
+  ]
+}

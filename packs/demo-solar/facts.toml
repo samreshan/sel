@@ -1,0 +1,21 @@
+# Approved, short statements reps may make. Each can point to the document it comes from.
+
+[[fact]]
+id = "price-3kw"
+statement = "The 3 kW grid-tie system costs NPR 4,20,000 including installation."
+source_doc = "docs/price-list.md"
+
+[[fact]]
+id = "panel-warranty"
+statement = "Panels carry a 25-year linear performance warranty."
+source_doc = "docs/warranty.md"
+
+[[fact]]
+id = "inverter-warranty"
+statement = "Inverters carry a 5-year manufacturer warranty, extendable to 10 years with the paid Care Plan."
+source_doc = "docs/warranty.md"
+
+[[fact]]
+id = "financing"
+statement = "Financing is arranged through partner banks; Ghamghar Solar does not offer EMI directly."
+source_doc = "docs/price-list.md"

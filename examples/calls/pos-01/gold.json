@@ -1,0 +1,20 @@
+{
+  "_note": "Human annotation of pos-01.",
+  "findings": [
+    {"kind": "question", "evidence": {"segment_ids": ["s02"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s04"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s06"]}},
+    {"kind": "objection", "evidence": {"segment_ids": ["s08"]}},
+    {"kind": "coaching", "criterion": "qualify", "evidence": {"segment_ids": ["s02", "s07"]}},
+    {"kind": "coaching", "criterion": "accurate-claims", "evidence": {"segment_ids": ["s05"]}}
+  ],
+  "claims": [
+    {"verdict": "supported", "evidence": {"segment_ids": ["s03"]}},
+    {"verdict": "contradicted", "evidence": {"segment_ids": ["s05"]}},
+    {"verdict": "supported", "evidence": {"segment_ids": ["s07"]}}
+  ],
+  "commitments": [
+    {"owner": "S1", "channel": "email", "due_status": "exact", "due_date": "2026-10-08", "evidence": {"segment_ids": ["s09"]}},
+    {"owner": "S1", "channel": "meeting", "due_status": "exact", "due_date": "2026-10-11", "evidence": {"segment_ids": ["s09", "s10", "s11"]}}
+  ]
+}

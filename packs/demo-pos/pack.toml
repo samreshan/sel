@@ -1,0 +1,31 @@
+# Example business pack. Thali POS is fictional; every fact, price and policy
+# below was invented for testing Sel. It shares no code or settings with
+# demo-solar: only this directory differs.
+
+[pack]
+id = "demo-pos"
+name = "Thali POS (fictional)"
+description = "Point-of-sale and billing software for restaurants and cafés, sold on a monthly subscription."
+languages = ["en", "ne"]
+week_starts_on = "sunday"
+
+[templates]
+email = "templates/followup-email.md"
+
+[[scorecard]]
+id = "qualify"
+title = "Qualify the outlet"
+description = "Find out the number of outlets, billing counters and whether they need kitchen order tickets before recommending a plan."
+weight = 2
+
+[[scorecard]]
+id = "accurate-claims"
+title = "Only approved product claims"
+description = "Integrations, offline behaviour and pricing must match the product sheet."
+weight = 3
+
+[[scorecard]]
+id = "book-demo"
+title = "Book a demo with a time"
+description = "End the call with a demo or callback booked for a specific day and time."
+weight = 2

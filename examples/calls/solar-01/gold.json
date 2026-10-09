@@ -1,0 +1,26 @@
+{
+  "_note": "Human annotation of solar-01: what a careful reviewer would mark. Used by `python -m sel eval`.",
+  "findings": [
+    {"kind": "question", "evidence": {"segment_ids": ["s06"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s08"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s12"]}},
+    {"kind": "objection", "evidence": {"segment_ids": ["s04"]}},
+    {"kind": "coaching", "criterion": "discovery", "evidence": {"segment_ids": ["s03"]}},
+    {"kind": "coaching", "criterion": "objection-handling", "evidence": {"segment_ids": ["s05"]}},
+    {"kind": "coaching", "criterion": "accurate-claims", "evidence": {"segment_ids": ["s09"]}},
+    {"kind": "coaching", "criterion": "clear-next-step", "evidence": {"segment_ids": ["s13"]}}
+  ],
+  "claims": [
+    {"verdict": "supported", "evidence": {"segment_ids": ["s03"]}},
+    {"verdict": "supported", "evidence": {"segment_ids": ["s05"]}},
+    {"verdict": "contradicted", "evidence": {"segment_ids": ["s05"]}},
+    {"verdict": "supported", "evidence": {"segment_ids": ["s07"]}},
+    {"verdict": "unverified", "evidence": {"segment_ids": ["s09"]}}
+  ],
+  "commitments": [
+    {"owner": "S1", "channel": "email", "due_status": "exact", "due_date": "2026-10-08", "evidence": {"segment_ids": ["s11", "s15"]}},
+    {"owner": "S1", "channel": "visit", "due_status": "ambiguous", "evidence": {"segment_ids": ["s13"]}},
+    {"owner": "S1", "channel": "call", "due_status": "ambiguous", "evidence": {"segment_ids": ["s13"]}},
+    {"owner": "S2", "channel": "call", "due_status": "exact", "due_date": "2026-10-09", "evidence": {"segment_ids": ["s14"]}}
+  ]
+}

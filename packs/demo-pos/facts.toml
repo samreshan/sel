@@ -1,0 +1,14 @@
+[[fact]]
+id = "price-standard"
+statement = "The Standard plan costs NPR 2,500 per month per outlet, billed yearly."
+source_doc = "docs/product-sheet.md"
+
+[[fact]]
+id = "offline"
+statement = "Billing keeps working offline and syncs when the connection returns."
+source_doc = "docs/product-sheet.md"
+
+[[fact]]
+id = "no-accounting-sync"
+statement = "Thali POS does not currently integrate with accounting software; sales can be exported as CSV."
+source_doc = "docs/product-sheet.md"

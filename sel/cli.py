@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +29,8 @@ def _report_for_example(example: Path, pack_path: Path):
 def _print_summary(report) -> None:
     t = report.transcript
     print(f"Call {t.call_id} · pack {report.pack_id} · {len(t.segments)} segments")
-    print(f"  analyzer: {report.meta['analyzer']} (fixture data, not model output)")
+    note = " (fixture data, not model output)" if str(report.meta.get("analyzer", "")).startswith("fixture") else ""
+    print(f"  transcriber: {report.meta.get('transcriber')} · analyzer: {report.meta.get('analyzer')}{note}")
     by_seg = {s.id: s for s in t.segments}
 
     def at(ids: list[str]) -> str:
@@ -73,6 +75,27 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("eval", help="score an example's report against its gold annotations")
     p.add_argument("example", type=Path)
     p.add_argument("--pack", type=Path, required=True)
+    p.add_argument("--report", type=Path, help="score this saved report.json instead of the fixture analysis")
+
+    p = sub.add_parser("analyze", help="run the real pipeline on a recording (local speech + language models)")
+    p.add_argument("audio", type=Path)
+    p.add_argument("--pack", type=Path, required=True)
+    p.add_argument("--started-at", required=True, help="call start, ISO 8601 with offset, e.g. 2026-10-07T14:00:00+05:45")
+    p.add_argument("--rep-name")
+    p.add_argument("--customer-name")
+    p.add_argument("--customer-email")
+    p.add_argument("--channels", choices=["auto", "split", "mono"], default="auto",
+                   help="split: stereo file with each side on its own channel")
+    p.add_argument("--rep-channel", type=int, default=0)
+    p.add_argument("--transcript", type=Path, help="skip speech recognition and analyse this transcript.json")
+    p.add_argument("--out", type=Path, help="write the report JSON here")
+
+    p = sub.add_parser("serve", help="start the local review app")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--calls-dir", default=os.environ.get("SEL_CALLS_DIR", "calls"))
+    p.add_argument("--packs-dir", default="packs")
+    p.add_argument("--no-examples", action="store_true", help="don't load the fixture example calls")
 
     args = parser.parse_args(argv)
 
@@ -86,6 +109,26 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(pack.scorecard)} scorecard criteria, templates: {', '.join(pack.templates) or 'defaults'}")
         return 0
 
+    if args.cmd == "serve":
+        return _serve(args)
+    if args.cmd == "analyze":
+        return _analyze(args)
+
+    if args.cmd == "eval" and args.report:
+        from .models import Analysis, CallReport, Draft, Rejection, Transcript
+        data = json.loads(args.report.read_text(encoding="utf-8"))
+        a = Analysis.from_dict(data)
+        report = CallReport(data["pack_id"], Transcript.from_dict(data["transcript"]), a.findings, a.claims,
+                            a.commitments, [Draft(**d) for d in data["drafts"]],
+                            [Rejection(**r) for r in data["rejected"]], data.get("meta", {}))
+        ref_file = args.example / "reference.json"  # timings of the example's recording, when it has one
+        if not ref_file.is_file():
+            ref_file = args.example / "transcript.json"
+        reference = json.loads(ref_file.read_text(encoding="utf-8"))
+        gold = json.loads((args.example / "gold.json").read_text(encoding="utf-8"))
+        print(json.dumps(score(report, gold, reference=reference), indent=2))
+        return 0
+
     report = _report_for_example(args.example, args.pack)
     if args.cmd == "demo":
         if args.json:
@@ -96,4 +139,71 @@ def main(argv: list[str] | None = None) -> int:
 
     gold = json.loads((args.example / "gold.json").read_text(encoding="utf-8"))
     print(json.dumps(score(report, gold), indent=2))
+    return 0
+
+
+def _health():
+    from .llm import client_from_env
+    out = {"asr": {"model": os.environ.get("SEL_WHISPER_MODEL", "small")}}
+    try:
+        llm = client_from_env()
+        out["llm"] = {"name": llm.name, **llm.health()}
+    except Exception as e:  # noqa: BLE001
+        out["llm"] = {"name": None, "ok": False, "error": str(e)}
+    try:
+        import faster_whisper  # noqa: F401
+        out["asr"]["ok"] = True
+    except ImportError:
+        out["asr"].update(ok=False, error="pip install faster-whisper")
+    return out
+
+
+def _serve(args) -> int:
+    from .server import serve
+    from .service import CallService
+
+    service = CallService(args.calls_dir, args.packs_dir)
+    if not args.no_examples:
+        root = Path(__file__).resolve().parent.parent / "examples" / "calls"
+        for example, pack_id in (("solar-01", "demo-solar"), ("pos-01", "demo-pos")):
+            if (root / example).is_dir():
+                service.create_from_example(root / example, pack_id)
+    httpd = serve(service, args.host, args.port, health=_health)
+    print(f"Sel is running at http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def _analyze(args) -> int:
+    from .adapters import FixtureTranscriber
+    from .analyzer_llm import LLMAnalyzer, label_speakers
+    from .asr import WhisperTranscriber
+    from .llm import client_from_env
+    from .models import Speaker
+    from .pipeline import analyze_call
+
+    pack = load_pack(args.pack)
+    llm = client_from_env()
+    speakers = [Speaker("S1", "rep", args.rep_name), Speaker("S2", "customer", args.customer_name, args.customer_email)]
+    if args.transcript:
+        transcriber = FixtureTranscriber(args.transcript)
+    else:
+        transcriber = WhisperTranscriber(speakers=speakers, rep_channel=args.rep_channel,
+                                         split_channels={"split": True, "mono": False}.get(args.channels))
+    analyzer = LLMAnalyzer(llm)
+
+    def progress(stage: str, frac: float) -> None:
+        print(f"  [{frac:4.0%}] {stage}", file=sys.stderr)
+
+    analyzer.progress = lambda s, f: progress(s, 0.45 + 0.5 * f)
+    report, _ = analyze_call(str(args.audio), args.started_at, pack, transcriber, analyzer,
+                             call_id=args.audio.stem, speaker_labeler=lambda t, p: label_speakers(t, p, llm),
+                             progress=progress)
+    if args.out:
+        args.out.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"report written to {args.out}", file=sys.stderr)
+    _print_summary(report)
     return 0

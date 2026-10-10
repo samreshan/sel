@@ -9,3 +9,10 @@ recordings/
 *.mp3
 *.m4a
 *.ogg
+
+# Local model files and tool binaries
+models/
+.tools/
+/calls/
+# Synthesized (text-to-speech) example recordings are safe to publish.
+!examples/calls/*/audio.ogg

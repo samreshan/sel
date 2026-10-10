@@ -1,5 +1,5 @@
 {
-  "_note": "Human annotation of solar-01: what a careful reviewer would mark. Used by `python -m sel eval`.",
+  "_note": "Reference annotation of solar-01, written together with this fictional test call (not an independent human annotation). Used by `python -m sel eval`.",
   "findings": [
     {"kind": "question", "evidence": {"segment_ids": ["s06"]}},
     {"kind": "question", "evidence": {"segment_ids": ["s08"]}},

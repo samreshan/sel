@@ -1,0 +1,24 @@
+{
+  "_note": "Reference annotation of pos-02, written together with this fictional test call (not an independent human annotation). Used by `python -m sel eval`.",
+  "findings": [
+    {"kind": "question", "evidence": {"segment_ids": ["s04"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s06"]}},
+    {"kind": "question", "evidence": {"segment_ids": ["s08"]}},
+    {"kind": "objection", "evidence": {"segment_ids": ["s11"]}},
+    {"kind": "coaching", "criterion": "qualify", "evidence": {"segment_ids": ["s10", "s14"]}},
+    {"kind": "coaching", "criterion": "accurate-claims", "evidence": {"segment_ids": ["s07", "s10"]}}
+  ],
+  "claims": [
+    {"verdict": "supported", "evidence": {"segment_ids": ["s05"]}},
+    {"verdict": "supported", "evidence": {"segment_ids": ["s09"]}},
+    {"verdict": "contradicted", "evidence": {"segment_ids": ["s07"]}},
+    {"verdict": "contradicted", "evidence": {"segment_ids": ["s10"]}},
+    {"verdict": "unverified", "evidence": {"segment_ids": ["s12"]}}
+  ],
+  "commitments": [
+    {"owner": "S1", "channel": "email", "due_status": "exact", "due_date": "2026-10-08", "evidence": {"segment_ids": ["s16"]}},
+    {"owner": "S1", "channel": "call", "due_status": "exact", "due_date": "2026-10-12", "evidence": {"segment_ids": ["s20"]}},
+    {"owner": "S1", "channel": "visit", "due_status": "ambiguous", "evidence": {"segment_ids": ["s18"]}},
+    {"owner": "S2", "channel": "other", "due_status": "exact", "due_date": "2026-10-10", "evidence": {"segment_ids": ["s19"]}}
+  ]
+}

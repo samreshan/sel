@@ -1,0 +1,180 @@
+{
+  "call_id": "pos-02",
+  "audio": "audio.wav",
+  "started_at": "2026-10-08T15:00:00+05:45",
+  "speakers": [
+    {
+      "id": "S1",
+      "role": "rep",
+      "name": "Bikash"
+    },
+    {
+      "id": "S2",
+      "role": "customer",
+      "name": "Mina",
+      "email": "mina@example.com"
+    }
+  ],
+  "segments": [
+    {
+      "id": "s01",
+      "start": 0.0,
+      "end": 6.29,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Hello Mina, this is Bikash from Thali POS. Thanks for booking this call. You mentioned a restaurant in Lalitpur, is that right?"
+    },
+    {
+      "id": "s02",
+      "start": 6.69,
+      "end": 12.49,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Yes, that's right. We're replacing our old billing app, and I have a few questions before we decide."
+    },
+    {
+      "id": "s03",
+      "start": 12.89,
+      "end": 13.92,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Sure, go ahead."
+    },
+    {
+      "id": "s04",
+      "start": 14.32,
+      "end": 18.29,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "First, if the internet goes down during lunch, does billing still work?"
+    },
+    {
+      "id": "s05",
+      "start": 18.69,
+      "end": 22.53,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Yes. Billing keeps working offline and syncs when the connection comes back."
+    },
+    {
+      "id": "s06",
+      "start": 22.93,
+      "end": 27.16,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Good. Second, do you send kitchen order tickets to the kitchen printer?"
+    },
+    {
+      "id": "s07",
+      "start": 27.56,
+      "end": 33.1,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Yes, kitchen order tickets are included in the Standard plan, so the kitchen gets orders straight from the counter."
+    },
+    {
+      "id": "s08",
+      "start": 33.5,
+      "end": 36.78,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Okay. Is there a free trial before we pay anything?"
+    },
+    {
+      "id": "s09",
+      "start": 37.18,
+      "end": 42.43,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Yes, there is a 14-day free trial on both plans, so you can test it in your own outlet first."
+    },
+    {
+      "id": "s10",
+      "start": 42.83,
+      "end": 47.66,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Our pricing: the Standard plan is NPR 2,000 per month per outlet, billed yearly."
+    },
+    {
+      "id": "s11",
+      "start": 48.06,
+      "end": 52.72,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Hmm, that's still a lot for one small cafe. We're not sure we need that much."
+    },
+    {
+      "id": "s12",
+      "start": 53.12,
+      "end": 56.99,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "I understand. Setup takes about one day per outlet, so it's quick to get going."
+    },
+    {
+      "id": "s13",
+      "start": 57.39,
+      "end": 58.95,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Okay, that's good to know."
+    },
+    {
+      "id": "s14",
+      "start": 59.35,
+      "end": 63.24,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "How many outlets and billing counters do you have? That decides which plan fits."
+    },
+    {
+      "id": "s15",
+      "start": 63.64,
+      "end": 67.84,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "One outlet and two billing counters, and we might add a third counter later."
+    },
+    {
+      "id": "s16",
+      "start": 68.24,
+      "end": 71.65,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Then I'll email you the trial link today, so your team can start this week."
+    },
+    {
+      "id": "s17",
+      "start": 72.05,
+      "end": 74.38,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Sounds good. Please send it to my email."
+    },
+    {
+      "id": "s18",
+      "start": 74.78,
+      "end": 77.99,
+      "speaker": "S1",
+      "lang": "en",
+      "text": "Our trainer will visit sometime next week to walk your staff through billing."
+    },
+    {
+      "id": "s19",
+      "start": 78.39,
+      "end": 81.75,
+      "speaker": "S2",
+      "lang": "en",
+      "text": "Okay. I'll talk to my partner and confirm by Saturday."
+    },
+    {
+      "id": "s20",
+      "start": 82.15,
+      "end": 86.29,
+      "speaker": "S1",
+      "lang": "en-ne",
+      "text": "Dhanyabad, Mina ji. I'll call you on Monday at 11 am to check on your decision."
+    }
+  ]
+}

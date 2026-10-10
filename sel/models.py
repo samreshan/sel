@@ -17,7 +17,7 @@ Verdict = Literal["supported", "contradicted", "unverified"]
 Channel = Literal["email", "call", "meeting", "visit", "other"]
 DueStatus = Literal["exact", "ambiguous", "missing"]
 DraftKind = Literal["email", "calendar"]
-DraftStatus = Literal["ready_for_approval", "needs_input"]
+DraftStatus = Literal["ready_for_approval", "needs_input", "approved"]
 
 
 @dataclass

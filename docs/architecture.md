@@ -4,22 +4,23 @@
 
 | Stage | Input → output | Built by | Status |
 |---|---|---|---|
-| 1. Transcribe | audio → timed text | speech model, on device | not integrated (`Transcriber` protocol) |
-| 2. Diarize and align | audio + text → `Segment`s with speaker and start/end | diarization model, or a two-channel recording | not integrated |
-| 3. Analyze | `Transcript` + pack → proposed `Finding`, `ClaimCheck`, `Commitment` | small language model, on device | not integrated (`Analyzer` protocol) |
+| 1. Transcribe | audio → timed text | faster-whisper, on device (`sel/asr.py`) | built; `small` by default |
+| 2. Speakers | timed text → rep / customer per segment | separate channels of a stereo recording, or the language model reading the words (`label_speakers`) | built |
+| 3. Analyze | `Transcript` + pack → proposed findings, claim checks, commitments | local LLM through an OpenAI-compatible API, or Claude (`sel/analyzer_llm.py`, `sel/llm.py`) | built; Qwen 2.5 7B via Ollama by default |
+| 3a. Retrieval | claim → candidate pack passages | BM25 over facts, paragraphs and table rows (`sel/retrieval.py`) | built |
 | 4. Evidence gate | proposals → kept + `Rejection`s | code (`sel/grounding.py`) | built |
 | 5. Due dates | spoken phrase → `DueResolution` | code (`sel/dates.py`) | built (English and Nepali relative dates) |
-| 6. Drafts | commitments + templates → `Draft`s | code (`sel/drafts.py`) | built |
-| 7. Review | `CallReport` → user approves, edits or dismisses | UI | not started |
+| 6. Drafts | commitments + templates → `Draft`s; edits and approval | code (`sel/drafts.py`) | built |
+| 7. Review | report → person edits, approves, dismisses, corrects the transcript | local web app (`sel/server.py`, `sel/service.py`, `sel/web/`) | built |
 
-`sel/pipeline.py` runs stages 1–6 and records how long each one takes.
+`sel/pipeline.py` runs stages 1–6 and records how long each one takes. `build_report` (stages 4–6) is pure and fast; the app re-runs it whenever someone corrects the transcript or edits a draft, against the analysis the model proposed the first time, so a correction never silently re-asks the model.
 
 ## Division of labour between models and code
 
 Small models are cheap to run locally but more likely to misquote or invent. The design limits what a model's output can do on its own:
 
-- **The model** extracts spans and judges meaning. It decides what counts as a question, objection, commitment or claim; which scorecard criterion applies; which pack passage is relevant; and whether that passage supports or contradicts the claim.
-- **Code** checks everything that can be checked mechanically. Cited segments must exist, quotes must appear in them, a commitment's owner must speak in the cited segments, and source quotes must appear in the cited pack document or fact. Code also does all the date arithmetic and template filling.
+- **The model** judges meaning and points. It decides what counts as a question, objection, commitment or claim and which segment it is in; which scorecard criterion applies; which retrieved passage decides a claim, and whether it supports or contradicts it.
+- **Code** supplies every quoted word and checks everything that can be checked mechanically. Quotes are the transcript's own words; sources are the retrieved passage's own text; cited segments must exist; a commitment's owner must speak in the cited segments; a due phrase must occur in the line; a `supported` claim's numbers must be in its passage. Code also does all the date arithmetic and template filling.
 - **The person** approves every draft and can dismiss any finding.
 
 Any date the model proposes is discarded and worked out again from `due_text`.
@@ -43,21 +44,29 @@ All defined in `sel/models.py`:
 | any item | no segment cited, an unknown segment is cited, or the quote isn't in the cited segments | rejected and listed |
 | coaching finding | the criterion isn't in the pack's scorecard | rejected |
 | commitment | the owner isn't a speaker, or doesn't speak in the cited segments | rejected |
-| claim verdict | `supported` or `contradicted` with no source; source missing from the pack; quote not in the source | downgraded to `unverified`, with the reason listed |
+| claim verdict | `supported` or `contradicted` with no source; source missing from the pack; quote not in the source; `supported` with a number the passage doesn't contain | downgraded to `unverified`, with the reason listed |
 
-Quote matching ignores case, whitespace and curly-versus-straight quotes, and nothing else. A paraphrase counts as a failure on purpose: the review screen promises the user that what's shown in quotes was actually said or written.
+Quote matching ignores case, whitespace and curly-versus-straight quotes, and nothing else. A paraphrase counts as a failure on purpose: the review screen promises the user that what's shown in quotes was actually said or written. With the LLM analyzer, quotes are filled in by code, so this check mostly guards fixtures, other analyzers and transcript corrections: if a person edits a line so that a finding's words no longer occur, that finding moves to the refused list.
+
+What the gate cannot catch: a real segment cited for the wrong reason, or a real passage that the model misjudges as supporting a claim without numbers. Those are what the evaluation measures (`false_supported` in particular).
 
 ## Model stages
 
-No model has been selected or validated. These are the candidates to measure with `sel eval` on the same calls:
+**Speech.** faster-whisper on CPU with int8 weights. `small` is the default; `large-v3-turbo` was more accurate on English names in a smoke test but about 3× slower, and on a Nepali TTS clip it looped and its language auto-detection picked Gujarati. Nepali–English code-switching accuracy on real calls is still unmeasured. A stereo recording with each side on its own channel gives exact speaker labels; for mono, the language model labels lines from their content, which is weaker and recorded in the report (`speakers_from`).
 
-- **Speech recognition:** the Whisper family (for example large-v3 or large-v3-turbo through whisper.cpp or faster-whisper), plus any Nepali fine-tunes with suitable licences. The open question is accuracy on Nepali–English code-switching and on romanized versus Devanagari output. The transcript format must be decided before analysis prompts are written.
-- **Diarization:** pyannote-style diarization, compared against the simpler route of recording each side on its own channel where the phone setup allows it.
-- **Analysis:** instruction-tuned open-weight models of roughly 3–8B parameters, run through llama.cpp or Ollama with constrained JSON output. Run one extraction task per prompt (questions, commitments, claims) rather than one large prompt, so that failures can be measured separately.
-- **Retrieval for claim checks:** start with keyword (BM25) search over pack passages, which needs no model. Add a small multilingual embedding model only if measurements show keyword search misses.
+**Analysis.** The model only *points*: it names segment ids and writes short summaries; string lengths and list sizes are capped in the JSON schema. This came from testing. Asked to copy quotes under schema-constrained decoding, Qwen 2.5 3B paraphrased, translated and then repeated itself until it ran out of tokens. Per chunk of about 2,400 characters there are three narrow requests (customer questions and objections; promises and the words that say when; the rep's claims), then one request judging claims against BM25-retrieved passages and one coaching request: five requests for a short call.
 
-The laptop to benchmark on (CPU, RAM, GPU or none) should be fixed before any timing is published.
+Code then:
 
-## Not decided
+- attaches the transcript's own words as each quote;
+- keeps a due phrase only if those words are in the cited line (near-verbatim allowed), widened over neighbouring time words ("beluka samma" → "bholi beluka samma");
+- attaches the retrieved passage itself as the claim source;
+- refuses a `supported` verdict whose numbers are not in the cited passage.
 
-The desktop shell (Tauri, Electron or a local web server), packaging, and the UI stack are all open. The engine is a plain Python package with JSON in and out, so it can sit behind any of them. See [decisions.md](decisions.md).
+Measured on the example calls (4 CPU cores, no GPU): see [running.md](running.md#measured-so-far).
+
+**Providers.** `SEL_LLM_PROVIDER=openai` talks to any OpenAI-compatible endpoint with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM, hosted APIs). `SEL_LLM_PROVIDER=anthropic` uses the official `anthropic` SDK with structured outputs. Hosted providers receive transcripts and pack documents; the default sends nothing off the machine.
+
+## App and storage
+
+The review app is a standard-library HTTP server bound to 127.0.0.1 with a vanilla-JS page (no build step, no external resources, works offline). Each call is a folder: the recording, the transcript including corrections, the model's proposed analysis, the review log (dismissals, draft edits, approvals, transcript edits) and the rendered report. Jobs run one at a time because speech and language models share the CPU. Packaging as a desktop app (Tauri or Electron around the same server) is still open; see [decisions.md](decisions.md).

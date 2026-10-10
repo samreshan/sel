@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sel · Call review</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="brand">Sel<span class="brand-sub">call review</span></div>
+    <div id="health" class="health" role="status" aria-live="polite">Checking models…</div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar" aria-labelledby="calls-title">
+      <div class="sidebar-top">
+        <h2 id="calls-title">Calls</h2>
+        <button type="button" class="primary" id="new-call">New call</button>
+      </div>
+      <p id="list-error" class="form-error" role="alert" hidden></p>
+      <ul id="call-list" class="call-list"></ul>
+      <p id="list-empty" class="muted" hidden>No calls yet. Choose New call to add a recording.</p>
+    </aside>
+
+    <main id="main" class="main"></main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

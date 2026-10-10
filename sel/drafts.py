@@ -8,8 +8,10 @@ missing fields are listed rather than filled with a guess.
 
 from __future__ import annotations
 
+import re
 import string
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta, timezone
 
 from .models import Commitment, Draft, Transcript
 from .pack import Pack
@@ -159,3 +161,61 @@ def _draft(c: Commitment, kind: str, fields: dict[str, str], missing: set[str], 
         missing=sorted(missing),
         ics=ics,
     )
+
+
+_PLACEHOLDER = re.compile(r"\[(business name|rep name|customer name|action|quote|due phrase|due date|call date)\]")
+EDITABLE = {"email": ("to", "subject", "body", "send_by"), "calendar": ("title", "body", "date", "time")}
+
+
+def _valid_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _valid_time(value: str) -> bool:
+    try:
+        time.fromisoformat(value)
+        return len(value) == 5
+    except ValueError:
+        return False
+
+
+def apply_edits(draft: Draft, edits: dict[str, str], transcript: Transcript) -> Draft:
+    """Apply a person's edits and recompute what is still missing.
+
+    Editing always clears an earlier approval: the person approves the final text.
+    """
+    fields = dict(draft.fields)
+    for key in EDITABLE[draft.kind]:
+        if key in edits:
+            fields[key] = str(edits[key]).strip() if key != "body" else str(edits[key])
+    missing: set[str] = set()
+    for key in EDITABLE[draft.kind]:
+        if _PLACEHOLDER.search(fields.get(key, "")):
+            missing.add(key)
+    ics = None
+    if draft.kind == "email":
+        if "@" not in fields.get("to", ""):
+            missing.add("to")
+        if not _valid_date(fields.get("send_by", "")):
+            missing.add("send_by")
+    else:
+        if not _valid_date(fields.get("date", "")):
+            missing.add("date")
+        if not _valid_time(fields.get("time", "")):
+            missing.add("time")
+        if not missing:
+            tz = datetime.fromisoformat(transcript.started_at).tzinfo
+            start = datetime.fromisoformat(f"{fields['date']}T{fields['time']}").replace(tzinfo=tz)
+            ics = _ics(f"{transcript.call_id}-{draft.commitment_id}", fields.get("title", ""), fields.get("body", ""), start)
+    return replace(draft, fields=fields, missing=sorted(missing), ics=ics,
+                   status="needs_input" if missing else "ready_for_approval")
+
+
+def approve(draft: Draft) -> Draft:
+    if draft.status == "needs_input":
+        raise ValueError(f"draft {draft.id} still needs: {', '.join(draft.missing)}")
+    return replace(draft, status="approved")

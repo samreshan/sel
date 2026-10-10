@@ -1,0 +1,31 @@
+{
+  "call_id": "pos-02",
+  "audio": null,
+  "started_at": "2026-10-08T15:00:00+05:45",
+  "speakers": [
+    {"id": "S1", "role": "rep", "name": "Bikash"},
+    {"id": "S2", "role": "customer", "name": "Mina", "email": "mina@example.com"}
+  ],
+  "segments": [
+    {"id": "s01", "start": 0.0, "end": 9.1, "speaker": "S1", "lang": "en", "text": "Hello Mina, this is Bikash from Thali POS. Thanks for booking this call. You mentioned a restaurant in Lalitpur, is that right?"},
+    {"id": "s02", "start": 9.6, "end": 17.1, "speaker": "S2", "lang": "en", "text": "Yes, that's right. We're replacing our old billing app, and I have a few questions before we decide."},
+    {"id": "s03", "start": 17.6, "end": 19.4, "speaker": "S1", "lang": "en", "text": "Sure, go ahead."},
+    {"id": "s04", "start": 19.9, "end": 25.1, "speaker": "S2", "lang": "en", "text": "First, if the internet goes down during lunch, does billing still work?"},
+    {"id": "s05", "start": 25.6, "end": 30.8, "speaker": "S1", "lang": "en", "text": "Yes. Billing keeps working offline and syncs when the connection comes back."},
+    {"id": "s06", "start": 31.3, "end": 36.5, "speaker": "S2", "lang": "en", "text": "Good. Second, do you send kitchen order tickets to the kitchen printer?"},
+    {"id": "s07", "start": 37.0, "end": 44.9, "speaker": "S1", "lang": "en", "text": "Yes, kitchen order tickets are included in the Standard plan, so the kitchen gets orders straight from the counter."},
+    {"id": "s08", "start": 45.4, "end": 49.8, "speaker": "S2", "lang": "en", "text": "Okay. Is there a free trial before we pay anything?"},
+    {"id": "s09", "start": 50.3, "end": 58.6, "speaker": "S1", "lang": "en", "text": "Yes, there is a 14-day free trial on both plans, so you can test it in your own outlet first."},
+    {"id": "s10", "start": 58.9, "end": 64.9, "speaker": "S1", "lang": "en", "text": "Our pricing: the Standard plan is NPR 2,000 per month per outlet, billed yearly."},
+    {"id": "s11", "start": 65.4, "end": 72.2, "speaker": "S2", "lang": "en", "text": "Hmm, that's still a lot for one small cafe. We're not sure we need that much."},
+    {"id": "s12", "start": 72.7, "end": 79.1, "speaker": "S1", "lang": "en", "text": "I understand. Setup takes about one day per outlet, so it's quick to get going."},
+    {"id": "s13", "start": 79.6, "end": 82.1, "speaker": "S2", "lang": "en", "text": "Okay, that's good to know."},
+    {"id": "s14", "start": 82.6, "end": 88.6, "speaker": "S1", "lang": "en", "text": "How many outlets and billing counters do you have? That decides which plan fits."},
+    {"id": "s15", "start": 89.1, "end": 95.1, "speaker": "S2", "lang": "en", "text": "One outlet and two billing counters, and we might add a third counter later."},
+    {"id": "s16", "start": 95.6, "end": 102.0, "speaker": "S1", "lang": "en", "text": "Then I'll email you the trial link today, so your team can start this week."},
+    {"id": "s17", "start": 102.5, "end": 106.2, "speaker": "S2", "lang": "en", "text": "Sounds good. Please send it to my email."},
+    {"id": "s18", "start": 106.7, "end": 112.3, "speaker": "S1", "lang": "en", "text": "Our trainer will visit sometime next week to walk your staff through billing."},
+    {"id": "s19", "start": 112.8, "end": 117.2, "speaker": "S2", "lang": "en", "text": "Okay. I'll talk to my partner and confirm by Saturday."},
+    {"id": "s20", "start": 117.7, "end": 124.5, "speaker": "S1", "lang": "en-ne", "text": "Dhanyabad, Mina ji. I'll call you on Monday at 11 am to check on your decision."}
+  ]
+}

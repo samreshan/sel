@@ -9,7 +9,10 @@ proposes reaches the review screen until it passes these checks:
   the cited segments;
 * a commitment's owner is a known speaker who actually spoke in a cited segment;
 * a ``supported``/``contradicted`` verdict cites at least one pack source, and
-  every cited quote appears in that source.
+  every cited quote appears in that source;
+* a ``supported`` verdict's numbers (years, prices, kW, ...) all appear in the
+  cited passages, so "10-year warranty" can't be "supported" by a passage
+  about financing. (Amounts in lakh/hajar are compared as numbers.)
 
 Failures are not silently dropped: findings and commitments go to
 ``rejected`` with reasons, and a claim whose sources don't check out is
@@ -46,6 +49,12 @@ def check_evidence(evidence: Evidence, transcript: Transcript) -> list[str]:
     return []
 
 
+def numbers(text: str) -> set[str]:
+    from .retrieval import collapse_amounts
+
+    return set(re.findall(r"\d+(?:\.\d+)?", collapse_amounts(text)))
+
+
 def check_sources(claim: ClaimCheck, pack: Pack) -> list[str]:
     problems: list[str] = []
     if claim.verdict != "unverified" and not claim.sources:
@@ -56,6 +65,13 @@ def check_sources(claim: ClaimCheck, pack: Pack) -> list[str]:
             problems.append(f"source {ref.source!r} is not in pack {pack.id!r}")
         elif normalize(ref.quote) not in normalize(text):
             problems.append(f"quote {ref.quote!r} does not appear in {ref.source}")
+    if claim.verdict == "supported" and claim.sources and not problems:
+        # Compare with the cited quotes, plus the whole statement of any cited fact (facts are one sentence).
+        cited = [r.quote for r in claim.sources] + [
+            pack.source_text(r.source) or "" for r in claim.sources if r.source.startswith("fact:")]
+        missing = numbers(claim.claim) - numbers(" ".join(cited))
+        if missing:
+            problems.append(f"'supported' but {', '.join(sorted(missing))} is not in the cited passage")
     return problems
 
 

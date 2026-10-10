@@ -8,10 +8,22 @@ version = "0.0.1"
 description = "On-device assistant for reviewing recorded sales calls (reference pipeline)"
 readme = "README.md"
 requires-python = ">=3.11"
+# The core engine and review server use only the standard library.
 dependencies = []
+
+[project.optional-dependencies]
+# On-device speech recognition. faster-whisper 1.2.1 breaks with PyAV 19.x, so pin av.
+speech = ["faster-whisper>=1.1", "av==17.1.0"]
+# Synthetic test calls (scripts/synth_call.py).
+tts = ["piper-tts>=1.2", "numpy"]
+# Claude API as the analysis model (SEL_LLM_PROVIDER=anthropic).
+anthropic = ["anthropic"]
 
 [project.scripts]
 sel = "sel.cli:main"
 
 [tool.setuptools]
 packages = ["sel"]
+
+[tool.setuptools.package-data]
+sel = ["web/*"]

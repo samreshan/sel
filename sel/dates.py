@@ -189,3 +189,19 @@ def resolve_due(phrase: str | None, call_started_at: str, week_starts_on: str = 
 def _first_weekday(text: str) -> int | None:
     word = _has(text, sorted(_WEEKDAY_WORDS, key=len, reverse=True))
     return _WEEKDAY_WORDS[word] if word else None
+
+
+# Words that can be part of a spoken due phrase; used to widen a phrase a model copied too narrowly
+# ("beluka samma" when the line says "bholi beluka samma").
+TIME_WORDS: frozenset[str] = frozenset(
+    {w for words, _ in _RELATIVE_DAYS for w in words}
+    | set(_WEEKDAY_WORDS) | set(_PART_OF_DAY)
+    | {"day", "after", "next", "this", "coming", "by", "on", "at", "before", "samma", "bhitra", "ma", "nai",
+       "arko", "aarko", "yo", "hapta", "week", "baje", "am", "pm", "a.m.", "p.m.", "din", "days", "in"}
+)
+_TIMEISH = re.compile(r"^\d{1,2}(?::\d{2})?(?:am|pm)?$")
+
+
+def is_time_word(word: str) -> bool:
+    w = word.strip(".,;:!?\"'()").lower()
+    return bool(w) and (w in TIME_WORDS or bool(_TIMEISH.match(w)))

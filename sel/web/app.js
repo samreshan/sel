@@ -11,13 +11,40 @@
   const POLL_IDLE_MS = 10000;
   const HEALTH_MS = 60000;
 
-  const KIND_LABEL = { question: "Questions", objection: "Objections", coaching: "Coaching" };
+  const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
+  const KIND_TAG = {
+    question: { cls: "info", label: "Question", icon: "question" },
+    objection: { cls: "warn", label: "Objection", icon: "alert" },
+    coaching: { cls: "violet", label: "Coaching", icon: "target" },
+  };
   const ROLE_LABEL = { rep: "Rep", customer: "Customer", other: "Other" };
   const VERDICT = {
-    supported: { cls: "ok", label: "Supported" },
-    contradicted: { cls: "bad", label: "Contradicted" },
-    unverified: { cls: "neutral", label: "Unverified" },
+    contradicted: { cls: "bad", label: "Contradicted", icon: "x", rank: 0 },
+    unverified: { cls: "neutral", label: "Unverified", icon: "question", rank: 1 },
+    supported: { cls: "ok", label: "Supported", icon: "check", rank: 2 },
   };
+  const CHANNEL_ICON = { email: "mail", call: "phone", meeting: "calendar", visit: "pin", other: "user" };
+  const STEPS = ["Transcribe", "Analyse", "Review", "Approve drafts"];
+
+  // Stroke icons, 24×24. Constant path data only; nothing from the server.
+  const ICONS = {
+    play: ["M7 4.5v15l13-7.5z"],
+    phone: ["M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"],
+    target: ["M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z", "M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z"],
+    alert: ["M12 4l9 16H3z", "M12 10v4M12 17v.01"],
+    question: ["M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"],
+    check: ["M5 12.5l4.5 4.5L19 7.5"],
+    x: ["M7 7l10 10M17 7L7 17"],
+    mail: ["M5.5 5.5h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z", "M4 7l8 6 8-6"],
+    calendar: ["M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M4 10h16M9 3v4M15 3v4"],
+    pin: ["M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z", "M12 7a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z"],
+    user: ["M12 4.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z", "M5 20a7 7 0 0 1 14 0"],
+    ban: ["M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z", "M6.5 6.5l11 11"],
+    lines: ["M5 6h14M5 10h14M5 14h9M5 18h6"],
+    doc: ["M6 3h8l4 4v14H6z", "M14 3v4h4"],
+    lock: ["M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"],
+  };
+  const FILLED_ICONS = new Set(["play"]);
   const DRAFT_STATUS = {
     needs_input: { cls: "warn", label: "Needs input" },
     ready_for_approval: { cls: "info", label: "Ready for approval" },
@@ -54,6 +81,7 @@
     mainError: null,
     tab: "coaching",
     evidence: new Set(), // segment ids highlighted by a card
+    focusItem: null, // id of the card whose evidence is highlighted
     current: null, // segment id under the playhead
     editing: null, // segment id in inline edit mode
     notice: null, // {kind, text} above the transcript
@@ -65,6 +93,7 @@
     mountKey: null,
     refs: null,
     segRows: new Map(),
+    mapBlocks: new Map(), // segment id -> call-map block
     health: null,
     pollTimer: null,
   };
@@ -112,6 +141,47 @@
   const compact = (items) => items.filter((x) => x !== null && x !== undefined && x !== false);
   const muted = (text) => el("p", { class: "muted", text });
   const pill = (cls, label) => el("span", { class: `pill pill-${cls}`, text: label });
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  function icon(name, size = 18) {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    const filled = FILLED_ICONS.has(name);
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("fill", filled ? "currentColor" : "none");
+    if (!filled) {
+      svg.setAttribute("stroke", "currentColor");
+      svg.setAttribute("stroke-width", "1.8");
+      svg.setAttribute("stroke-linecap", "round");
+      svg.setAttribute("stroke-linejoin", "round");
+    }
+    for (const d of ICONS[name] || []) {
+      const path = document.createElementNS(NS, "path");
+      path.setAttribute("d", d);
+      svg.append(path);
+    }
+    return svg;
+  }
+
+  const iconTile = (tone, name) => el("span", { class: `icon-tile tone-${tone}` }, icon(name));
+  const cardTag = (cls, label) => el("span", { class: `pill pill-${cls} card-tag`, text: label });
+
+  function cardHead(tone, iconName, summary, sub) {
+    return el(
+      "div",
+      { class: "card-head" },
+      iconTile(tone, iconName),
+      el(
+        "div",
+        { class: "card-head-text" },
+        el("p", { class: "summary", text: summary }),
+        sub ? el("p", { class: "card-sub", text: sub }) : null
+      )
+    );
+  }
 
   function mmss(seconds) {
     const s = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -207,6 +277,19 @@
     return sp.name || ROLE_LABEL[sp.role] || "Speaker";
   }
 
+  function speakerOf(segId) {
+    const seg = segId ? segmentById(segId) : null;
+    if (!seg) return null;
+    return state.call.report.transcript.speakers.find((s) => s.id === seg.speaker) || null;
+  }
+
+  // "Said by Asha at 00:28", from the first segment a card cites.
+  function saidBy(segmentIds, verb = "Said by") {
+    const first = segmentIds && segmentIds.length ? segmentById(segmentIds[0]) : null;
+    if (!first) return null;
+    return `${verb} ${speakerLabel(speakerOf(first.id))} at ${mmss(first.start)}`;
+  }
+
   function isDismissed(itemId) {
     return !!(state.call && state.call.review && state.call.review.dismissed.includes(itemId));
   }
@@ -228,6 +311,8 @@
   function resetCallUi() {
     state.tab = "coaching";
     state.evidence = new Set();
+    state.focusItem = null;
+    state.mapBlocks = new Map();
     state.current = null;
     state.editing = null;
     state.notice = null;
@@ -368,9 +453,52 @@
     const llm = h.llm || {};
     const asr = h.asr || {};
     node.replaceChildren(
-      chip(!!llm.ok, `Language model ${llm.name || "(not set)"}`, llm.error),
-      chip(!!asr.ok, `Speech model ${asr.model || "(not set)"}`, asr.error)
+      chip(!!asr.ok, `Speech ${asr.model || "(not set)"}`, asr.error),
+      chip(!!llm.ok, `Analysis ${llm.name || "(not set)"}`, llm.error)
     );
+  }
+
+  // ---------- top bar: review progress ----------
+
+  // Which of Transcribe / Analyse / Review / Approve drafts are done, worked
+  // out from the call's status and its drafts.
+  function stepState(call) {
+    if (!call) return null;
+    if (call.status === "done" && call.report) {
+      const drafts = call.report.drafts || [];
+      const allApproved = drafts.length > 0 && drafts.every((d) => d.status === "approved");
+      return allApproved ? { done: 4, current: null } : { done: 2, current: 2 };
+    }
+    if (call.status === "error") return { done: 0, current: null };
+    const stage = String(call.stage || "");
+    const analysing = /analys|checking/i.test(stage);
+    return { done: analysing ? 1 : 0, current: analysing ? 1 : 0 };
+  }
+
+  function renderSteps() {
+    const list = $("#steps");
+    const bar = list.closest(".topbar");
+    const call = state.view === "call" && state.call && state.call.id === state.callId ? state.call : null;
+    const s = stepState(call);
+    list.hidden = !s;
+    bar.hidden = !s;
+    if (!s) return;
+    const items = [];
+    STEPS.forEach((label, i) => {
+      if (i > 0) items.push(el("li", { class: `step-line${i <= s.done ? " is-done" : ""}`, "aria-hidden": "true" }));
+      const done = i < s.done;
+      const current = i === s.current;
+      items.push(
+        el(
+          "li",
+          { class: `step${done ? " is-done" : ""}${current ? " is-current" : ""}`, "aria-current": current ? "step" : null },
+          el("span", { class: "step-num" }, done ? icon("check", 12) : String(i + 1)),
+          el("span", { text: label }),
+          done ? el("span", { class: "sr-only", text: " (done)" }) : null
+        )
+      );
+    });
+    list.replaceChildren(...items);
   }
 
   // ---------- sidebar ----------
@@ -395,6 +523,7 @@
           class: `call-link${selected ? " is-selected" : ""}`,
           "aria-current": selected ? "page" : null,
         },
+        icon("phone", 20),
         el("span", { class: "call-title", text: title }),
         el("span", { class: "call-sub", text: `${packName(c.pack_id)} · ${formatStarted(c.started_at)}` }),
         el(
@@ -419,6 +548,11 @@
 
   function renderMain() {
     const main = $("#main");
+    renderSteps();
+    main.classList.toggle(
+      "is-call",
+      state.view === "call" && !!state.call && state.call.id === state.callId && state.call.status === "done" && !!state.call.report
+    );
     if (state.view === "new") {
       renderUpload(main);
       return;
@@ -524,23 +658,41 @@
   function mountCall(main, key) {
     const call = state.call;
     const head = el("header", { class: "call-head" });
+    const tiles = el("div", { class: "tiles" });
     const notice = el("div", { class: "notice", role: "status", hidden: true });
     const list = el("ol", { class: "transcript", "aria-label": "Transcript" });
+    const txSub = el("p", { class: "card-sub" });
     const clear = el("button", {
       type: "button",
-      class: "link small",
+      class: "small",
       text: "Clear highlight",
       hidden: true,
       on: {
         click: () => {
           state.evidence = new Set();
+          state.focusItem = null;
           markEvidence();
+          markFocused();
         },
       },
     });
+    const talk = el("section", { class: "talk", "aria-labelledby": "talk-title" });
     const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Review" });
     const panel = el("div", { class: "panel", id: "panel", role: "tabpanel" });
-    const player = el("div", { class: "player" });
+    const map = el("div", { class: "callmap", "aria-hidden": "true", title: "Call map: click to play from that moment" });
+    map.addEventListener("click", (e) => seekFromMap(e, map));
+    const player = el(
+      "section",
+      { class: "player", "aria-label": "Recording" },
+      map,
+      el(
+        "div",
+        { class: "legend" },
+        el("span", {}, el("i", { class: "role-rep" }), "Rep"),
+        el("span", {}, el("i", { class: "role-customer" }), "Customer"),
+        el("span", {}, el("i", { class: "is-evidence" }), "Evidence for the selected card")
+      )
+    );
 
     if (call.audio_url) {
       const audio = el("audio", { controls: true, preload: "metadata", src: call.audio_url });
@@ -552,24 +704,52 @@
       player.append(el("p", { class: "no-audio", text: "No recording for this call (example data)." }));
     }
 
-    state.refs = { head, notice, list, clear, tabs, panel };
+    state.refs = { head, tiles, notice, list, txSub, clear, talk, tabs, panel, map };
     state.mountKey = key;
     state.segRows = new Map();
+    state.mapBlocks = new Map();
 
     main.replaceChildren(
-      head,
       el(
         "div",
         { class: "call-cols" },
         el(
           "div",
           { class: "col-left" },
+          head,
+          tiles,
           player,
           notice,
-          el("div", { class: "section-head" }, el("h2", { class: "section-title", text: "Transcript" }), clear),
-          list
+          el(
+            "section",
+            { class: "transcript-card", "aria-labelledby": "tx-title" },
+            el(
+              "div",
+              { class: "section-head" },
+              el(
+                "div",
+                { class: "section-head-main" },
+                iconTile("accent", "lines"),
+                el("div", {}, el("h2", { class: "section-title", id: "tx-title", text: "Transcript" }), txSub)
+              ),
+              clear
+            ),
+            list
+          )
         ),
-        el("div", { class: "col-right" }, tabs, panel)
+        el(
+          "aside",
+          { class: "col-right", "aria-label": "Review" },
+          el(
+            "div",
+            { class: "inspector-head" },
+            el("h2", { text: "Call review" }),
+            el("p", { class: "card-sub", text: "Findings, claim checks and drafts" })
+          ),
+          talk,
+          tabs,
+          panel
+        )
       )
     );
   }
@@ -578,10 +758,134 @@
     const r = state.refs;
     if (!r || !state.call) return;
     renderHead(r.head);
+    renderSummary(r.tiles);
     renderNotice(r.notice);
+    renderCallMap(r.map);
     renderTranscript(r.list);
+    renderTalk(r.talk);
     renderTabs(r.tabs);
     renderPanel();
+  }
+
+  // ---------- summary tiles and talk time ----------
+
+  function renderSummary(tiles) {
+    const r = state.call.report;
+    const count = (kind) => r.findings.filter((f) => f.kind === kind).length;
+    const verdicts = { supported: 0, contradicted: 0, unverified: 0 };
+    for (const c of r.claims) if (c.verdict in verdicts) verdicts[c.verdict] += 1;
+    const drafts = r.drafts || [];
+    const needs = drafts.filter((d) => d.status === "needs_input").length;
+    const ready = drafts.filter((d) => d.status === "ready_for_approval").length;
+    const approved = drafts.filter((d) => d.status === "approved").length;
+
+    let claimLine;
+    let claimPill;
+    if (!r.claims.length) {
+      claimLine = "No claims checked";
+      claimPill = ["neutral", "Nothing to compare"];
+    } else if (verdicts.contradicted || verdicts.unverified) {
+      claimLine = [
+        verdicts.contradicted ? `${verdicts.contradicted} contradicted` : null,
+        verdicts.unverified ? `${verdicts.unverified} unverified` : null,
+      ].filter(Boolean).join(", ");
+      claimPill = [verdicts.contradicted ? "bad" : "neutral", `${verdicts.supported} of ${r.claims.length} supported`];
+    } else {
+      claimLine = "All supported";
+      claimPill = ["ok", plural(r.claims.length, "claim matches the pack", "claims match the pack")];
+    }
+
+    let draftPill;
+    if (needs) draftPill = ["warn", `${needs} need${needs === 1 ? "s" : ""} input`];
+    else if (ready) draftPill = ["info", `${ready} ready to approve`];
+    else if (approved) draftPill = ["ok", `${approved} approved`];
+    else draftPill = ["neutral", "No drafts"];
+
+    const spec = [
+      ["coaching", "What happened?", `${plural(count("question"), "question", "questions")}, ${plural(count("objection"), "objection", "objections")}`, ["violet", plural(count("coaching"), "coaching point", "coaching points")]],
+      ["claims", "What did we claim?", claimLine, claimPill],
+      ["followups", "What did we promise?", plural(r.commitments.length, "promise", "promises"), draftPill],
+    ];
+    tiles.replaceChildren(
+      ...spec.map(([tab, q, a, [cls, sub]]) =>
+        el(
+          "button",
+          {
+            type: "button",
+            class: "tile",
+            "aria-pressed": state.tab === tab ? "true" : "false",
+            on: { click: () => setTab(tab) },
+          },
+          el("span", { class: "tile-q", text: q }),
+          el("span", { class: "tile-a", text: a }),
+          pill(cls, sub)
+        )
+      )
+    );
+  }
+
+  function renderTalk(node) {
+    const { segments, speakers } = state.call.report.transcript;
+    const secs = new Map();
+    for (const seg of segments) secs.set(seg.speaker, (secs.get(seg.speaker) || 0) + Math.max(0, seg.end - seg.start));
+    const total = [...secs.values()].reduce((a, b) => a + b, 0);
+    if (!total) {
+      node.hidden = true;
+      return;
+    }
+    node.hidden = false;
+    const rows = speakers
+      .filter((sp) => secs.get(sp.id))
+      .sort((a, b) => (a.role === "rep" ? -1 : 0) - (b.role === "rep" ? -1 : 0));
+    const share = (sp) => Math.round((secs.get(sp.id) / total) * 100);
+    node.replaceChildren(
+      el("h3", { id: "talk-title", text: "Talk time" }),
+      el(
+        "div",
+        { class: "talk-figures" },
+        ...rows.map((sp) =>
+          el(
+            "div",
+            { class: "talk-figure" },
+            el("span", { class: "k", text: `${speakerLabel(sp)} · ${(ROLE_LABEL[sp.role] || "Speaker").toLowerCase()}` }),
+            el("span", { class: "v" }, `${Math.round(secs.get(sp.id))}s`, el("small", { text: `${share(sp)}%` }))
+          )
+        )
+      ),
+      el(
+        "div",
+        { class: "talk-bar", "aria-hidden": "true" },
+        ...rows.map((sp) =>
+          el("span", {
+            style: `flex: ${secs.get(sp.id)} 1 0; background: var(${sp.role === "rep" ? "--accent" : sp.role === "customer" ? "--customer" : "--muted"})`,
+          })
+        )
+      )
+    );
+  }
+
+  // ---------- call map ----------
+
+  function renderCallMap(map) {
+    const { segments, speakers } = state.call.report.transcript;
+    const byId = new Map(speakers.map((s) => [s.id, s]));
+    state.mapBlocks = new Map();
+    const blocks = segments.map((seg) => {
+      const sp = byId.get(seg.speaker);
+      const b = el("span", {
+        class: `callmap-block role-${sp ? sp.role : "other"}`,
+        style: `flex: ${Math.max(0.5, seg.end - seg.start)} 1 0`,
+        dataset: { start: String(seg.start) },
+      });
+      state.mapBlocks.set(seg.id, b);
+      return b;
+    });
+    map.replaceChildren(...blocks);
+  }
+
+  function seekFromMap(e, map) {
+    const block = e.target.closest(".callmap-block");
+    if (block) seekTo(Number(block.dataset.start));
   }
 
   function renderHead(head) {
@@ -649,6 +953,9 @@
       return li;
     });
     list.replaceChildren(...rows);
+    if (state.refs && state.refs.txSub) {
+      state.refs.txSub.textContent = `${plural(segments.length, "line", "lines")} · choose a time to play from there`;
+    }
     markPlayback();
     markEvidence();
   }
@@ -658,7 +965,11 @@
     const role = speaker ? speaker.role : "other";
     const stamp = mmss(seg.start);
     const li = el("li", { class: `seg role-${role}${editing ? " is-editing" : ""}`, dataset: { id: seg.id } });
-    const body = el("div", { class: "seg-body" }, el("p", { class: "who", text: speakerLabel(speaker) }));
+    const body = el(
+      "div",
+      { class: "seg-body" },
+      el("p", { class: "who" }, el("span", { text: speakerLabel(speaker) }), seg.lang ? el("span", { class: "lang", text: seg.lang }) : null)
+    );
     if (editing) {
       body.append(editForm(seg));
     } else {
@@ -699,11 +1010,21 @@
 
   function markPlayback() {
     for (const [id, row] of state.segRows) row.classList.toggle("is-current", id === state.current);
+    for (const [id, b] of state.mapBlocks) b.classList.toggle("is-current", id === state.current);
   }
 
   function markEvidence() {
     for (const [id, row] of state.segRows) row.classList.toggle("is-evidence", state.evidence.has(id));
+    for (const [id, b] of state.mapBlocks) b.classList.toggle("is-evidence", state.evidence.has(id));
+    if (state.refs && state.refs.map) state.refs.map.classList.toggle("has-evidence", state.evidence.size > 0);
     if (state.refs && state.refs.clear) state.refs.clear.hidden = state.evidence.size === 0;
+  }
+
+  function markFocused() {
+    if (!state.refs) return;
+    for (const card of state.refs.panel.querySelectorAll("[data-item]")) {
+      card.classList.toggle("is-focused", !!state.focusItem && card.dataset.item === state.focusItem);
+    }
   }
 
   function onTimeUpdate() {
@@ -731,18 +1052,28 @@
     seekTo(segmentById(known[0]).start);
   }
 
-  function evidenceButton(segmentIds) {
+  function evidenceButton(segmentIds, itemId) {
     const first = segmentIds && segmentIds.length ? segmentById(segmentIds[0]) : null;
     if (!first) return null;
     const stamp = mmss(first.start);
-    return el("button", {
-      type: "button",
-      class: "ref-btn small",
-      text: `▶︎ ${stamp}`,
-      title: `Play from ${stamp} and highlight the evidence`,
-      "aria-label": `Play from ${stamp} and highlight the evidence in the transcript`,
-      on: { click: () => focusEvidence(segmentIds) },
-    });
+    return el(
+      "button",
+      {
+        type: "button",
+        class: "ref-btn small",
+        title: `Play from ${stamp} and highlight the evidence`,
+        "aria-label": `Play from ${stamp} and highlight the evidence in the transcript`,
+        on: {
+          click: () => {
+            state.focusItem = itemId || null;
+            markFocused();
+            focusEvidence(segmentIds);
+          },
+        },
+      },
+      icon("play", 11),
+      stamp
+    );
   }
 
   // ---------- inline segment edit ----------
@@ -878,6 +1209,7 @@
 
   function setTab(id) {
     state.tab = id;
+    renderSummary(state.refs.tiles);
     renderTabs(state.refs.tabs);
     renderPanel();
   }
@@ -902,6 +1234,7 @@
     const views = { coaching: coachingView, claims: claimsView, followups: followupsView, refused: refusedView };
     r.panel.setAttribute("aria-labelledby", `tab-${state.tab}`);
     r.panel.replaceChildren(views[state.tab](report));
+    markFocused();
     const mark = r.panel.querySelector(".doc-text mark");
     if (mark) {
       const box = mark.closest(".doc-text");
@@ -914,7 +1247,7 @@
   function coachingView(report) {
     const wrap = el("div", { class: "stack" });
     if (!report.findings.length) wrap.append(muted("Sel found no questions, objections or coaching points in this call."));
-    for (const kind of ["question", "objection", "coaching"]) {
+    for (const kind of ["coaching", "objection", "question"]) {
       const items = sortDismissedLast(
         report.findings.filter((f) => f.kind === kind),
         (f) => f.id
@@ -939,20 +1272,25 @@
   function findingCard(f) {
     const dismissed = isDismissed(f.id);
     const segIds = f.evidence.segment_ids || [];
+    const tag = KIND_TAG[f.kind] || { cls: "neutral", label: f.kind, icon: "target" };
+    const sub = f.criterion
+      ? `Scorecard: ${criterionTitle(state.call.pack_id, f.criterion)}`
+      : saidBy(segIds, f.kind === "question" ? "Asked by" : "Raised by");
     return el(
       "article",
       { class: `card finding${dismissed ? " is-dismissed" : ""}`, dataset: { item: f.id } },
-      el("p", { class: "summary", text: f.summary }),
+      cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label),
+      cardHead(tag.cls, tag.icon, f.summary, sub),
       f.evidence.quote ? el("p", { class: "quote", text: quoted(f.evidence.quote) }) : null,
-      f.criterion ? labelled("Scorecard", criterionTitle(state.call.pack_id, f.criterion)) : null,
       f.suggestion ? labelled("Try next time", f.suggestion) : null,
       el(
         "div",
         { class: "card-actions" },
-        evidenceButton(segIds),
+        evidenceButton(segIds, f.id),
+        segIds.length > 1 ? pill("neutral", plural(segIds.length, "line", "lines")) : null,
         el("button", {
           type: "button",
-          class: "small",
+          class: "small ghost push",
           text: dismissed ? "Restore" : "Dismiss",
           "aria-pressed": dismissed ? "true" : "false",
           on: { click: () => setDismissed(f.id, !dismissed) },
@@ -979,27 +1317,29 @@
 
   function claimsView(report) {
     if (!report.claims.length) return el("div", { class: "stack" }, muted("No claims were checked in this call."));
-    return el("div", { class: "stack" }, ...report.claims.map(claimCard));
+    // Problems first: contradicted, then unverified, then supported.
+    const rank = (c) => (VERDICT[c.verdict] ? VERDICT[c.verdict].rank : 1);
+    const ordered = report.claims.map((c, i) => ({ c, i })).sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i).map((o) => o.c);
+    return el(
+      "div",
+      { class: "stack" },
+      el("p", { class: "explain", text: "Each product claim from the call, checked against the pack's own documents. Problems first." }),
+      ...ordered.map(claimCard)
+    );
   }
 
   function claimCard(c) {
-    const v = VERDICT[c.verdict] || { cls: "neutral", label: c.verdict };
+    const v = VERDICT[c.verdict] || { cls: "neutral", label: c.verdict, icon: "question" };
     const segIds = c.evidence.segment_ids || [];
     return el(
       "article",
-      { class: "card claim" },
-      el("div", { class: "claim-head" }, pill(v.cls, v.label)),
-      el("p", { class: "summary", text: c.claim }),
-      c.evidence.quote
-        ? el(
-            "div",
-            { class: "quote-row" },
-            el("p", { class: "quote", text: quoted(c.evidence.quote) }),
-            evidenceButton(segIds)
-          )
-        : evidenceButton(segIds),
+      { class: "card claim", dataset: { item: c.id } },
+      cardTag(v.cls, v.label),
+      cardHead(v.cls, v.icon, c.claim, saidBy(segIds)),
+      c.evidence.quote ? el("p", { class: "quote", text: quoted(c.evidence.quote) }) : null,
       c.explanation ? el("p", { class: "explanation", text: c.explanation }) : null,
-      c.sources && c.sources.length ? el("div", { class: "sources" }, ...c.sources.map(sourceBlock)) : null
+      c.sources && c.sources.length ? el("div", { class: "sources" }, ...c.sources.map(sourceBlock)) : null,
+      segIds.length ? el("div", { class: "card-actions" }, evidenceButton(segIds, c.id)) : null
     );
   }
 
@@ -1013,7 +1353,7 @@
       el(
         "div",
         { class: "source-head" },
-        el("code", { class: "source-name", text: src.source }),
+        el("span", { class: "source-name" }, icon("doc", 14), el("span", { text: src.source })),
         el("button", {
           type: "button",
           class: "small",
@@ -1082,7 +1422,7 @@
     const wrap = el(
       "div",
       { class: "stack" },
-      el("p", { class: "fine", text: "Sel never sends email or creates events. Approved drafts are for you to send." })
+      el("p", { class: "fine" }, icon("lock", 15), el("span", { text: "Sel never sends email or creates events. Approved drafts are for you to send." }))
     );
     if (!report.commitments.length) wrap.append(muted("No promises were found in this call."));
     for (const c of report.commitments) {
@@ -1096,7 +1436,7 @@
       const when = [due.date, due.time ? `at ${due.time}` : null, due.part_of_day || null].filter(Boolean).join(", ");
       return el("p", { class: "due" }, el("span", { class: "label", text: "Due: " }), when);
     }
-    const parts = [pill("warn", "Needs a date")];
+    const parts = [el("p", { class: "due-reason" }, el("span", { class: "label", text: "No fixed date." }))];
     if (due && due.reason) parts.push(el("p", { class: "due-reason", text: `Reason: ${due.reason}` }));
     if (due && (due.window_start || due.window_end)) {
       const window = due.window_start && due.window_end
@@ -1113,17 +1453,29 @@
       ? `${ROLE_LABEL[owner.role] || "Speaker"}${owner.name ? ` · ${owner.name}` : ""}`
       : "Unknown speaker";
     let tail;
-    if (!isRep) tail = el("p", { class: "tracked", text: "Tracked — no draft (the customer promised this)" });
-    else if (draft) tail = draftForm(draft);
-    else tail = muted("No draft for this channel.");
+    let tag;
+    if (!isRep) {
+      tail = el("p", { class: "tracked", text: "Tracked, no draft: the customer promised this." });
+      tag = { cls: "neutral", label: "Tracked" };
+    } else if (draft) {
+      tail = draftForm(draft);
+      tag = DRAFT_STATUS[draft.status] || { cls: "neutral", label: draft.status };
+    } else {
+      tail = muted("No draft for this channel.");
+      tag = c.due && c.due.status === "exact" ? { cls: "neutral", label: "No draft" } : { cls: "warn", label: "Needs a date" };
+    }
+    let tone = "ok";
+    if (isRep) tone = tag.cls === "neutral" ? "accent" : tag.cls;
+    const iconName = isRep ? CHANNEL_ICON[c.channel] || "user" : "user";
+    const action = c.action ? c.action.charAt(0).toUpperCase() + c.action.slice(1) : c.action;
+    const said = c.due_text ? `said ${quoted(c.due_text)}` : "no due phrase was said";
     return el(
       "article",
-      { class: "card commitment" },
-      el("div", { class: "commit-head" }, el("span", { class: "who", text: who }), el("span", { class: "channel", text: c.channel })),
-      el("p", { class: "summary", text: c.action }),
-      el("p", { class: "said", text: c.due_text ? `Said ${quoted(c.due_text)}` : "No due phrase was said." }),
+      { class: "card commitment", dataset: { item: c.id } },
+      cardTag(tag.cls, tag.label),
+      cardHead(tone, iconName, action, `${who} · ${c.channel} · ${said}`),
       dueLine(c.due),
-      el("div", { class: "card-actions" }, evidenceButton(c.evidence.segment_ids || [])),
+      el("div", { class: "card-actions" }, evidenceButton(c.evidence.segment_ids || [], c.id)),
       tail
     );
   }
@@ -1219,7 +1571,7 @@
 
     form.append(
       ...compact([
-        el("div", { class: "draft-head" }, el("h4", { text: isEmail ? "Email draft" : "Calendar draft" }), pill(status.cls, status.label)),
+        el("div", { class: "draft-head" }, el("h4", { text: isEmail ? "Email draft" : "Calendar draft" }), el("span", { class: "sr-only", text: status.label })),
         draft.fields.review_note
           ? el("div", { class: "review-note", role: "note" }, el("strong", { text: "Review note: " }), draft.fields.review_note)
           : null,
@@ -1324,11 +1676,15 @@
     const wrap = el("div", { class: "stack" }, el("p", { class: "explain", text: REFUSED_EXPLAINER }));
     if (!report.rejected.length) wrap.append(muted("Nothing was refused for this call."));
     for (const r of report.rejected) {
+      // item_type is "finding:objection", "claim" or "commitment".
+      const kind = String(r.item_type || "item").split(":").pop();
+      const title = `Proposed ${kind.replace(/_/g, " ")}`;
       wrap.append(
         el(
           "article",
           { class: "card refused" },
-          el("p", { class: "refused-head" }, el("code", { text: r.item_type }), el("span", { class: "muted", text: ` · ID ${r.item_id}` })),
+          cardTag("bad", "Refused"),
+          cardHead("bad", "ban", title, `${r.item_type} · ID ${r.item_id}`),
           el("ul", { class: "reasons" }, ...r.reasons.map((reason) => el("li", { text: reason })))
         )
       );

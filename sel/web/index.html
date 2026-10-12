@@ -10,23 +10,42 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="topbar">
-    <div class="brand">Sel<span class="brand-sub">call review</span></div>
-    <div id="health" class="health" role="status" aria-live="polite">Checking models…</div>
-  </header>
-
   <div class="shell">
-    <aside class="sidebar" aria-labelledby="calls-title">
-      <div class="sidebar-top">
-        <h2 id="calls-title">Calls</h2>
-        <button type="button" class="primary" id="new-call">New call</button>
+    <aside class="sidebar" aria-label="Sel">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h3l2-5 3 10 2-5h6"/></svg>
+        </span>
+        <span class="brand-name">Sel</span>
       </div>
-      <p id="list-error" class="form-error" role="alert" hidden></p>
-      <ul id="call-list" class="call-list"></ul>
-      <p id="list-empty" class="muted" hidden>No calls yet. Choose New call to add a recording.</p>
+
+      <button type="button" class="primary new-call" id="new-call">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        New call
+      </button>
+
+      <nav class="nav-section" aria-labelledby="calls-title">
+        <h2 id="calls-title" class="nav-title">Calls</h2>
+        <p id="list-error" class="form-error" role="alert" hidden></p>
+        <ul id="call-list" class="call-list"></ul>
+        <p id="list-empty" class="muted small" hidden>No calls yet. Choose New call to add a recording.</p>
+      </nav>
+
+      <section class="device-card" aria-labelledby="device-title">
+        <p id="device-title" class="device-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          Runs on this device
+        </p>
+        <div id="health" class="health" role="status" aria-live="polite">Checking models…</div>
+      </section>
     </aside>
 
-    <main id="main" class="main"></main>
+    <div class="workspace">
+      <header class="topbar">
+        <ol id="steps" class="steps" aria-label="Review progress" hidden></ol>
+      </header>
+      <main id="main" class="main"></main>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>

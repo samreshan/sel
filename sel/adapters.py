@@ -50,6 +50,17 @@ class FixtureTranscriber:
         return Transcript.from_dict(json.loads(self.path.read_text(encoding="utf-8")))
 
 
+class StoredTranscriber:
+    """A transcript that already exists, e.g. captured live by the call simulator. Not a fixture."""
+
+    def __init__(self, path: str | Path, name: str = "live transcript"):
+        self.path = Path(path)
+        self.name = name
+
+    def transcribe(self, audio_path: str, started_at: str, pack: Pack) -> Transcript:
+        return Transcript.from_dict(json.loads(self.path.read_text(encoding="utf-8")))
+
+
 class FixtureAnalyzer:
     name = "fixture-analysis"
 

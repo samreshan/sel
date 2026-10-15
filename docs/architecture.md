@@ -12,6 +12,8 @@
 | 5. Due dates | spoken phrase → `DueResolution` | code (`sel/dates.py`) | built (English and Nepali relative dates) |
 | 6. Drafts | commitments + templates → `Draft`s; edits and approval | code (`sel/drafts.py`) | built |
 | 7. Review | report → person edits, approves, dismisses, corrects the transcript | local web app (`sel/server.py`, `sel/service.py`, `sel/web/`) | built |
+| Scorecard | report → each scorecard criterion met, partly, missed or left to coaching | code (`sel/scoring.py`, signals from `sel/live.py`) | built |
+| Live (simulator) | lines as they are spoken → live score, next best actions; on hang-up a call through stages 3–7 | code and Whisper (`sel/simulator.py`, `sel/live.py`) | built |
 
 `sel/pipeline.py` runs stages 1–6 and records how long each one takes. `build_report` (stages 4–6) is pure and fast; the app re-runs it whenever someone corrects the transcript or edits a draft, against the analysis the model proposed the first time, so a correction never silently re-asks the model.
 
@@ -67,6 +69,18 @@ Measured on the example calls (4 CPU cores, no GPU): see [running.md](running.md
 
 **Providers.** `SEL_LLM_PROVIDER=openai` talks to any OpenAI-compatible endpoint with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM, hosted APIs). `SEL_LLM_PROVIDER=anthropic` uses the official `anthropic` SDK with structured outputs. Hosted providers receive transcripts and pack documents; the default sends nothing off the machine.
 
+## Without a language model
+
+`RuleAnalyzer` (`sel/live.py`) proposes questions, objections, claims and promises from cue words in English and romanized/Devanagari Nepali, sentence and clause splitting, and BM25 over the pack. It is used when no LLM answers (simulated calls default to "the LLM if reachable, else rules") and is named as the analyzer in the report. Its proposals go through the same evidence gate, date resolution and drafts. It never gives a claim a verdict: a numbers check cannot tell "5-year warranty, extendable to 10" from "10-year warranty", so claims stay `unverified` with the closest pack passage attached, and a claim whose numbers appear in no nearby passage is flagged.
+
+## Scorecard
+
+Five signals can be measured by code: discovery (questions before the price), objections (answered with a question first), claims (conflicts with the pack, or verdicts after review), next step (follow-ups with a fixed day) and talk ratio. A pack's criterion names one (`signal = "discovery"`) or it is inferred from the criterion's title or description; criteria without one are left to coaching. The same grader scores a call live in the simulator and a reviewed report afterwards (`report.json` → `score`).
+
+## Call simulator
+
+Two browser sessions join a room on the Sel server. Audio goes browser to browser over WebRTC; the server relays only the connection setup (offer, answer, ICE candidates) through each tab's event stream. The rep's browser records stereo (rep left, customer right). Each browser streams its own microphone as 16 kHz PCM; a pause detector (`PcmSegmenter`) cuts utterances and one worker runs Whisper on them, so speaker labels are exact. Typed lines and opt-in browser captions feed the same transcript. Every new line re-runs the rules and the grade, and both tabs get the score and the next best actions. Hanging up uploads the recording; once queued speech is transcribed, the hub files a call (`source: simulator`) whose job reads the live transcript and runs stages 3–6. Rooms live in memory.
+
 ## App and storage
 
-The review app is a standard-library HTTP server bound to 127.0.0.1 with a vanilla-JS page (no build step, no external resources, works offline). Each call is a folder: the recording, the transcript including corrections, the model's proposed analysis, the review log (dismissals, draft edits, approvals, transcript edits) and the rendered report. Jobs run one at a time because speech and language models share the CPU. Packaging as a desktop app (Tauri or Electron around the same server) is still open; see [decisions.md](decisions.md).
+The review app is a standard-library HTTP server bound to 127.0.0.1 with a vanilla-JS page (no build step, no external resources, works offline). Each tab keeps one Server-Sent Events stream (`/api/events`) for call updates and simulator traffic instead of polling; static files are content-hashed and cached, API reads carry ETags, and recordings and uploads stream through disk. CLAUDE.md has the measurements. Each call is a folder: the recording, the transcript including corrections, the model's proposed analysis, the review log (dismissals, draft edits, approvals, transcript edits) and the rendered report. Jobs run one at a time because speech and language models share the CPU. Packaging as a desktop app (Tauri or Electron around the same server) is still open; see [decisions.md](decisions.md).

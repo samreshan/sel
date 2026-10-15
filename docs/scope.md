@@ -17,7 +17,7 @@ Then run the same workflow with a second, unrelated business pack and no code ch
 
 ## Out of scope for v1
 
-- Live, in-call coaching
+- Live, in-call coaching on real customer calls. (The call simulator scores practice calls live; real calls are still reviewed after they end.)
 - Sending email or creating calendar events automatically. Sel's output is a draft, an `.ics` file, or a `mailto:` link, all waiting for approval.
 - CRM integrations
 - Team dashboards and trends across many calls

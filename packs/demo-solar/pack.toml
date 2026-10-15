@@ -17,21 +17,25 @@ id = "discovery"
 title = "Discovery before price"
 description = "Learn the customer's monthly electricity bill, roof space and household load before quoting a price."
 weight = 2
+signal = "discovery"
 
 [[scorecard]]
 id = "objection-handling"
 title = "Price objections answered with value"
 description = "When the customer compares on price, ask what the other quote includes (panel brand, inverter, warranty) before defending the price."
 weight = 2
+signal = "objections"
 
 [[scorecard]]
 id = "accurate-claims"
 title = "Only approved product claims"
 description = "Warranty terms, generation figures and approval timelines must match the product sheet. Say 'I'll confirm' instead of guessing."
 weight = 3
+signal = "claims"
 
 [[scorecard]]
 id = "clear-next-step"
 title = "Next step with a date"
 description = "Every promised follow-up (quotation, site visit, callback) is agreed with a specific day."
 weight = 2
+signal = "next_step"

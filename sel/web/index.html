@@ -6,6 +6,7 @@
   <title>Sel · Call review</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="prefetch" href="/static/sim.js" as="script">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -22,6 +23,11 @@
       <button type="button" class="primary new-call" id="new-call">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         New call
+      </button>
+      <button type="button" class="new-sim" id="open-sim" aria-current="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>
+        Call simulator
+        <span class="live-dot" aria-hidden="true"></span>
       </button>
 
       <nav class="nav-section" aria-labelledby="calls-title">
@@ -48,6 +54,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js" data-sim="/static/sim.js" data-worklet="/static/pcm-worklet.js"></script>
 </body>
 </html>

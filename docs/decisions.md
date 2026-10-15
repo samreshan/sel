@@ -21,6 +21,12 @@
 | Customer commitments are tracked but get no draft | The rep can't act on them directly. A reminder feature may come later |
 | `week_starts_on` is set per pack | "Next week" depends on the local working week (Sunday in Nepal) |
 | Example packs and calls are fictional | Safe to publish |
+| The call simulator is part of the app: two Sel sessions call each other over WebRTC, the server only relays setup | No media server; audio stays between the two browsers and the Sel machine |
+| Simulator next actions are set, not sent: Sel files the call, analyses it and drafts follow-ups; people approve and send | Same rule as uploaded calls |
+| A code-only rules analyzer stands in when no language model answers, and is named in the report | Simulated calls get drafts and a scorecard on any machine; it never gives a claim a verdict |
+| Live transcription uses Whisper `base` by default | Median 2.2 s from end of speech to line on 4 CPU cores, against 6.1 s for `small`, same accuracy on the English test call |
+| Server-Sent Events, not WebSockets, for pushes and WebRTC signalling | Works with the standard-library server; one stream per tab stays within browsers' six connections per origin |
+| Static files are content-hashed and cached; API reads carry ETags | A reload transfers about 1 kB instead of 450 kB |
 
 ## Open
 
@@ -34,3 +40,6 @@
 8. **Recipient details.** Where do customer email addresses come from: typed in at review time, or imported from a contacts file?
 9. **Benchmark consent.** We need a written consent form and a policy for removing recordings from the public set.
 10. **Coaching volume.** How many coaching points per call is "a small number": three? Should it be configurable per pack?
+11. **Simulator across the internet.** No STUN/TURN server is configured by default, so calls work on one machine or one network. Run one, or document a provider?
+12. **Login.** Serving to the network (`--host 0.0.0.0`) has no authentication. Needed before the simulator is used beyond a trusted office.
+13. **Live Nepali transcription.** Whisper `base` garbles romanized Nepali; try `initial_prompt` with pack vocabulary and time words, or a Nepali model.

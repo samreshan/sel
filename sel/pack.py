@@ -18,6 +18,8 @@ from pathlib import Path
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 DOC_SUFFIXES = {".md", ".txt"}
+# What code can measure from a transcript; a scorecard criterion may name one (see sel/scoring.py).
+SIGNALS = ("discovery", "objections", "claims", "next_step", "talk_ratio")
 
 
 @dataclass
@@ -26,6 +28,7 @@ class Criterion:
     title: str
     description: str
     weight: int = 1
+    signal: str | None = None  # one of SIGNALS; inferred from the wording when not given
 
 
 @dataclass
@@ -128,6 +131,9 @@ def validate_pack(pack: Pack) -> list[str]:
     ids = [c.id for c in pack.scorecard]
     if len(ids) != len(set(ids)):
         problems.append("scorecard criterion ids must be unique")
+    for c in pack.scorecard:
+        if c.signal is not None and c.signal not in SIGNALS:
+            problems.append(f"criterion {c.id!r}: signal must be one of {', '.join(SIGNALS)}, got {c.signal!r}")
     for fact in pack.facts.values():
         if fact.source_doc and fact.source_doc not in pack.docs:
             problems.append(f"fact {fact.id!r} cites missing document {fact.source_doc!r}")

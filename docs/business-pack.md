@@ -39,7 +39,19 @@ description = "Every promised follow-up is agreed with a specific day."
 weight = 2
 ```
 
-Scorecard descriptions are written for both the analysis model and the rep. Make each one concrete enough that two reviewers would agree on whether a call meets it.
+Scorecard descriptions are written for both the analysis model and the rep. Make each one concrete enough that two reviewers would agree on whether a call meets it. The description is also what the call simulator shows the rep as the next best action.
+
+A criterion can name what code measures for it, for the live score and the report's scorecard:
+
+```toml
+[[scorecard]]
+id = "qualify"
+title = "Qualify the outlet"
+description = "Find out the number of outlets and billing counters before recommending a plan."
+signal = "discovery"   # discovery | objections | claims | next_step | talk_ratio
+```
+
+Without `signal`, Sel infers it from the title, then the description ("Discovery before price" → discovery, "Book a demo with a time" → next_step). A criterion that matches none is left to the coaching review.
 
 ## `facts.toml`
 

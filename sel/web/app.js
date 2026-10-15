@@ -2,14 +2,27 @@
  *
  * Every string from the server (transcript text, quotes, drafts, document
  * text) is inserted with textContent through el(). Nothing is parsed as HTML.
+ *
+ * Performance (numbers in CLAUDE.md):
+ * - One Server-Sent Events stream per tab pushes call and simulator updates;
+ *   polling is only a fallback while the stream is down.
+ * - Call views are cached in memory and revalidated with ETags, and sidebar
+ *   links prefetch on hover, so opening a call renders immediately.
+ * - Segment lookups go through an index; the playhead uses binary search and
+ *   touches only the rows that change; editing a line replaces one row.
+ * - The call simulator (sim.js) loads only when it is opened.
  */
 (function () {
   "use strict";
 
   const MAX_UPLOAD = 500 * 1024 * 1024;
   const POLL_ACTIVE_MS = 2000;
-  const POLL_IDLE_MS = 10000;
+  const POLL_FALLBACK_MS = 10000;
   const HEALTH_MS = 60000;
+  const CACHE_MAX = 24;
+  const TAB = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const SCRIPT = document.currentScript;
+  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "rooms", "room", "line", "live", "signal"];
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -25,6 +38,14 @@
   };
   const CHANNEL_ICON = { email: "mail", call: "phone", meeting: "calendar", visit: "pin", other: "user" };
   const STEPS = ["Transcribe", "Analyse", "Review", "Approve drafts"];
+  const SCORE_STATUS = {
+    met: { cls: "ok", label: "Met" },
+    partial: { cls: "warn", label: "Partly" },
+    missed: { cls: "bad", label: "Missed" },
+    open: { cls: "info", label: "Open" },
+    na: { cls: "neutral", label: "Not raised" },
+    not_scored: { cls: "neutral", label: "In coaching" },
+  };
 
   // Stroke icons, 24×24. Constant path data only; nothing from the server.
   const ICONS = {
@@ -43,6 +64,14 @@
     lines: ["M5 6h14M5 10h14M5 14h9M5 18h6"],
     doc: ["M6 3h8l4 4v14H6z", "M14 3v4h4"],
     lock: ["M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"],
+    mic: ["M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z", "M6 11a6 6 0 0 0 12 0M12 17v3"],
+    micoff: ["M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z", "M6 11a6 6 0 0 0 12 0M12 17v3", "M4 4l16 16"],
+    hangup: ["M3.5 14.5c4.7-4.7 12.3-4.7 17 0l-2.3 2.3-3.4-1.4v-2.6a10 10 0 0 0-5.6 0v2.6l-3.4 1.4z"],
+    gauge: ["M4 15a8 8 0 1 1 16 0", "M12 15l4-5"],
+    bolt: ["M13 3L5 13.5h6L10 21l8-10.5h-6z"],
+    link: ["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
+    send: ["M4 12l16-8-6 16-2.5-6.5z"],
+    keyboard: ["M4 7h16v10H4z", "M7 10h.01M10 10h.01M13 10h.01M16 10h.01M8 14h8"],
   };
   const FILLED_ICONS = new Set(["play"]);
   const DRAFT_STATUS = {
@@ -74,15 +103,21 @@
     packs: new Map(),
     packError: null,
     calls: [],
-    listKey: null,
-    view: "empty", // "empty" | "new" | "call"
+    listRows: new Map(), // call id -> {li, key}: sidebar rows are reused when unchanged
+    view: "empty", // "empty" | "new" | "call" | "sim"
     callId: null,
+    simCode: null,
     call: null, // full view from GET /api/calls/{id}
+    cache: new Map(), // call id -> {data, etag}
+    inflight: new Map(), // GET path -> promise
     mainError: null,
     tab: "coaching",
     evidence: new Set(), // segment ids highlighted by a card
+    marked: new Set(), // segment ids currently drawn as evidence
     focusItem: null, // id of the card whose evidence is highlighted
     current: null, // segment id under the playhead
+    currentRow: null,
+    currentBlock: null,
     editing: null, // segment id in inline edit mode
     notice: null, // {kind, text} above the transcript
     draftEdits: {}, // unsaved draft form values, by draft id
@@ -90,13 +125,23 @@
     openDocs: new Set(), // "pack|source" keys with the document panel open
     docs: new Map(), // "pack|source" -> {text} or {error}
     audio: null,
+    raf: 0,
     mountKey: null,
+    txKey: null,
+    mapKey: null,
     refs: null,
+    idx: null, // segment index for the shown report
     segRows: new Map(),
     mapBlocks: new Map(), // segment id -> call-map block
     health: null,
     pollTimer: null,
+    stream: { es: null, qs: null, connected: false },
+    sim: null, // simulator capabilities, from the event stream
+    rooms: [], // open simulator rooms
+    simLoad: null,
+    showKeys: false,
   };
+  const listeners = new Map();
 
   // ---------- helpers ----------
 
@@ -204,6 +249,14 @@
     return m ? `${m[1]}${m[2]}:${m[3]}` : null;
   }
 
+  // This browser's UTC offset as "+05:45".
+  function localOffset() {
+    const mins = -new Date().getTimezoneOffset();
+    const sign = mins >= 0 ? "+" : "-";
+    const a = Math.abs(mins);
+    return `${sign}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+  }
+
   const isActive = (status) => status === "queued" || status === "running";
 
   function stageText(stage) {
@@ -222,33 +275,99 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  async function api(path, { method = "GET", json, body, contentType } = {}) {
-    const init = { method, headers: {}, cache: "no-store" };
-    if (json !== undefined) {
-      init.headers["Content-Type"] = "application/json";
-      init.body = JSON.stringify(json);
-    } else if (body !== undefined) {
-      init.headers["Content-Type"] = contentType || "application/octet-stream";
-      init.body = body;
-    }
-    let res;
-    let raw = "";
+  function store(key, value) {
     try {
-      res = await fetch(path, init);
-      raw = await res.text();
+      if (value === undefined) return JSON.parse(localStorage.getItem(key) || "null");
+      localStorage.setItem(key, JSON.stringify(value));
     } catch (_) {
-      throw new ApiError("Cannot reach the Sel server. Is it still running?", 0);
+      /* private mode or blocked storage: remembering is only a convenience */
     }
-    let data = null;
-    if (raw) {
+    return null;
+  }
+
+  function on(type, fn) {
+    if (!listeners.has(type)) listeners.set(type, []);
+    listeners.get(type).push(fn);
+  }
+
+  function emit(type, data) {
+    for (const fn of listeners.get(type) || []) {
       try {
-        data = JSON.parse(raw);
-      } catch (_) {
-        data = null;
+        fn(data);
+      } catch (e) {
+        console.error(e); // eslint-disable-line no-console
       }
     }
-    if (!res.ok) throw new ApiError((data && data.error) || `Request failed with HTTP ${res.status}`, res.status);
-    return data;
+  }
+
+  // ---------- server requests ----------
+
+  // GETs revalidate through the browser's HTTP cache (the server sends ETags),
+  // and concurrent GETs of the same path share one request.
+  // `fresh` skips sharing: a request made because the server announced a change
+  // must not reuse one that started before the change.
+  function request(path, { method = "GET", json, body, contentType, fresh = false } = {}) {
+    const get = method === "GET";
+    if (get && !fresh && state.inflight.has(path)) return state.inflight.get(path);
+    const p = (async () => {
+      const init = { method, headers: {} };
+      if (!get) init.headers["X-Sel-Tab"] = TAB;
+      if (json !== undefined) {
+        init.headers["Content-Type"] = "application/json";
+        init.body = JSON.stringify(json);
+      } else if (body !== undefined) {
+        init.headers["Content-Type"] = contentType || "application/octet-stream";
+        init.body = body;
+      }
+      let res;
+      let raw = "";
+      try {
+        res = await fetch(path, init);
+        raw = await res.text();
+      } catch (_) {
+        throw new ApiError("Cannot reach the Sel server. Is it still running?", 0);
+      }
+      let data = null;
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch (_) {
+          data = null;
+        }
+      }
+      if (!res.ok) throw new ApiError((data && data.error) || `Request failed with HTTP ${res.status}`, res.status);
+      return { data, etag: res.headers.get("ETag") };
+    })();
+    if (get) {
+      state.inflight.set(path, p);
+      p.finally(() => state.inflight.delete(path)).catch(() => {});
+    }
+    return p;
+  }
+
+  const api = (path, opts) => request(path, opts).then((r) => r.data);
+
+  // Upload with progress (fetch cannot report upload progress).
+  function upload(path, blob, contentType, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", path);
+      xhr.setRequestHeader("Content-Type", contentType || "application/octet-stream");
+      xhr.setRequestHeader("X-Sel-Tab", TAB);
+      if (onProgress) xhr.upload.addEventListener("progress", (e) => e.lengthComputable && onProgress(e.loaded / e.total));
+      xhr.addEventListener("load", () => {
+        let data = null;
+        try {
+          data = JSON.parse(xhr.responseText || "null");
+        } catch (_) {
+          data = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new ApiError((data && data.error) || `Upload failed with HTTP ${xhr.status}`, xhr.status));
+      });
+      xhr.addEventListener("error", () => reject(new ApiError("Cannot reach the Sel server. Is it still running?", 0)));
+      xhr.send(blob);
+    });
   }
 
   // ---------- lookups ----------
@@ -268,8 +387,43 @@
     return c ? c.title : criterionId;
   }
 
+  // Segment index for the report on screen; rebuilt only when the report object changes.
+  function index() {
+    const r = state.call && state.call.report;
+    if (!r) return null;
+    if (state.idx && state.idx.report === r) return state.idx;
+    const list = r.transcript.segments;
+    const segs = new Map();
+    const starts = new Float64Array(list.length);
+    list.forEach((s, i) => {
+      segs.set(s.id, s);
+      starts[i] = s.start;
+    });
+    state.idx = { report: r, list, segs, starts, speakers: new Map(r.transcript.speakers.map((s) => [s.id, s])) };
+    return state.idx;
+  }
+
   function segmentById(id) {
-    return state.call.report.transcript.segments.find((s) => s.id === id) || null;
+    const idx = index();
+    return (idx && idx.segs.get(id)) || null;
+  }
+
+  // The segment playing at time t: the last one starting at or before t.
+  function segmentAt(t) {
+    const idx = index();
+    if (!idx || !idx.list.length) return null;
+    const s = idx.starts;
+    let lo = 0;
+    let hi = s.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (s[mid] <= t) {
+        found = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return found >= 0 ? idx.list[found].id : null;
   }
 
   function speakerLabel(sp) {
@@ -280,7 +434,7 @@
   function speakerOf(segId) {
     const seg = segId ? segmentById(segId) : null;
     if (!seg) return null;
-    return state.call.report.transcript.speakers.find((s) => s.id === seg.speaker) || null;
+    return index().speakers.get(seg.speaker) || null;
   }
 
   // "Said by Asha at 00:28", from the first segment a card cites.
@@ -301,19 +455,29 @@
       .map((o) => o.x);
   }
 
-  // ---------- routing and polling ----------
+  // ---------- routing ----------
 
   function navigate(hash) {
     if (location.hash === hash) route();
     else location.hash = hash;
   }
 
+  function stopPlayLoop() {
+    clearTimeout(state.raf);
+    state.raf = 0;
+  }
+
   function resetCallUi() {
+    stopPlayLoop();
+    if (state.audio) state.audio.pause();
     state.tab = "coaching";
     state.evidence = new Set();
+    state.marked = new Set();
     state.focusItem = null;
     state.mapBlocks = new Map();
     state.current = null;
+    state.currentRow = null;
+    state.currentBlock = null;
     state.editing = null;
     state.notice = null;
     state.draftEdits = {};
@@ -324,14 +488,19 @@
     state.mainError = null;
     state.refs = null;
     state.mountKey = null;
+    state.txKey = null;
+    state.mapKey = null;
+    state.idx = null;
   }
 
   async function route() {
     const hash = decodeURIComponent(location.hash.replace(/^#/, ""));
     const m = /^call\/([a-z0-9-]{1,64})$/.exec(hash);
-    if (hash === "new") {
-      resetCallUi();
-      state.view = "new";
+    const sim = /^sim(?:\/([a-z0-9]{6}))?$/.exec(hash);
+    if (hash === "new" || sim) {
+      if (state.view === "call") resetCallUi();
+      state.view = sim ? "sim" : "new";
+      state.simCode = sim ? sim[1] || null : null;
       state.callId = null;
       state.call = null;
       renderList();
@@ -344,7 +513,8 @@
         resetCallUi();
         state.view = "call";
         state.callId = id;
-        state.call = null;
+        const cached = state.cache.get(id);
+        state.call = cached ? cached.data : null;
       }
       renderList();
       renderMain();
@@ -366,22 +536,72 @@
     renderMain();
   }
 
-  async function loadCall(id) {
-    const data = await api(`/api/calls/${enc(id)}`);
+  // ---------- calls: fetching, caching, live updates ----------
+
+  // Responses can arrive out of order; each carries the order its request
+  // was made in, and an older one never replaces a newer one.
+  let callSeq = 0;
+
+  async function fetchCall(id, fresh = false) {
+    const seq = ++callSeq;
+    const r = await request(`/api/calls/${enc(id)}`, { fresh });
+    const prev = state.cache.get(id);
+    if (prev && prev.seq > seq) return { entry: prev, unchanged: true, stale: true };
+    const unchanged = !!(prev && r.etag && prev.etag === r.etag);
+    const entry = unchanged ? Object.assign(prev, { seq }) : { data: r.data, etag: r.etag, seq };
+    state.cache.delete(id);
+    state.cache.set(id, entry);
+    while (state.cache.size > CACHE_MAX) state.cache.delete(state.cache.keys().next().value);
+    return { entry, unchanged };
+  }
+
+  async function loadCall(id, fresh = false) {
+    const { entry, unchanged } = await fetchCall(id, fresh);
     if (state.view !== "call" || state.callId !== id) return;
-    state.call = data;
+    if (unchanged && state.call === entry.data) return; // already on screen
+    state.call = entry.data;
     state.mainError = null;
     renderMain();
   }
 
+  function prefetchCall(id) {
+    if (!id || state.cache.has(id) || state.inflight.has(`/api/calls/${enc(id)}`)) return;
+    fetchCall(id).catch(() => {});
+  }
+
+  function sortCalls() {
+    // Same order as the server: newest folder name first.
+    state.calls.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  }
+
+  function applyList(list) {
+    state.calls = list;
+    renderList();
+  }
+
+  function upsertCall(summary) {
+    const i = state.calls.findIndex((c) => c.id === summary.id);
+    if (i >= 0) state.calls[i] = summary;
+    else {
+      state.calls.push(summary);
+      sortCalls();
+    }
+    renderList();
+  }
+
+  function onCallEvent(summary) {
+    upsertCall(summary);
+    if (state.view === "call" && state.callId === summary.id) {
+      const shown = state.call;
+      if (!shown || shown.updated_at !== summary.updated_at || shown.status !== summary.status) {
+        loadCall(summary.id, true).catch((e) => setListError(e.message));
+      }
+    }
+  }
+
   async function refreshList() {
     const list = await api("/api/calls");
-    const key = JSON.stringify(list);
-    if (key !== state.listKey) {
-      state.listKey = key;
-      state.calls = list;
-      renderList();
-    }
+    if (JSON.stringify(list) !== JSON.stringify(state.calls)) applyList(list);
   }
 
   function setListError(message) {
@@ -390,12 +610,14 @@
     node.hidden = !message;
   }
 
+  // Fallback while the event stream is down (or unsupported): poll like before.
   function schedule(ms) {
     clearTimeout(state.pollTimer);
     state.pollTimer = setTimeout(tick, ms);
   }
 
   async function tick() {
+    if (state.stream.connected) return;
     try {
       await refreshList();
       setListError(null);
@@ -407,18 +629,82 @@
       const shown = state.call && state.call.id === state.callId ? state.call : null;
       if (listed && (!shown || shown.status !== listed.status || isActive(listed.status))) {
         try {
-          await loadCall(state.callId);
+          await loadCall(state.callId, true);
         } catch (e) {
           setListError(e.message);
         }
       }
     }
-    schedule(state.calls.some((c) => isActive(c.status)) ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    if (!state.stream.connected) schedule(state.calls.some((c) => isActive(c.status)) ? POLL_ACTIVE_MS : POLL_FALLBACK_MS);
   }
 
   function kickPoll() {
-    schedule(0);
+    if (!state.stream.connected) schedule(0);
   }
+
+  // One event stream per tab. The simulator passes its room and client so the
+  // same connection also carries the room's updates and WebRTC signalling
+  // (browsers allow only six connections per origin across all tabs).
+  function connectEvents(params) {
+    if (typeof EventSource === "undefined") {
+      schedule(0);
+      return;
+    }
+    const qs = new URLSearchParams({ tab: TAB, ...(params || {}) }).toString();
+    if (state.stream.es && state.stream.qs === qs && state.stream.es.readyState !== 2) return;
+    if (state.stream.es) state.stream.es.close();
+    const es = new EventSource(`/api/events?${qs}`);
+    state.stream = { es, qs, connected: false };
+    es.addEventListener("open", () => {
+      if (state.stream.es !== es) return;
+      state.stream.connected = true;
+      clearTimeout(state.pollTimer);
+      setListError(null);
+      emit("stream", true);
+    });
+    es.addEventListener("error", () => {
+      if (state.stream.es !== es) return;
+      state.stream.connected = false;
+      emit("stream", false);
+      schedule(POLL_ACTIVE_MS); // EventSource reconnects by itself; poll meanwhile
+    });
+    for (const type of STREAM_EVENTS) {
+      es.addEventListener(type, (e) => {
+        if (state.stream.es !== es) return;
+        let data = null;
+        try {
+          data = JSON.parse(e.data);
+        } catch (_) {
+          return;
+        }
+        emit(type, data);
+      });
+    }
+  }
+
+  on("hello", (data) => {
+    state.sim = data.sim || null;
+    state.rooms = data.rooms || [];
+    if (JSON.stringify(data.calls) !== JSON.stringify(state.calls)) applyList(data.calls || []);
+    // After a reconnect anything may have changed; on the first connect the page just loaded it.
+    if (state.helloSeen && state.view === "call" && state.callId) loadCall(state.callId, true).catch(() => {});
+    state.helloSeen = true;
+  });
+  on("call", onCallEvent);
+  on("call-deleted", (data) => {
+    state.calls = state.calls.filter((c) => c.id !== data.id);
+    state.cache.delete(data.id);
+    renderList();
+  });
+  on("call-changed", (data) => {
+    if (state.view === "call" && state.callId === data.id) loadCall(data.id, true).catch(() => {});
+    else state.cache.delete(data.id);
+  });
+  on("rooms", (rooms) => {
+    state.rooms = rooms || [];
+  });
+
+  // ---------- health ----------
 
   async function loadHealth() {
     try {
@@ -503,10 +789,38 @@
 
   // ---------- sidebar ----------
 
+  // Rows are rebuilt only when their call changed, and moved rather than recreated.
   function renderList() {
+    const ul = $("#call-list");
     const selectedId = state.view === "call" ? state.callId : null;
-    $("#call-list").replaceChildren(...state.calls.map((c) => callItem(c, c.id === selectedId)));
+    const keep = new Set();
+    const nodes = state.calls.map((c) => {
+      const selected = c.id === selectedId;
+      const key = `${JSON.stringify(c)}|${selected}|${packName(c.pack_id)}`;
+      let row = state.listRows.get(c.id);
+      if (!row || row.key !== key) {
+        row = { li: callItem(c, selected), key };
+        state.listRows.set(c.id, row);
+      }
+      keep.add(c.id);
+      return row.li;
+    });
+    for (const id of [...state.listRows.keys()]) if (!keep.has(id)) state.listRows.delete(id);
+    let prev = null;
+    for (const node of nodes) {
+      const want = prev ? prev.nextSibling : ul.firstChild;
+      if (want !== node) ul.insertBefore(node, want);
+      prev = node;
+    }
+    let extra = prev ? prev.nextSibling : ul.firstChild;
+    while (extra) {
+      const next = extra.nextSibling;
+      extra.remove();
+      extra = next;
+    }
     $("#list-empty").hidden = state.calls.length > 0;
+    const simBtn = $("#open-sim");
+    if (simBtn) simBtn.setAttribute("aria-current", state.view === "sim" ? "page" : "false");
   }
 
   function callItem(c, selected) {
@@ -522,6 +836,7 @@
           href: `#call/${enc(c.id)}`,
           class: `call-link${selected ? " is-selected" : ""}`,
           "aria-current": selected ? "page" : null,
+          dataset: { id: c.id },
         },
         icon("phone", 20),
         el("span", { class: "call-title", text: title }),
@@ -530,7 +845,8 @@
           "span",
           { class: "call-meta" },
           pill(status.cls, status.label),
-          c.source === "fixture" ? pill("neutral", "Example") : null
+          c.source === "fixture" ? pill("neutral", "Example") : null,
+          c.source === "simulator" ? pill("violet", "Simulated") : null
         ),
         isActive(c.status)
           ? el(
@@ -553,8 +869,13 @@
       "is-call",
       state.view === "call" && !!state.call && state.call.id === state.callId && state.call.status === "done" && !!state.call.report
     );
+    main.classList.toggle("is-sim", state.view === "sim");
     if (state.view === "new") {
       renderUpload(main);
+      return;
+    }
+    if (state.view === "sim") {
+      renderSim(main);
       return;
     }
     if (state.view !== "call") {
@@ -571,12 +892,15 @@
     if (!call || call.id !== state.callId) {
       state.refs = null;
       state.mountKey = null;
-      main.replaceChildren(muted("Loading call…"));
+      main.replaceChildren(skeleton());
       return;
     }
     if (call.status !== "done" || !call.report) {
+      stopPlayLoop();
       state.refs = null;
       state.mountKey = null;
+      state.txKey = null;
+      state.mapKey = null;
       state.audio = null;
       main.replaceChildren(renderProgress(call));
       return;
@@ -586,14 +910,31 @@
     renderCallParts();
   }
 
+  function skeleton() {
+    return el(
+      "div",
+      { class: "skeleton", "aria-busy": "true", "aria-label": "Loading call" },
+      el("span", { class: "sk sk-title" }),
+      el("span", { class: "sk sk-line" }),
+      el("span", { class: "sk sk-block" }),
+      el("span", { class: "sk sk-line" }),
+      el("span", { class: "sk sk-line short" })
+    );
+  }
+
   function renderWelcome(main) {
     main.replaceChildren(
       el(
         "section",
         { class: "welcome" },
         el("h1", { text: "Sel" }),
-        el("p", { class: "lede", text: "Review recorded sales calls on this computer. Pick a call on the left, or add a new recording." }),
-        el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } })
+        el("p", { class: "lede", text: "Review recorded sales calls on this computer. Pick a call on the left, add a new recording, or practise a call in the simulator." }),
+        el(
+          "div",
+          { class: "row" },
+          el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } }),
+          el("button", { type: "button", text: "Call simulator", on: { click: () => navigate("#sim") } })
+        )
       )
     );
   }
@@ -637,19 +978,22 @@
     return pill(s.cls, s.label);
   }
 
-  async function retryCall(id) {
+  async function retryCall(id, transcribe) {
     try {
-      const view = await api(`/api/calls/${enc(id)}/retry`, { method: "POST" });
+      const view = await api(`/api/calls/${enc(id)}/retry${transcribe ? `?transcribe=${enc(transcribe)}` : ""}`, { method: "POST" });
+      state.cache.delete(id);
       if (state.callId === id) {
         state.call = view;
         state.mainError = null;
         renderMain();
       }
-      await refreshList().catch(() => {});
       kickPoll();
     } catch (e) {
       state.mainError = e.message;
-      renderMain();
+      if (state.refs) {
+        state.notice = { kind: "error", text: e.message };
+        renderNotice(state.refs.notice);
+      } else renderMain();
     }
   }
 
@@ -667,20 +1011,15 @@
       class: "small",
       text: "Clear highlight",
       hidden: true,
-      on: {
-        click: () => {
-          state.evidence = new Set();
-          state.focusItem = null;
-          markEvidence();
-          markFocused();
-        },
-      },
+      on: { click: clearHighlight },
     });
     const talk = el("section", { class: "talk", "aria-labelledby": "talk-title" });
     const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Review" });
     const panel = el("div", { class: "panel", id: "panel", role: "tabpanel" });
     const map = el("div", { class: "callmap", "aria-hidden": "true", title: "Call map: click to play from that moment" });
-    map.addEventListener("click", (e) => seekFromMap(e, map));
+    map.addEventListener("click", (e) => seekFromMap(e));
+    // One listener for every transcript row instead of two per row.
+    list.addEventListener("click", onTranscriptClick);
     const player = el(
       "section",
       { class: "player", "aria-label": "Recording" },
@@ -694,20 +1033,53 @@
       )
     );
 
+    stopPlayLoop();
     if (call.audio_url) {
       const audio = el("audio", { controls: true, preload: "metadata", src: call.audio_url });
-      audio.addEventListener("timeupdate", onTimeUpdate);
+      audio.addEventListener("timeupdate", syncPlayhead);
+      audio.addEventListener("seeked", syncPlayhead);
+      audio.addEventListener("ratechange", syncPlayhead);
+      audio.addEventListener("play", startPlayLoop);
+      audio.addEventListener("pause", stopPlayLoop);
+      audio.addEventListener("ended", stopPlayLoop);
       state.audio = audio;
       player.append(audio);
     } else {
       state.audio = null;
-      player.append(el("p", { class: "no-audio", text: "No recording for this call (example data)." }));
+      player.append(el("p", { class: "no-audio", text: "No recording for this call." }));
     }
 
-    state.refs = { head, tiles, notice, list, txSub, clear, talk, tabs, panel, map };
+    const keysHint = el(
+      "button",
+      {
+        type: "button",
+        class: "keys-hint small ghost",
+        "aria-expanded": "false",
+        title: "Keyboard shortcuts",
+        on: { click: () => toggleKeys() },
+      },
+      icon("keyboard", 16),
+      "Keys"
+    );
+    const keys = el(
+      "div",
+      { class: "keys", hidden: true, role: "note" },
+      el(
+        "dl",
+        {},
+        ...[["Space", "Play or pause"], ["1 – 4", "Switch tab"], ["J / K", "Next or previous card"], ["Enter", "Play the focused card"], ["Esc", "Clear the highlight"]].flatMap(([k, v]) => [
+          el("dt", {}, el("kbd", { text: k })),
+          el("dd", { text: v }),
+        ])
+      )
+    );
+
+    state.refs = { head, tiles, notice, list, txSub, clear, talk, tabs, panel, map, keys, keysHint };
     state.mountKey = key;
     state.segRows = new Map();
     state.mapBlocks = new Map();
+    state.txKey = null;
+    state.mapKey = null;
 
     main.replaceChildren(
       el(
@@ -743,9 +1115,10 @@
           el(
             "div",
             { class: "inspector-head" },
-            el("h2", { text: "Call review" }),
-            el("p", { class: "card-sub", text: "Findings, claim checks and drafts" })
+            el("div", {}, el("h2", { text: "Call review" }), el("p", { class: "card-sub", text: "Findings, claim checks and drafts" })),
+            keysHint
           ),
+          keys,
           talk,
           tabs,
           panel
@@ -754,14 +1127,34 @@
     );
   }
 
+  function toggleKeys(force) {
+    if (!state.refs) return;
+    state.showKeys = force === undefined ? !state.showKeys : force;
+    state.refs.keys.hidden = !state.showKeys;
+    state.refs.keysHint.setAttribute("aria-expanded", state.showKeys ? "true" : "false");
+  }
+
+  function transcriptKey() {
+    const t = state.call.report.transcript;
+    const edits = (state.call.review && state.call.review.transcript_edits) || [];
+    return `${state.call.id}|${t.segments.length}|${edits.length}`;
+  }
+
+  function mapKeyOf() {
+    const segs = state.call.report.transcript.segments;
+    return `${state.call.id}|${segs.length}|${segs.length ? segs[segs.length - 1].end : 0}`;
+  }
+
   function renderCallParts() {
     const r = state.refs;
     if (!r || !state.call) return;
+    index();
     renderHead(r.head);
     renderSummary(r.tiles);
     renderNotice(r.notice);
-    renderCallMap(r.map);
-    renderTranscript(r.list);
+    const mk = mapKeyOf();
+    if (mk !== state.mapKey) renderCallMap(r.map, mk);
+    if (transcriptKey() !== state.txKey) renderTranscript(r.list);
     renderTalk(r.talk);
     renderTabs(r.tabs);
     renderPanel();
@@ -866,24 +1259,26 @@
 
   // ---------- call map ----------
 
-  function renderCallMap(map) {
-    const { segments, speakers } = state.call.report.transcript;
-    const byId = new Map(speakers.map((s) => [s.id, s]));
+  function renderCallMap(map, key) {
+    const idx = index();
     state.mapBlocks = new Map();
-    const blocks = segments.map((seg) => {
-      const sp = byId.get(seg.speaker);
-      const b = el("span", {
-        class: `callmap-block role-${sp ? sp.role : "other"}`,
-        style: `flex: ${Math.max(0.5, seg.end - seg.start)} 1 0`,
-        dataset: { start: String(seg.start) },
-      });
+    state.currentBlock = null;
+    const frag = document.createDocumentFragment();
+    for (const seg of idx.list) {
+      const sp = idx.speakers.get(seg.speaker);
+      const b = document.createElement("span");
+      b.className = `callmap-block role-${sp ? sp.role : "other"}${state.evidence.has(seg.id) ? " is-evidence" : ""}`;
+      b.style.flex = `${Math.max(0.5, seg.end - seg.start)} 1 0`;
+      b.dataset.start = String(seg.start);
       state.mapBlocks.set(seg.id, b);
-      return b;
-    });
-    map.replaceChildren(...blocks);
+      frag.append(b);
+    }
+    map.replaceChildren(frag);
+    state.mapKey = key;
+    markPlayback();
   }
 
-  function seekFromMap(e, map) {
+  function seekFromMap(e) {
     const block = e.target.closest(".callmap-block");
     if (block) seekTo(Number(block.dataset.start));
   }
@@ -899,6 +1294,8 @@
       .map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? `${v.toFixed(1)} s` : v}`)
       .join(" · ");
     const when = [formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
+    const rules = String(meta.analyzer || "").startsWith("rules");
+    const sim = call.source === "simulator";
     head.replaceChildren(
       ...compact([
         el(
@@ -912,6 +1309,30 @@
         ),
         call.source === "fixture"
           ? el("div", { class: "banner", role: "note" }, el("strong", { text: "Example data:" }), " hand-written fixture, not model output")
+          : null,
+        sim || rules
+          ? el(
+              "div",
+              { class: "banner banner-row", role: "note" },
+              el(
+                "span",
+                {},
+                sim ? el("strong", { text: "Recorded in the call simulator. " }) : null,
+                rules
+                  ? "Analysed by Sel's rules because no language model answered: claims are left unverified. Start a model and re-analyse for verdicts."
+                  : "Transcript captured live during the call."
+              ),
+              el(
+                "span",
+                { class: "row" },
+                sim || call.source === "audio"
+                  ? el("button", { type: "button", class: "small", text: "Re-analyse", on: { click: () => retryCall(call.id) } })
+                  : null,
+                sim && call.audio_file
+                  ? el("button", { type: "button", class: "small", text: "Re-transcribe recording", on: { click: () => retryCall(call.id, "recording") } })
+                  : null
+              )
+            )
           : null,
       ])
     );
@@ -943,57 +1364,107 @@
 
   // ---------- transcript and playback ----------
 
+  // Rows go into chunks of TX_CHUNK; the browser skips layout and paint for
+  // chunks that are off screen (content-visibility on .tx-chunk). Chunks, not
+  // rows, so a layout elsewhere on the page walks a few dozen boxes, not
+  // every line of a long call. The chunk wrappers have no list semantics.
+  const TX_CHUNK = 40;
+
   function renderTranscript(list) {
-    const { segments, speakers } = state.call.report.transcript;
-    const byId = new Map(speakers.map((s) => [s.id, s]));
+    const idx = index();
     state.segRows = new Map();
-    const rows = segments.map((seg) => {
-      const li = segmentRow(seg, byId.get(seg.speaker) || null);
+    state.currentRow = null;
+    const frag = document.createDocumentFragment();
+    let rows = null;
+    idx.list.forEach((seg, i) => {
+      if (i % TX_CHUNK === 0) {
+        rows = document.createElement("ol");
+        rows.className = "tx-rows";
+        rows.setAttribute("role", "none");
+        const chunk = document.createElement("li");
+        chunk.className = "tx-chunk";
+        chunk.setAttribute("role", "none");
+        chunk.style.containIntrinsicSize = `auto ${Math.min(TX_CHUNK, idx.list.length - i) * 64}px`;
+        chunk.append(rows);
+        frag.append(chunk);
+      }
+      const li = segmentRow(seg, idx.speakers.get(seg.speaker) || null);
       state.segRows.set(seg.id, li);
-      return li;
+      rows.append(li);
     });
-    list.replaceChildren(...rows);
+    list.replaceChildren(frag);
+    state.marked = new Set([...state.evidence].filter((id) => state.segRows.has(id)));
+    state.txKey = transcriptKey();
     if (state.refs && state.refs.txSub) {
-      state.refs.txSub.textContent = `${plural(segments.length, "line", "lines")} · choose a time to play from there`;
+      state.refs.txSub.textContent = `${plural(idx.list.length, "line", "lines")} · choose a time to play from there`;
     }
     markPlayback();
-    markEvidence();
+    markEvidenceChrome();
   }
+
+  // Rows are cloned from this constant markup and filled with textContent;
+  // about four times faster than building each element for a long call.
+  const ROW = (() => {
+    const t = document.createElement("template");
+    t.innerHTML =
+      '<li class="seg"><button type="button" class="ts"></button><div class="seg-body"><p class="who"><span></span></p>' +
+      '<p class="text"></p></div><button type="button" class="edit-btn small">Edit</button></li>';
+    return t.content.firstChild;
+  })();
 
   function segmentRow(seg, speaker) {
     const editing = state.editing === seg.id;
     const role = speaker ? speaker.role : "other";
     const stamp = mmss(seg.start);
-    const li = el("li", { class: `seg role-${role}${editing ? " is-editing" : ""}`, dataset: { id: seg.id } });
-    const body = el(
-      "div",
-      { class: "seg-body" },
-      el("p", { class: "who" }, el("span", { text: speakerLabel(speaker) }), seg.lang ? el("span", { class: "lang", text: seg.lang }) : null)
-    );
+    const li = ROW.cloneNode(true);
+    li.className = `seg role-${role}${editing ? " is-editing" : ""}${state.evidence.has(seg.id) ? " is-evidence" : ""}`;
+    li.dataset.id = seg.id;
+    const ts = li.firstChild;
+    const body = ts.nextSibling;
+    const edit = body.nextSibling;
+    ts.textContent = stamp;
+    ts.title = `Play from ${stamp}`;
+    ts.setAttribute("aria-label", `Play from ${stamp}`);
+    const who = body.firstChild;
+    who.firstChild.textContent = speakerLabel(speaker);
+    if (seg.lang) who.append(el("span", { class: "lang", text: seg.lang }));
     if (editing) {
-      body.append(editForm(seg));
+      body.lastChild.replaceWith(editForm(seg));
+      edit.remove();
     } else {
-      body.append(el("p", { class: "text", text: seg.text }));
-    }
-    li.append(el("button", { type: "button", class: "ts", text: stamp, title: `Play from ${stamp}`, "aria-label": `Play from ${stamp}` }), body);
-    if (!editing) {
-      li.append(
-        el("button", {
-          type: "button",
-          class: "edit-btn small",
-          text: "Edit",
-          "aria-label": `Edit the line at ${stamp}`,
-          on: {
-            click: (e) => {
-              e.stopPropagation();
-              startEdit(seg.id);
-            },
-          },
-        })
-      );
-      li.addEventListener("click", () => seekTo(seg.start));
+      body.lastChild.textContent = seg.text;
+      edit.setAttribute("aria-label", `Edit the line at ${stamp}`);
     }
     return li;
+  }
+
+  // Replace one transcript row in place (editing, saving), keeping its highlight state.
+  function replaceRow(id) {
+    const old = state.segRows.get(id);
+    const seg = segmentById(id);
+    if (!old || !seg) return null;
+    const row = segmentRow(seg, index().speakers.get(seg.speaker) || null);
+    old.replaceWith(row);
+    state.segRows.set(id, row);
+    if (state.currentRow === old) {
+      row.classList.add("is-current");
+      state.currentRow = row;
+    }
+    return row;
+  }
+
+  function onTranscriptClick(e) {
+    const row = e.target.closest(".seg");
+    if (!row || !state.refs || !state.refs.list.contains(row)) return;
+    const id = row.dataset.id;
+    if (e.target.closest(".edit-btn")) {
+      e.stopPropagation();
+      startEdit(id);
+      return;
+    }
+    if (row.classList.contains("is-editing")) return;
+    const seg = segmentById(id);
+    if (seg) seekTo(seg.start);
   }
 
   function seekTo(seconds) {
@@ -1008,16 +1479,53 @@
     else audio.addEventListener("loadedmetadata", apply, { once: true });
   }
 
+  // Moves the "current" mark between two rows; never walks the whole transcript.
   function markPlayback() {
-    for (const [id, row] of state.segRows) row.classList.toggle("is-current", id === state.current);
-    for (const [id, b] of state.mapBlocks) b.classList.toggle("is-current", id === state.current);
+    const row = state.current ? state.segRows.get(state.current) || null : null;
+    if (state.currentRow !== row) {
+      if (state.currentRow) state.currentRow.classList.remove("is-current");
+      if (row) row.classList.add("is-current");
+      state.currentRow = row;
+    }
+    const block = state.current ? state.mapBlocks.get(state.current) || null : null;
+    if (state.currentBlock !== block) {
+      if (state.currentBlock) state.currentBlock.classList.remove("is-current");
+      if (block) block.classList.add("is-current");
+      state.currentBlock = block;
+    }
   }
 
+  // Draws state.evidence by touching only the rows that changed.
   function markEvidence() {
-    for (const [id, row] of state.segRows) row.classList.toggle("is-evidence", state.evidence.has(id));
-    for (const [id, b] of state.mapBlocks) b.classList.toggle("is-evidence", state.evidence.has(id));
+    const next = state.evidence;
+    for (const id of state.marked) {
+      if (next.has(id)) continue;
+      const row = state.segRows.get(id);
+      const block = state.mapBlocks.get(id);
+      if (row) row.classList.remove("is-evidence");
+      if (block) block.classList.remove("is-evidence");
+    }
+    for (const id of next) {
+      if (state.marked.has(id)) continue;
+      const row = state.segRows.get(id);
+      const block = state.mapBlocks.get(id);
+      if (row) row.classList.add("is-evidence");
+      if (block) block.classList.add("is-evidence");
+    }
+    state.marked = new Set(next);
+    markEvidenceChrome();
+  }
+
+  function markEvidenceChrome() {
     if (state.refs && state.refs.map) state.refs.map.classList.toggle("has-evidence", state.evidence.size > 0);
     if (state.refs && state.refs.clear) state.refs.clear.hidden = state.evidence.size === 0;
+  }
+
+  function clearHighlight() {
+    state.evidence = new Set();
+    state.focusItem = null;
+    markEvidence();
+    markFocused();
   }
 
   function markFocused() {
@@ -1027,29 +1535,50 @@
     }
   }
 
-  function onTimeUpdate() {
-    if (!state.audio || !state.call) return;
-    const t = state.audio.currentTime;
-    let pick = null;
-    for (const seg of state.call.report.transcript.segments) {
-      if (seg.start <= t) pick = seg;
-      else break;
+  // The highlight moves exactly when the next line starts: one timer per line
+  // change, re-armed on play, seek and rate change. timeupdate (about four
+  // times a second) is the safety net. Each update is a binary search plus
+  // two class changes.
+  function syncPlayhead() {
+    if (!state.audio || !state.call || !state.call.report) return;
+    const id = segmentAt(state.audio.currentTime);
+    if (id !== state.current) {
+      state.current = id;
+      markPlayback();
+      if (state.currentRow && !state.audio.paused) state.currentRow.scrollIntoView({ block: "nearest" });
     }
-    const id = pick ? pick.id : null;
-    if (id === state.current) return;
-    state.current = id;
-    markPlayback();
-    const row = id ? state.segRows.get(id) : null;
-    if (row && !state.audio.paused) scrollRow(row, "nearest");
+    if (!state.audio.paused) armPlayhead();
   }
 
-  function focusEvidence(segmentIds) {
+  function armPlayhead() {
+    stopPlayLoop();
+    const audio = state.audio;
+    const idx = index();
+    if (!audio || !idx || audio.paused) return;
+    const t = audio.currentTime;
+    const at = state.current ? idx.list.findIndex((s) => s.id === state.current) : -1;
+    let next = at + 1;
+    if (at < 0) {
+      next = 0;
+      while (next < idx.list.length && idx.starts[next] <= t) next += 1;
+    }
+    if (next >= idx.list.length) return;
+    const wait = ((idx.starts[next] - t) / (audio.playbackRate || 1)) * 1000;
+    state.raf = setTimeout(syncPlayhead, Math.max(0, wait) + 15);
+  }
+
+  function startPlayLoop() {
+    syncPlayhead();
+    armPlayhead();
+  }
+
+  function focusEvidence(segmentIds, play = true) {
     const known = (segmentIds || []).filter((id) => state.segRows.has(id));
     if (!known.length) return;
     state.evidence = new Set(known);
     markEvidence();
     scrollRow(state.segRows.get(known[0]), "center");
-    seekTo(segmentById(known[0]).start);
+    if (play) seekTo(segmentById(known[0]).start);
   }
 
   function evidenceButton(segmentIds, itemId) {
@@ -1079,9 +1608,11 @@
   // ---------- inline segment edit ----------
 
   function startEdit(id) {
+    const prev = state.editing;
     state.editing = id;
-    renderTranscript(state.refs.list);
-    const ta = state.refs.list.querySelector(".edit-text");
+    if (prev && prev !== id) replaceRow(prev);
+    const row = replaceRow(id);
+    const ta = row && row.querySelector(".edit-text");
     if (ta) {
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -1089,8 +1620,9 @@
   }
 
   function cancelEdit() {
+    const id = state.editing;
     state.editing = null;
-    renderTranscript(state.refs.list);
+    if (id) replaceRow(id);
   }
 
   function editForm(seg) {
@@ -1162,8 +1694,11 @@
     try {
       const data = await api(`/api/calls/${enc(state.callId)}/segments/${enc(id)}`, { method: "PUT", json: { text } });
       state.call.report = data.report;
+      if (state.call.review) state.call.review.transcript_edits.push({ segment_id: id, new: text });
       state.editing = null;
       state.notice = { kind: "info", text: describeEdit(data) };
+      replaceRow(id);
+      state.txKey = transcriptKey(); // only this row changed
       renderCallParts();
     } catch (e) {
       btn.disabled = false;
@@ -1183,17 +1718,17 @@
     };
     tabs.replaceChildren(
       ...TABS.map(([id, label], i) => {
-        const on = state.tab === id;
+        const selected = state.tab === id;
         return el(
           "button",
           {
             type: "button",
             role: "tab",
             id: `tab-${id}`,
-            class: on ? "tab is-selected" : "tab",
-            "aria-selected": on ? "true" : "false",
+            class: selected ? "tab is-selected" : "tab",
+            "aria-selected": selected ? "true" : "false",
             "aria-controls": "panel",
-            tabindex: on ? "0" : "-1",
+            tabindex: selected ? "0" : "-1",
             on: {
               click: () => setTab(id),
               keydown: (e) => tabKey(e, i),
@@ -1208,6 +1743,7 @@
   }
 
   function setTab(id) {
+    if (state.tab === id || !state.refs) return;
     state.tab = id;
     renderSummary(state.refs.tiles);
     renderTabs(state.refs.tabs);
@@ -1242,10 +1778,66 @@
     }
   }
 
+  // ---------- scorecard ----------
+
+  function scorecardView(score, liveScore) {
+    if (!score || !score.criteria || !score.criteria.length) return null;
+    const overall = score.overall;
+    const rows = score.criteria.map((c) => {
+      const s = SCORE_STATUS[c.status] || { cls: "neutral", label: c.status };
+      const seg = c.segment ? segmentById(c.segment) : null;
+      return el(
+        "li",
+        { class: `score-row status-${c.status}` },
+        el("div", { class: "score-row-head" }, el("span", { class: "score-title", text: c.title }), pill(s.cls, s.label)),
+        c.detail ? el("p", { class: "score-detail", text: c.detail }) : null,
+        seg
+          ? el(
+              "button",
+              {
+                type: "button",
+                class: "ref-btn small",
+                title: `Play from ${mmss(seg.start)}`,
+                on: { click: () => focusEvidence([seg.id]) },
+              },
+              icon("play", 11),
+              mmss(seg.start)
+            )
+          : null
+      );
+    });
+    return el(
+      "section",
+      { class: "scorecard", "aria-labelledby": "scorecard-title" },
+      el(
+        "div",
+        { class: "scorecard-head" },
+        el(
+          "div",
+          {},
+          el("h3", { id: "scorecard-title", class: "group-title", text: "Scorecard" }),
+          el("p", { class: "card-sub", text: "Graded by code from the reviewed findings, against the pack's scorecard." })
+        ),
+        el(
+          "div",
+          { class: "score-big", "aria-label": overall === null ? "No score" : `Score ${overall} out of 100` },
+          el("span", { text: overall === null ? "–" : String(overall) }),
+          el("small", { text: "/100" })
+        )
+      ),
+      liveScore && liveScore.overall !== null && liveScore.overall !== undefined
+        ? el("p", { class: "card-sub", text: `Live score at hang-up: ${liveScore.overall}/100` })
+        : null,
+      el("ul", { class: "score-list" }, ...rows)
+    );
+  }
+
   // ---------- coaching ----------
 
   function coachingView(report) {
     const wrap = el("div", { class: "stack" });
+    const card = scorecardView(report.score, state.call.live_score);
+    if (card) wrap.append(card);
     if (!report.findings.length) wrap.append(muted("Sel found no questions, objections or coaching points in this call."));
     for (const kind of ["coaching", "objection", "question"]) {
       const items = sortDismissedLast(
@@ -1278,7 +1870,7 @@
       : saidBy(segIds, f.kind === "question" ? "Asked by" : "Raised by");
     return el(
       "article",
-      { class: `card finding${dismissed ? " is-dismissed" : ""}`, dataset: { item: f.id } },
+      { class: `card finding${dismissed ? " is-dismissed" : ""}`, dataset: { item: f.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label),
       cardHead(tag.cls, tag.icon, f.summary, sub),
       f.evidence.quote ? el("p", { class: "quote", text: quoted(f.evidence.quote) }) : null,
@@ -1299,15 +1891,20 @@
     );
   }
 
+  // Optimistic: the card changes at once and changes back if the server refuses.
   async function setDismissed(itemId, dismiss) {
     const callId = state.callId;
+    const review = state.call.review;
+    const before = review.dismissed.slice();
+    review.dismissed = dismiss ? [...new Set([...before, itemId])].sort() : before.filter((x) => x !== itemId);
+    renderPanel();
     try {
-      const review = await api(`/api/calls/${enc(callId)}/items/${enc(itemId)}/${dismiss ? "dismiss" : "restore"}`, { method: "POST" });
-      if (state.callId === callId) {
-        state.call.review = review;
-        renderPanel();
-      }
+      const saved = await api(`/api/calls/${enc(callId)}/items/${enc(itemId)}/${dismiss ? "dismiss" : "restore"}`, { method: "POST" });
+      if (state.callId === callId && state.call) state.call.review = saved;
     } catch (e) {
+      if (state.callId !== callId) return;
+      review.dismissed = before;
+      renderPanel();
       state.notice = { kind: "error", text: `Could not ${dismiss ? "dismiss" : "restore"} ${itemId}: ${e.message}` };
       renderNotice(state.refs.notice);
     }
@@ -1333,7 +1930,7 @@
     const segIds = c.evidence.segment_ids || [];
     return el(
       "article",
-      { class: "card claim", dataset: { item: c.id } },
+      { class: "card claim", dataset: { item: c.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(v.cls, v.label),
       cardHead(v.cls, v.icon, c.claim, saidBy(segIds)),
       c.evidence.quote ? el("p", { class: "quote", text: quoted(c.evidence.quote) }) : null,
@@ -1469,13 +2066,14 @@
     const iconName = isRep ? CHANNEL_ICON[c.channel] || "user" : "user";
     const action = c.action ? c.action.charAt(0).toUpperCase() + c.action.slice(1) : c.action;
     const said = c.due_text ? `said ${quoted(c.due_text)}` : "no due phrase was said";
+    const segIds = c.evidence.segment_ids || [];
     return el(
       "article",
-      { class: "card commitment", dataset: { item: c.id } },
+      { class: "card commitment", dataset: { item: c.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(tag.cls, tag.label),
       cardHead(tone, iconName, action, `${who} · ${c.channel} · ${said}`),
       dueLine(c.due),
-      el("div", { class: "card-actions" }, evidenceButton(c.evidence.segment_ids || [], c.id)),
+      el("div", { class: "card-actions" }, evidenceButton(segIds, c.id)),
       tail
     );
   }
@@ -1608,6 +2206,8 @@
       state.draftMsg[draftId] = { kind: "error", text: e.message };
     }
     renderPanel();
+    renderSummary(state.refs.tiles);
+    renderSteps();
   }
 
   async function approveDraft(draftId) {
@@ -1621,6 +2221,8 @@
       state.draftMsg[draftId] = { kind: "error", text: e.message };
     }
     renderPanel();
+    renderSummary(state.refs.tiles);
+    renderSteps();
   }
 
   function copyViaSelection(text) {
@@ -1692,11 +2294,72 @@
     return wrap;
   }
 
+  // ---------- keyboard ----------
+
+  function moveCard(dir) {
+    const cards = [...state.refs.panel.querySelectorAll("[data-item]")];
+    if (!cards.length) return;
+    const at = cards.findIndex((c) => c.dataset.item === state.focusItem);
+    const next = cards[at < 0 ? (dir > 0 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, at + dir))];
+    state.focusItem = next.dataset.item;
+    markFocused();
+    next.focus({ preventScroll: true });
+    scrollRow(next, "nearest");
+    const segs = (next.dataset.segs || "").split(" ").filter(Boolean);
+    if (segs.length) focusEvidence(segs, false);
+  }
+
+  function onKey(e) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && t.closest && t.closest("input, textarea, select, [contenteditable]")) return;
+    if (state.view !== "call" || !state.refs) return;
+    const onControl = t && t.closest && t.closest("button, a, audio, summary");
+    switch (e.key) {
+      case " ":
+        if (onControl || !state.audio) return;
+        e.preventDefault();
+        if (state.audio.paused) state.audio.play().catch(() => {});
+        else state.audio.pause();
+        break;
+      case "1":
+      case "2":
+      case "3":
+      case "4":
+        e.preventDefault();
+        setTab(TABS[Number(e.key) - 1][0]);
+        break;
+      case "j":
+      case "k":
+        e.preventDefault();
+        moveCard(e.key === "j" ? 1 : -1);
+        break;
+      case "Enter": {
+        const card = t && t.closest && t.closest("[data-item]");
+        if (!card || onControl) return;
+        e.preventDefault();
+        const segs = (card.dataset.segs || "").split(" ").filter(Boolean);
+        if (segs.length) focusEvidence(segs, true);
+        break;
+      }
+      case "Escape":
+        clearHighlight();
+        toggleKeys(false);
+        break;
+      case "?":
+        toggleKeys();
+        break;
+      default:
+    }
+  }
+
   // ---------- new call form ----------
 
-  function defaultStartValue() {
-    // Wall clock in the default offset (+05:45), formatted for datetime-local.
-    return new Date(Date.now() + 5.75 * 3600 * 1000).toISOString().slice(0, 16);
+  function defaultStartValue(offset) {
+    // Wall clock in the chosen offset, formatted for datetime-local.
+    const m = /^([+-])(\d{2}):(\d{2})$/.exec(offset || "+05:45");
+    const mins = m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 345;
+    return new Date(Date.now() + mins * 60 * 1000).toISOString().slice(0, 16);
   }
 
   function formField(forId, labelText, control, hint) {
@@ -1704,9 +2367,11 @@
   }
 
   function renderUpload(main) {
+    const saved = store("sel.upload") || {};
     const packSel = el("select", { id: "f-pack", name: "pack" });
     if (!state.packList.length) packSel.append(el("option", { value: "", text: state.packError ? "Packs could not be loaded" : "No business packs found" }));
     for (const p of state.packList) packSel.append(el("option", { value: p.id, text: p.name }));
+    if (saved.pack && state.packs.has(saved.pack)) packSel.value = saved.pack;
 
     const channels = el(
       "select",
@@ -1715,34 +2380,73 @@
       el("option", { value: "split", text: "Stereo — one side per channel" }),
       el("option", { value: "mono", text: "Mono" })
     );
+    if (saved.channels) channels.value = saved.channels;
     const repChannelSel = el(
       "select",
       { id: "f-rep-channel", name: "rep_channel" },
       el("option", { value: "0", text: "Left" }),
       el("option", { value: "1", text: "Right" })
     );
+    if (saved.rep_channel) repChannelSel.value = saved.rep_channel;
     const repChannelField = formField("f-rep-channel", "Rep is on", repChannelSel);
-    repChannelField.hidden = true;
+    repChannelField.hidden = channels.value !== "split";
     channels.addEventListener("change", () => {
       repChannelField.hidden = channels.value !== "split";
     });
 
+    const offset = saved.offset || "+05:45";
+    const fileInput = el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*", class: "sr-file" });
+    const fileName = el("span", { class: "drop-name", text: "No file chosen" });
+    const drop = el(
+      "label",
+      { class: "dropzone", for: "f-audio" },
+      icon("mic", 22),
+      el("span", { class: "drop-main", text: "Drop a recording here, or choose a file" }),
+      fileName
+    );
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files[0];
+      fileName.textContent = f ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)} MB` : "No file chosen";
+      drop.classList.toggle("has-file", !!f);
+    });
+
     const submit = el("button", { type: "submit", class: "primary", id: "upload-submit", text: "Upload and analyse", disabled: !state.packList.length });
+    const bar = el("progress", { class: "upload-progress", max: "1", value: "0", hidden: true, "aria-label": "Upload progress" });
     const form = el(
       "form",
       { class: "upload", id: "upload-form", novalidate: true },
-      formField("f-audio", "Recording", el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*" }), "Up to 500 MB. The file stays on this computer."),
+      el("div", { class: "field" }, el("span", { class: "label-like", text: "Recording" }), fileInput, drop, el("p", { class: "hint small", text: "Up to 500 MB. The file stays on this computer." })),
       formField("f-pack", "Business pack", packSel),
-      formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue() })),
-      formField("f-offset", "UTC offset", el("input", { type: "text", id: "f-offset", name: "offset", value: "+05:45", autocomplete: "off" }), "For example +05:45 or -03:00."),
-      formField("f-rep", "Rep name", el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off" })),
+      formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue(offset) })),
+      formField("f-offset", "UTC offset", el("input", { type: "text", id: "f-offset", name: "offset", value: offset, autocomplete: "off" }), "For example +05:45 or -03:00."),
+      formField("f-rep", "Rep name", el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" })),
       formField("f-cust", "Customer name", el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off" })),
       formField("f-cust-email", "Customer email", el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off" })),
       formField("f-channels", "Recording type", channels),
       repChannelField,
       el("p", { id: "upload-error", class: "form-error", role: "alert", hidden: true }),
+      bar,
       el("div", { class: "row" }, submit)
     );
+    for (const type of ["dragenter", "dragover"]) {
+      form.addEventListener(type, (e) => {
+        e.preventDefault();
+        drop.classList.add("is-over");
+      });
+    }
+    for (const type of ["dragleave", "drop"]) {
+      form.addEventListener(type, (e) => {
+        if (type === "dragleave" && form.contains(e.relatedTarget)) return;
+        drop.classList.remove("is-over");
+      });
+    }
+    form.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer && e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        fileInput.dispatchEvent(new Event("change"));
+      }
+    });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       submitUpload(form);
@@ -1762,6 +2466,7 @@
   async function submitUpload(form) {
     const errBox = form.querySelector("#upload-error");
     const submit = form.querySelector("#upload-submit");
+    const bar = form.querySelector(".upload-progress");
     const val = (sel) => form.querySelector(sel).value.trim();
     const fail = (message) => {
       errBox.textContent = message;
@@ -1779,6 +2484,7 @@
     if (!when) return fail("Enter when the call started.");
     if (!offset) return fail("The UTC offset should look like +05:45.");
 
+    store("sel.upload", { pack, offset, rep: val("#f-rep"), channels: val("#f-channels"), rep_channel: val("#f-rep-channel") });
     const startedAt = `${when.length === 16 ? `${when}:00` : when}${offset}`;
     const params = new URLSearchParams({
       pack,
@@ -1793,20 +2499,52 @@
 
     submit.disabled = true;
     submit.textContent = "Uploading…";
+    bar.hidden = false;
     try {
-      const created = await api(`/api/calls?${params.toString()}`, {
-        method: "POST",
-        body: file,
-        contentType: file.type || "application/octet-stream",
+      const created = await upload(`/api/calls?${params.toString()}`, file, file.type || "application/octet-stream", (f) => {
+        bar.value = f;
+        submit.textContent = `Uploading… ${Math.round(f * 100)}%`;
       });
-      await refreshList().catch(() => {});
       navigate(`#call/${enc(created.id)}`);
       kickPoll();
     } catch (e) {
       fail(e.message);
       submit.disabled = false;
       submit.textContent = "Upload and analyse";
+      bar.hidden = true;
     }
+  }
+
+  // ---------- call simulator (sim.js, loaded on first use) ----------
+
+  function loadSim() {
+    if (window.Sel.sim) return Promise.resolve();
+    if (!state.simLoad) {
+      state.simLoad = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = (SCRIPT && SCRIPT.dataset.sim) || "/static/sim.js";
+        s.onload = () => resolve();
+        s.onerror = () => {
+          state.simLoad = null;
+          reject(new Error("Could not load the call simulator."));
+        };
+        document.head.append(s);
+      });
+    }
+    return state.simLoad;
+  }
+
+  function renderSim(main) {
+    if (window.Sel.sim) {
+      window.Sel.sim.render(main, state.simCode);
+      return;
+    }
+    main.replaceChildren(skeleton());
+    loadSim()
+      .then(() => {
+        if (state.view === "sim") window.Sel.sim.render(main, state.simCode);
+      })
+      .catch((e) => main.replaceChildren(el("div", { class: "error-box", role: "alert" }, el("p", { text: e.message }))));
   }
 
   // ---------- boot ----------
@@ -1816,19 +2554,84 @@
       state.packList = await api("/api/packs");
       state.packs = new Map(state.packList.map((p) => [p.id, p]));
       state.packError = null;
+      emit("packs", state.packList);
     } catch (e) {
       state.packError = e.message;
     }
   }
 
+  window.Sel = {
+    el,
+    icon,
+    iconTile,
+    pill,
+    muted,
+    compact,
+    plural,
+    mmss,
+    quoted,
+    formatStarted,
+    stageText,
+    isActive,
+    localOffset,
+    store,
+    api,
+    request,
+    upload,
+    navigate,
+    on,
+    connectEvents,
+    packName,
+    packs: () => state.packList,
+    calls: () => state.calls,
+    simInfo: () => state.sim,
+    rooms: () => state.rooms,
+    view: () => state.view,
+    streamUp: () => state.stream.connected,
+    CALL_STATUS,
+    DRAFT_STATUS,
+    SCORE_STATUS,
+    ROLE_LABEL,
+    reduceMotion,
+    worklet: (SCRIPT && SCRIPT.dataset.worklet) || "/static/pcm-worklet.js",
+    sim: null,
+  };
+
   async function boot() {
     $("#new-call").addEventListener("click", () => navigate("#new"));
+    const simBtn = $("#open-sim");
+    if (simBtn) simBtn.addEventListener("click", () => navigate("#sim"));
     window.addEventListener("hashchange", () => route());
+    document.addEventListener("keydown", onKey);
+    const list = $("#call-list");
+    const prefetch = (e) => {
+      const a = e.target.closest && e.target.closest("a.call-link");
+      if (a && a.dataset.id !== state.callId) prefetchCall(a.dataset.id);
+    };
+    list.addEventListener("pointerover", prefetch);
+    list.addEventListener("focusin", prefetch);
+
+    // A simulator session in this tab joins the same event stream from the start.
+    let simSession = null;
+    try {
+      simSession = JSON.parse(sessionStorage.getItem("sel.sim") || "null");
+    } catch (_) {
+      simSession = null;
+    }
+    connectEvents(simSession && simSession.code ? { room: simSession.code, client: simSession.client } : null);
     loadHealth();
     setInterval(loadHealth, HEALTH_MS);
-    await loadPacks();
-    await route();
-    tick();
+
+    // Packs, the call list and the routed view load in parallel.
+    const packs = loadPacks();
+    const calls = refreshList().catch((e) => setListError(e.message));
+    const routed = route();
+    if (/^#sim/.test(location.hash)) loadSim().catch(() => {});
+    await packs;
+    renderList();
+    if (state.view === "new") renderMain();
+    else if (state.view === "call" && state.refs) renderCallParts();
+    await Promise.all([calls, routed]);
   }
 
   boot();

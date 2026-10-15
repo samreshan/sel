@@ -8,6 +8,8 @@ Sel is an open-source assistant that runs on your own device and helps you revie
 - a record of who promised what, and by when,
 - follow-up email and calendar drafts that nobody sends until a person approves them.
 
+It also has a **call simulator**: two open Sel sessions (two windows, or two computers on the same network) call each other, Sel records the call, transcribes and scores it live against the business's scorecard with next best actions, and when you hang up it files the call with its follow-up drafts set up and waiting for approval.
+
 It is meant to help a small team answer three questions after every call:
 
 1. **What happened?**
@@ -42,12 +44,15 @@ scripts/setup_local.sh          # Linux: .venv with faster-whisper, Ollama in .t
 
 Then choose **New call**, pick a recording and a business pack, and wait for the analysis. Details, configuration (including other local servers and the Claude API) and the command-line tools are in [docs/running.md](docs/running.md).
 
+To try the **call simulator**, open http://127.0.0.1:8765/#sim in two windows: start a call in one, join it from the other, turn on the microphones (or type lines) and talk. Without faster-whisper installed people type their lines; without a language model the filed call is analysed by Sel's rules. Across two computers, serve over https (`--host 0.0.0.0 --tls-cert … --tls-key …`) so browsers allow the microphone. See [docs/running.md](docs/running.md#call-simulator).
+
 Without any models, you can still explore the screens and the logic using the hand-written example calls:
 
 ```bash
 python -m sel serve                                   # loads example-solar-01 and example-pos-01
 python -m sel demo examples/calls/solar-01 --pack packs/demo-solar
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar
+python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # Sel's code-only analyzer
 python -m unittest discover -s tests -t .
 ```
 
@@ -93,10 +98,11 @@ sel/asr.py      speech recognition (faster-whisper)
 sel/llm.py      LLM clients: OpenAI-compatible (local servers) and Claude
 sel/analyzer_llm.py  model-backed analysis
 sel/server.py, sel/service.py, sel/web/   local review app and call storage
+sel/simulator.py, sel/live.py, sel/scoring.py, sel/events.py   call simulator, live scoring and rules, scorecard, event stream
 packs/          example business packs (fictional)
 examples/calls/ example calls: transcripts, synthetic recordings, fixture analysis, gold annotations
-scripts/        local setup; synthetic test-call generator
-tests/          unit and end-to-end tests (stdlib unittest)
+scripts/        local setup; synthetic test-call generator; UI performance and live-call measurements
+tests/          unit and end-to-end tests (stdlib unittest; browser tests run when Playwright is installed)
 docs/           running, scope, architecture, pack format, evaluation plan, open decisions
 ```
 
@@ -108,6 +114,7 @@ docs/           running, scope, architecture, pack format, evaluation plan, open
 - [docs/business-pack.md](docs/business-pack.md): how to describe a new business
 - [docs/evaluation.md](docs/evaluation.md): what we will measure, and how to build a shareable benchmark
 - [docs/decisions.md](docs/decisions.md): decisions made so far and questions still open
+- [CLAUDE.md](CLAUDE.md): working notes for contributors: invariants, code map, measurements and every finding so far
 
 ## Data and consent
 

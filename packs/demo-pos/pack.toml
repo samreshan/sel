@@ -17,15 +17,18 @@ id = "qualify"
 title = "Qualify the outlet"
 description = "Find out the number of outlets, billing counters and whether they need kitchen order tickets before recommending a plan."
 weight = 2
+signal = "discovery"
 
 [[scorecard]]
 id = "accurate-claims"
 title = "Only approved product claims"
 description = "Integrations, offline behaviour and pricing must match the product sheet."
 weight = 3
+signal = "claims"
 
 [[scorecard]]
 id = "book-demo"
 title = "Book a demo with a time"
 description = "End the call with a demo or callback booked for a specific day and time."
 weight = 2
+signal = "next_step"

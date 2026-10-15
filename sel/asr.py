@@ -29,6 +29,25 @@ DEFAULT_MODEL = "small"
 DEFAULT_MODEL_DIR = "models/whisper"
 
 
+def live_speech_available() -> tuple[bool, str | None]:
+    """Whether the call simulator can transcribe speech on this machine, without importing anything heavy."""
+    import importlib.util
+
+    if importlib.util.find_spec("faster_whisper") is None:
+        return False, "pip install faster-whisper to transcribe speech live; typed lines still work"
+    return True, None
+
+
+# Live transcription runs while people talk, so it favours speed: on 4 CPU cores "base" put a line on
+# screen a median 2.2 s after the speaker stopped, "small" 6.1 s, with the same accuracy on an English
+# test call (CLAUDE.md). The recording can be re-transcribed afterwards with SEL_WHISPER_MODEL.
+DEFAULT_LIVE_MODEL = "base"
+
+
+def live_model_name() -> str:
+    return os.environ.get("SEL_LIVE_WHISPER_MODEL") or DEFAULT_LIVE_MODEL
+
+
 def audio_channels(path: str) -> int:
     try:
         out = subprocess.run(
@@ -85,6 +104,30 @@ class WhisperTranscriber:
                                           vad_filter=True, condition_on_previous_text=False)
         out = [(s.start, s.end, s.text.strip(), math.exp(s.avg_logprob)) for s in segments if s.text.strip()]
         return out, getattr(info, "language", None)
+
+    def transcribe_pcm(self, pcm: bytes, sample_rate: int = 16000) -> list[tuple[float, float, str, float]]:
+        """Short live window (16-bit mono PCM) → [(start, end, text, confidence)], times relative to the window.
+
+        Used by the call simulator. Greedy decoding keeps a window well under its
+        own length on CPU; segments Whisper itself marks as probably not speech
+        are dropped, since short near-silent windows are where it invents
+        "Thank you." and the like.
+        """
+        import numpy as np
+
+        if sample_rate != 16000:
+            raise ValueError("live audio must be 16 kHz")
+        audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        segments, _info = self._load().transcribe(
+            audio, language=self.language, beam_size=1, vad_filter=True, condition_on_previous_text=False,
+            without_timestamps=False)
+        out = []
+        for s in segments:
+            text = s.text.strip()
+            if not text or (s.no_speech_prob > 0.6 and s.avg_logprob < -0.7):
+                continue
+            out.append((s.start, s.end, text, math.exp(s.avg_logprob)))
+        return out
 
     def transcribe(self, audio_path: str, started_at: str, pack: Pack) -> Transcript:
         from faster_whisper import decode_audio

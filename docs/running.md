@@ -33,6 +33,35 @@ Open http://127.0.0.1:8765, choose **New call**, pick the recording, the busines
 
 The two example calls (`example-solar-01`, `example-pos-01`) load from hand-written fixture data so the screens can be explored without models. `--no-examples` skips them.
 
+The review screen updates by itself (the server pushes changes over one event stream per tab), and opening a call you have looked at, or hovered in the list, is instant. Keyboard: Space plays or pauses, 1–4 switch tabs, J/K move between cards and highlight their evidence, Enter plays the card, Esc clears the highlight.
+
+## Call simulator
+
+Open `#sim` (the **Call simulator** button) in two windows, or on two computers:
+
+1. In one, enter your name, pick the business pack and your side (rep or customer), and choose **Open a call**.
+2. In the other, the call appears under **Join a call**; join it (or open the invite link, or type the six-letter code). If you join as the customer, your email becomes the To: of the follow-up drafts.
+3. Both turn on the microphone (or type lines), and either one presses **Start the call**.
+4. Talk. The transcript fills in as each side speaks; the live score, the next best actions and what Sel noticed (questions, objections, claims, promises) update after every line.
+5. **Hang up.** The rep's browser uploads the stereo recording (rep left, customer right); Sel files the call and analyses it. The **After the call** panel lists what Sel did and what waits for you: drafts ready to approve, drafts that need a date, customer promises it tracks, and what to try next time. **Open the full review** goes to the normal review screen.
+
+What it needs:
+
+| For | Needs |
+|---|---|
+| Typing lines, live score, drafts | nothing beyond Sel |
+| Talking (audio between the browsers) | a microphone; two windows on one computer, or computers on one network |
+| Live transcription of speech | `pip install -e ".[speech]"`; runs Whisper `base` by default (`SEL_LIVE_WHISPER_MODEL`) |
+| The recording | a browser with MediaRecorder (Chrome, Edge, Firefox, Safari 14.1+) on the rep's side |
+| Analysis by a language model | the configured LLM; without one Sel's rules analyse the filed call and say so |
+| Another computer's microphone | https: `python -m sel serve --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem` |
+
+A self-signed certificate for testing: `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30 -subj /CN=sel.local` (each browser has to accept it once). `--host 0.0.0.0` makes Sel reachable from the network with no login; use it only on a network you trust. Audio goes directly between the browsers; without a STUN server (`SEL_ICE_SERVERS`) that works on one machine or one local network.
+
+On one computer, use headphones: both windows hear the speakers. Browser captions (Chrome) can stand in for Whisper but send audio to the browser vendor's service, so they are off unless ticked.
+
+Sel never sends anything: the drafts wait for approval as with any other call.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -46,6 +75,8 @@ The two example calls (`example-solar-01`, `example-pos-01`) load from hand-writ
 | `SEL_WHISPER_DIR` | `models/whisper` | where Whisper models are cached |
 | `SEL_WHISPER_LANGUAGE` | auto-detect | `en`, `ne`, …; set it, auto-detection misfired on short Nepali clips |
 | `SEL_CALLS_DIR` | `calls` | where calls are stored |
+| `SEL_LIVE_WHISPER_MODEL` | `base` | Whisper model for the simulator's live transcription; faster than `small` for the same accuracy on English (below) |
+| `SEL_ICE_SERVERS` | `[]` | JSON list of WebRTC ICE servers for simulator calls across networks, e.g. `[{"urls":"stun:stun.example.org"}]` |
 
 ## Command line
 
@@ -61,6 +92,15 @@ python -m sel analyze examples/calls/solar-01/transcript.json --pack packs/demo-
 
 # Score a saved report against the hand annotations (matches by time when the transcript came from audio)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --report report.json
+
+# Sel's code-only analyzer (used when no language model answers) on an example, scored against gold
+python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules
+
+# A whole simulated call: two browsers each speak one side of a stereo test call, with live Whisper
+python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base
+
+# Review-screen speed on a generated 2-hour call (needs Playwright)
+python scripts/perf_ui.py
 
 # Make a synthetic stereo test call from a transcript (text-to-speech; for testing only)
 .venv/bin/python scripts/synth_call.py examples/calls/pos-02/transcript.json --stereo \
@@ -103,3 +143,7 @@ What this says so far:
 - About 7 minutes per 90-second call on 4 CPU cores. A laptop with more cores, a GPU or Apple Silicon will be faster; a smaller model is faster but much worse.
 
 To reproduce: start the app, upload `examples/calls/pos-02/audio.ogg` (pack `demo-pos`, start 2026-10-08 15:00 +05:45, stereo, rep on the left), copy the call's `report.json` out of `calls/<id>/`, and run `python -m sel eval examples/calls/pos-02 --pack packs/demo-pos --report report.json`.
+
+### Call simulator, live
+
+`scripts/simulate_call.py`, two Chromium processes, Whisper int8 on the same 4 cores. Lines appear a median 2.2 s after the speaker stops with `base` (p90 4.6 s) and 6.1 s with `small` (p90 11.6 s), with the same accuracy on the English call. On pos-02 the filed call (rules analyzer, no language model) had every question, objection, promise and claim of the reference annotation, every due date right, no invented dates and no false "supported". On solar-01, romanized Nepali through an English voice, live `base` garbled the date phrases, so Sel asked for dates instead of guessing. Details and the UI performance numbers are in [CLAUDE.md](../CLAUDE.md).

@@ -14,22 +14,29 @@ from .pack import PackError, load_pack
 from .pipeline import run
 
 
-def _report_for_example(example: Path, pack_path: Path):
+def _report_for_example(example: Path, pack_path: Path, analyzer: str = "fixture"):
     meta = json.loads((example / "transcript.json").read_text(encoding="utf-8"))
     pack = load_pack(pack_path)
+    if analyzer == "rules":
+        from .live import RuleAnalyzer
+        chosen = RuleAnalyzer()
+    else:
+        chosen = FixtureAnalyzer(example / "analysis.json")
     return run(
         audio_path=meta.get("audio") or "",
         started_at=meta["started_at"],
         pack=pack,
         transcriber=FixtureTranscriber(example / "transcript.json"),
-        analyzer=FixtureAnalyzer(example / "analysis.json"),
+        analyzer=chosen,
     )
 
 
 def _print_summary(report) -> None:
     t = report.transcript
     print(f"Call {t.call_id} · pack {report.pack_id} · {len(t.segments)} segments")
-    note = " (fixture data, not model output)" if str(report.meta.get("analyzer", "")).startswith("fixture") else ""
+    analyzer = str(report.meta.get("analyzer", ""))
+    note = (" (fixture data, not model output)" if analyzer.startswith("fixture")
+            else " (cue words and the pack, no language model)" if analyzer.startswith("rules") else "")
     print(f"  transcriber: {report.meta.get('transcriber')} · analyzer: {report.meta.get('analyzer')}{note}")
     by_seg = {s.id: s for s in t.segments}
 
@@ -71,11 +78,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("example", type=Path, help="e.g. examples/calls/solar-01")
     p.add_argument("--pack", type=Path, required=True)
     p.add_argument("--json", action="store_true", help="print the full report as JSON")
+    p.add_argument("--analyzer", choices=["fixture", "rules"], default="fixture",
+                   help="fixture: the example's hand-written analysis; rules: Sel's code-only analyzer")
 
     p = sub.add_parser("eval", help="score an example's report against its gold annotations")
     p.add_argument("example", type=Path)
     p.add_argument("--pack", type=Path, required=True)
     p.add_argument("--report", type=Path, help="score this saved report.json instead of the fixture analysis")
+    p.add_argument("--analyzer", choices=["fixture", "rules"], default="fixture",
+                   help="fixture: the example's hand-written analysis; rules: Sel's code-only analyzer")
 
     p = sub.add_parser("analyze", help="run the real pipeline on a recording (local speech + language models)")
     p.add_argument("audio", type=Path)
@@ -96,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--calls-dir", default=os.environ.get("SEL_CALLS_DIR", "calls"))
     p.add_argument("--packs-dir", default="packs")
     p.add_argument("--no-examples", action="store_true", help="don't load the fixture example calls")
+    p.add_argument("--tls-cert", help="serve https with this certificate (needed for microphones on other computers)")
+    p.add_argument("--tls-key", help="private key for --tls-cert")
 
     args = parser.parse_args(argv)
 
@@ -129,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(score(report, gold, reference=reference), indent=2))
         return 0
 
-    report = _report_for_example(args.example, args.pack)
+    report = _report_for_example(args.example, args.pack, args.analyzer)
     if args.cmd == "demo":
         if args.json:
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
@@ -168,12 +181,23 @@ def _serve(args) -> int:
         for example, pack_id in (("solar-01", "demo-solar"), ("pos-01", "demo-pos")):
             if (root / example).is_dir():
                 service.create_from_example(root / example, pack_id)
-    httpd = serve(service, args.host, args.port, health=_health)
-    print(f"Sel is running at http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    if bool(args.tls_cert) != bool(args.tls_key):
+        print("give both --tls-cert and --tls-key", file=sys.stderr)
+        return 2
+    tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
+    httpd = serve(service, args.host, args.port, health=_health, tls=tls)
+    scheme = "https" if tls else "http"
+    print(f"Sel is running at {scheme}://{args.host}:{args.port}  (Ctrl+C to stop)")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("  Reachable from other computers, with no login: use only on a network you trust.")
+        if not tls:
+            print("  Browsers on other computers allow the microphone only over https (--tls-cert/--tls-key).")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        service.bus.close()
     return 0
 
 

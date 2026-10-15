@@ -53,7 +53,8 @@ _THIS_WEEK = ("this week", "yo hapta", "यो हप्ता")
 
 _NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "ek": 1, "dui": 2, "tin": 3, "char": 4, "paanch": 5}
 
-_CLOCK_EN = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)", re.I)
+# "11 am", "11am", "11 a.m." and "11 a.m" (a phrase's final dot may have been trimmed), not "11 amazing".
+_CLOCK_EN = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])", re.I)
 _CLOCK_24 = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
 _CLOCK_NE = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:baje|bajey|bajechi|बजे)")
 _IN_DAYS = re.compile(r"\b(?:in|within)\s+(\d+|" + "|".join(_NUM_WORDS) + r")\s+days?\b|\b(\d+|"
@@ -205,3 +206,64 @@ _TIMEISH = re.compile(r"^\d{1,2}(?::\d{2})?(?:am|pm)?$")
 def is_time_word(word: str) -> bool:
     w = word.strip(".,;:!?\"'()").lower()
     return bool(w) and (w in TIME_WORDS or bool(_TIMEISH.match(w)))
+
+
+# Words that on their own say something about *when* (unlike "by", "on", "ma", "next").
+_VAGUE_WORDS = frozenset({"sometime", "soon", "later", "asap", "pachhi", "paxi", "chhito", "chito"})
+_STRONG = frozenset(
+    {w for words, _ in _RELATIVE_DAYS for w in words}
+    | set(_WEEKDAY_WORDS) | set(_PART_OF_DAY) | _VAGUE_WORDS | {"week", "hapta", "weekend", "baje", "बजे"}
+)
+_EDGE_WEAK = frozenset({"by", "on", "at", "ma", "before", "after", "nai", "ko", "the"})
+
+
+def _norm(word: str) -> str:
+    return word.strip(".,;:!?\"'()").lower()
+
+
+def due_phrase_in(text: str) -> str | None:
+    """The first run of time words in ``text`` that names a time, as spoken; None if there is none.
+
+    Used where no language model points at the due words (the live simulator
+    and the rules analyzer). "Huncha, ma bholi beluka samma ... email garchu"
+    gives "bholi beluka samma"; "I'll call you on Monday at 11 am to check"
+    gives "Monday at 11 am"; "I am going to" gives nothing ("am" counts only
+    after a number).
+    """
+    words = text.split()
+
+    meridiem = ("am", "pm", "a.m", "p.m")  # _norm has trimmed any final dot
+
+    def timeish(i: int) -> bool:
+        w = _norm(words[i])
+        if w in meridiem:
+            return i > 0 and _norm(words[i - 1]).replace(":", "").isdigit()
+        return is_time_word(words[i]) or w in _VAGUE_WORDS
+
+    def strong(i: int) -> bool:
+        w = _norm(words[i])
+        if w in meridiem:
+            return timeish(i)
+        if re.fullmatch(r"\d{1,2}:\d{2}|\d{1,2}(?:am|pm)", w):
+            return True
+        if w in ("days", "din") and i > 0 and (_norm(words[i - 1]).isdigit() or _norm(words[i - 1]) in _NUM_WORDS):
+            return True
+        return w in _STRONG
+
+    i = 0
+    while i < len(words):
+        if not timeish(i):
+            i += 1
+            continue
+        j = i
+        while j < len(words) and timeish(j):
+            j += 1
+        if any(strong(k) for k in range(i, j)):
+            lo, hi = i, j
+            while lo < hi - 1 and _norm(words[lo]) in _EDGE_WEAK:
+                lo += 1
+            while hi - 1 > lo and _norm(words[hi - 1]) in _EDGE_WEAK:
+                hi -= 1
+            return " ".join(words[lo:hi]).strip(".,;:!?\"'()")
+        i = j
+    return None

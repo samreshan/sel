@@ -82,9 +82,13 @@
   }
 
   function section(title, sub, iconName, tone, ...body) {
+    return sectionOf("list-card page-section", title, sub, iconName, tone, ...body);
+  }
+
+  function sectionOf(cls, title, sub, iconName, tone, ...body) {
     return el(
       "section",
-      { class: "list-card page-section" },
+      { class: cls },
       el("div", { class: "section-head" }, el("div", { class: "section-head-main" }, iconTile(tone, iconName), el("div", {}, el("h2", { class: "section-title", text: title }), sub ? el("p", { class: "card-sub", text: sub }) : null))),
       el("div", { class: "page-section-body" }, ...compact(body))
     );
@@ -135,7 +139,16 @@
     if (!me) return main.replaceChildren(chooseViewer(people));
     const id = me.id;
     if (page.todayFor !== id || !page.today) {
-      main.replaceChildren(header(todayDate(), "Today", `${me.name} · ${ROLE[me.role]}`), S.skeleton());
+      const head = header(todayDate(), "Today", `${me.name} · ${ROLE[me.role]}`);
+      if (page.todayErr && !page.loading) {
+        // A first load that failed: say why and offer to try again, rather than loading forever.
+        const retry = el("button", { type: "button", text: "Try again", on: { click: () => { page.todayErr = null; renderToday(main); } } });
+        main.replaceChildren(el("div", { class: "page" }, head, el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: "Today could not be loaded." }), el("p", { class: "muted small", text: page.todayErr }), el("div", { class: "row" }, retry))));
+        return;
+      }
+      main.replaceChildren(
+        el("div", { class: "page" }, head, el("section", { class: "card is-loading", "aria-busy": "true" }, el("p", { class: "muted", text: `Gathering ${me.role === "manager" ? "the team's" : "your"} calls and follow-ups…` })))
+      );
       if (!page.loading) loadToday();
       return;
     }
@@ -150,8 +163,7 @@
       ),
       page.todayErr ? el("p", { class: "form-error", role: "alert", text: page.todayErr }) : null,
       counts(t),
-      followUps(t, manager),
-      skills(t, manager),
+      el("div", { class: "bento" }, skills(t, manager), followUps(t, manager)),
       manager ? team(t) : null,
       manager && t.unassigned.length ? unassigned(t) : null,
       working(t),
@@ -160,15 +172,16 @@
     main.replaceChildren(el("div", { class: "page" }, ...compact(nodes)));
   }
 
+  // A passive summary: numbers, not buttons.
   function counts(t) {
-    const tile = (q, a, tone) => el("div", { class: "tile" }, el("span", { class: "tile-q", text: q }), el("span", { class: `tile-a${tone ? ` tone-text-${tone}` : ""}`, text: String(a) }));
+    const stat = (label, n, warn) => el("div", { class: `stat${warn ? " is-warn" : ""}` }, el("dt", { text: label }), el("dd", { text: String(n) }));
     return el(
-      "div",
-      { class: "tiles" },
-      tile("Follow-ups needing input", t.counts.needs_input, t.counts.needs_input ? "warn" : null),
-      tile("Ready for approval", t.counts.ready_for_approval),
-      tile("Being analysed", t.in_progress.length),
-      tile(t.scope === "team" ? "Team calls" : "Your calls", t.counts.calls)
+      "dl",
+      { class: "stat-strip", "aria-label": "Summary" },
+      stat("Follow-ups needing input", t.counts.needs_input, t.counts.needs_input > 0),
+      stat("Ready for approval", t.counts.ready_for_approval),
+      stat("Being analysed", t.in_progress.length),
+      stat(t.scope === "team" ? "Team calls" : "Your calls", t.counts.calls)
     );
   }
 
@@ -194,7 +207,8 @@
 
   function skills(t, manager) {
     if (!t.skills.length) {
-      return section(
+      return sectionOf(
+        "list-card page-section bento-anchor is-empty",
         "Skills to work on",
         null,
         "target",
@@ -224,10 +238,11 @@
             return el("a", { class: "chip-link", href: `#call/${enc(c.id)}`, title: c.detail || "" }, `${callLabel(c)}${manager && c.rep_name ? ` (${c.rep_name})` : ""} · ${st.label}`);
           })
         ),
-        el("div", { class: "row" }, el("a", { class: "button small", href: "#sim", text: "Practise this" }))
+        el("div", { class: "row" }, el("button", { type: "button", class: "small ghost", text: "Practise this", on: { click: () => navigate("#sim") } }))
       );
     });
-    return section(
+    return sectionOf(
+      "list-card page-section bento-anchor",
       "Skills to work on",
       manager ? "Scorecard skills the team fell short on in recent calls, from the pack's scorecard." : "Scorecard skills your recent calls fell short on. Practise one, then watch it on your next calls.",
       "target",

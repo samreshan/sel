@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sel Design"
+  short_description: "Design Sel UI with its shared visual language"
+  default_prompt: "Use $sel-design to design or refine this Sel UI using the existing tokens, components, card states, and interactions."
+policy:
+  allow_implicit_invocation: true

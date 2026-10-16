@@ -57,7 +57,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 117 tests; the 3 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 126 tests; the 4 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
@@ -90,17 +90,45 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
 | `sel/simulator.py` | `SimulatorHub`: rooms, presence, WebRTC signal relay, lines, `PcmSegmenter`, live Whisper worker, filing the call |
 | `sel/events.py` | In-process pub/sub behind the Server-Sent Events stream |
-| `sel/service.py` | Calls on disk, the analysis job, review actions, caches, events |
+| `sel/service.py` | Calls on disk, the analysis job, review actions, caches, events, `rep_id` per call, `today()` |
+| `sel/people.py` | The team (`people.json`): reps and managers behind "Viewing as"; no login |
 | `sel/server.py` | HTTP API, static files, `/api/events`, simulator routes, TLS |
 | `sel/web/app.js` | Review app; exposes `window.Sel` helpers |
-| `sel/web/sim.js` | Simulator UI, lazy-loaded on first `#sim` |
+| `sel/web/sim.js` | Simulator UI ("Practice"), lazy-loaded on first `#sim` |
+| `sel/web/coach.js` | Today (`#today`, the home page), Playbook (`#playbook/<pack>`), People (`#people`); lazy-loaded |
 | `sel/web/pcm-worklet.js` | Audio worklet: microphone → 16 kHz PCM chunks |
 | `tests/` | stdlib unittest; `test_e2e_browser.py` drives Chromium |
 | `scripts/perf_ui.py`, `scripts/simulate_call.py` | Reproduce the measurements below |
 
-Call folder (`calls/<id>/`): `call.json`, `audio.<ext>`, `live_transcript.json`
+Next to the call folders: `calls/people.json` (the team). Call folder (`calls/<id>/`): `call.json`, `audio.<ext>`, `live_transcript.json`
 (simulated calls), `transcript.json`, `analysis.json`, `review.json`,
 `report.json` (now with a `score` key).
+
+## Today, people and the Playbook
+
+Navigation: **Today · Practice · Playbook**, then the call list. The browser
+picks who it is **viewing as** (`localStorage` `sel.viewer`); there is no
+login, so this is a convenience, not access control. UI follows DESIGN.md
+(see "Navigation, Today and the Playbook" there).
+
+- **People** (`people.json`, `sel/people.py`): name and role (`rep` or
+  `manager`). Calls carry `rep_id`: set from the upload form, from the
+  simulator (the rep's `person_id`), or later with "Whose call" on the call
+  page (`PUT /api/calls/<id>/rep`). Example calls start with no rep.
+- **Today** (`GET /api/today?person=`): for a rep, their follow-up drafts
+  that need input or approval, the scorecard skills they fell short on across
+  their last 10 reviewed calls (each linked to the calls), calls being
+  analysed, and recent calls. A manager gets the whole team, a per-rep table
+  and the calls with no rep. Everything is read from the calls' own files
+  (`report.json` cached by mtime); nothing is inferred. "Skills to work on" is
+  the seed of the coaching loop: the next stage replaces "Practise this"
+  with a drill built from the weak moment.
+- **Playbook** (`GET /api/packs/<id>`): the pack as reps use it: skills
+  (scorecard), approved facts, documents.
+- A tab's own changes are not echoed back on the event stream, so the page
+  re-reads after its own writes (`Sel.refreshPeople()`; Today re-checks each
+  time it is opened). A first load of Today that fails shows the reason and
+  "Try again" instead of loading forever.
 
 ## The call simulator
 

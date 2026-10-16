@@ -99,6 +99,7 @@ sel/llm.py      LLM client for /chat/completions servers: local (Ollama, llama.c
 sel/doctor.py   `sel doctor`: models, where they run, licences
 sel/analyzer_llm.py  model-backed analysis
 sel/server.py, sel/service.py, sel/web/   local review app and call storage
+sel/people.py, sel/web/coach.js   the team ("Viewing as"), Today, Playbook
 sel/simulator.py, sel/live.py, sel/scoring.py, sel/events.py   call simulator, live scoring and rules, scorecard, event stream
 packs/          example business packs (fictional)
 examples/calls/ example calls: transcripts, synthetic recordings, fixture analysis, gold annotations

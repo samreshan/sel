@@ -48,33 +48,6 @@
     not_scored: { cls: "neutral", label: "In coaching" },
   };
 
-  // Stroke icons, 24×24. Constant path data only; nothing from the server.
-  const ICONS = {
-    play: ["M7 4.5v15l13-7.5z"],
-    phone: ["M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"],
-    target: ["M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z", "M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z"],
-    alert: ["M12 4l9 16H3z", "M12 10v4M12 17v.01"],
-    question: ["M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"],
-    check: ["M5 12.5l4.5 4.5L19 7.5"],
-    x: ["M7 7l10 10M17 7L7 17"],
-    mail: ["M5.5 5.5h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z", "M4 7l8 6 8-6"],
-    calendar: ["M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M4 10h16M9 3v4M15 3v4"],
-    pin: ["M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z", "M12 7a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z"],
-    user: ["M12 4.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z", "M5 20a7 7 0 0 1 14 0"],
-    ban: ["M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z", "M6.5 6.5l11 11"],
-    lines: ["M5 6h14M5 10h14M5 14h9M5 18h6"],
-    doc: ["M6 3h8l4 4v14H6z", "M14 3v4h4"],
-    lock: ["M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"],
-    mic: ["M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z", "M6 11a6 6 0 0 0 12 0M12 17v3"],
-    micoff: ["M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z", "M6 11a6 6 0 0 0 12 0M12 17v3", "M4 4l16 16"],
-    hangup: ["M3.5 14.5c4.7-4.7 12.3-4.7 17 0l-2.3 2.3-3.4-1.4v-2.6a10 10 0 0 0-5.6 0v2.6l-3.4 1.4z"],
-    gauge: ["M4 15a8 8 0 1 1 16 0", "M12 15l4-5"],
-    bolt: ["M13 3L5 13.5h6L10 21l8-10.5h-6z"],
-    link: ["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
-    send: ["M4 12l16-8-6 16-2.5-6.5z"],
-    keyboard: ["M4 7h16v10H4z", "M7 10h.01M10 10h.01M13 10h.01M16 10h.01M8 14h8"],
-  };
-  const FILLED_ICONS = new Set(["play"]);
   const DRAFT_STATUS = {
     needs_input: { cls: "warn", label: "Needs input" },
     ready_for_approval: { cls: "info", label: "Ready for approval" },
@@ -194,26 +167,19 @@
   const pill = (cls, label) => el("span", { class: `pill pill-${cls}`, text: label });
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+  // Locally bundled Solar Icons (@solar-icons/static 2.3.2): Linear, Bold playback.
   function icon(name, size = 18) {
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg");
-    const filled = FILLED_ICONS.has(name);
     svg.setAttribute("width", String(size));
     svg.setAttribute("height", String(size));
     svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "solar-icon");
     svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("fill", filled ? "currentColor" : "none");
-    if (!filled) {
-      svg.setAttribute("stroke", "currentColor");
-      svg.setAttribute("stroke-width", "1.8");
-      svg.setAttribute("stroke-linecap", "round");
-      svg.setAttribute("stroke-linejoin", "round");
-    }
-    for (const d of ICONS[name] || []) {
-      const path = document.createElementNS(NS, "path");
-      path.setAttribute("d", d);
-      svg.append(path);
-    }
+    svg.setAttribute("focusable", "false");
+    const use = document.createElementNS(NS, "use");
+    use.setAttribute("href", `/static/solar-icons.svg#${name}`);
+    svg.append(use);
     return svg;
   }
 

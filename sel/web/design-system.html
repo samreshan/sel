@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sel · Design system</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/design-system.css"><script src="/static/design-system.js" defer></script></head><body class="ds-page"><a class="skip-link" href="#content">Skip to content</a><aside class="ds-sidebar"><a class="brand" href="/" aria-label="Sel home"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round">
+<path d="M4 12h3l2-5 3 10 2-5h6"/></svg></span><span class="brand-name">Sel</span></a>
+<p class="ds-sidebar-title">Design system</p><nav aria-label="Design system sections"><a href="#overview" aria-current="location">Overview</a><a href="#foundations">Foundations</a><a href="#typography">Typography</a><a href="#buttons">Buttons</a><a href="#cards">Cards & states</a><a href="#forms">Forms & controls</a><a href="#feedback">Feedback</a><a href="#patterns">Product patterns</a><a href="#icons">Iconography</a><a href="#motion">Motion & access</a></nav>
+<div class="ds-sidebar-footer"><span class="pill pill-neutral">Version 1.0</span>
+<p>Calm. Precise.<br>Considerate.</p><a class="ds-text-link" href="/">Back to product</a></div></aside>
+<div class="ds-workspace">
+<header class="ds-topbar"><span>Sel <span class="muted">/ Design system</span></span><a href="#foundations" class="ds-text-link">Foundations & components</a></header><main id="content" class="ds-content">
+<section id="overview" class="ds-hero" aria-labelledby="page-title">
+<div class="ds-hero-copy">
+<p class="ds-kicker">SEL DESIGN LANGUAGE / 01</p>
+<h1 id="page-title">Clear by design.<br><span>Considered in every detail.</span></h1>
+<p class="ds-intro">A quieter space for better conversations. Soft surfaces, thoughtful feedback, and just enough motion to make every action feel natural.</p>
+<div class="row"><a class="button primary" href="#cards">Explore the components <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#add"/></svg></a><a class="ds-text-link" href="/#new">Open Sel</a></div>
+<p class="ds-footnote">Switzer typography · Solar icons · Made for Sel</p></div>
+<div class="ds-hero-preview">
+<div class="ds-preview-label"><span>THE LANGUAGE, IN PRACTICE</span><span class="pill pill-neutral">Example</span></div>
+<article class="card ds-feature-card">
+<div class="row"><span class="pill pill-ok"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Ready for review</span><span class="ds-preview-time">Just now</span></div>
+<div class="card-head"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#mail"/></svg>
+<div>
+<h2>Your next step,<br>already considered.</h2>
+<p class="card-sub">Follow-up · Example sales call</p></div></div>
+<p class="quote">“I’ll send the proposal tomorrow morning.”</p>
+<div class="ds-preview-detail"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg>
+<div><strong>A promise with a clear next step</strong>
+<p class="muted small">Review the draft before you send it.</p></div></div>
+<div class="card-actions">
+<button class="primary" id="hero-review">Review example <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg></button><span class="ds-private"><svg class="solar-icon" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lock"/></svg> Stays on your device</span></div></article>
+<div class="ds-preview-note"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Clear status. Quiet surfaces. One primary action.</div></div></section>
+
+<section id="foundations" class="ds-section" aria-labelledby="foundations-title">
+<div class="ds-section-head"><span class="ds-number">01</span>
+<div>
+<h2 id="foundations-title">A calm foundation.</h2>
+<p>A light grey canvas gives white surfaces room to breathe. Color earns its place by communicating meaning.</p></div></div>
+<div class="ds-swatches">
+<button class="ds-swatch" data-token="--bg"><span class="ds-swatch-color" style="--swatch:var(--bg)"></span><strong>Canvas</strong><code>--bg</code><span class="ds-color-value"></span></button>
+<button class="ds-swatch" data-token="--surface"><span class="ds-swatch-color" style="--swatch:var(--surface)"></span><strong>Surface</strong><code>--surface</code><span class="ds-color-value"></span></button>
+<button class="ds-swatch" data-token="--surface-3"><span class="ds-swatch-color" style="--swatch:var(--surface-3)"></span><strong>Inset</strong><code>--surface-3</code><span class="ds-color-value"></span></button>
+<button class="ds-swatch" data-token="--surface-2"><span class="ds-swatch-color" style="--swatch:var(--surface-2)"></span><strong>Selection</strong><code>--surface-2</code><span class="ds-color-value"></span></button>
+<button class="ds-swatch" data-token="--text"><span class="ds-swatch-color" style="--swatch:var(--text)"></span><strong>Ink</strong><code>--text</code><span class="ds-color-value"></span></button>
+<button class="ds-swatch" data-token="--muted"><span class="ds-swatch-color" style="--swatch:var(--muted)"></span><strong>Quiet text</strong><code>--muted</code><span class="ds-color-value"></span></button></div>
+<p class="ds-caption">Select a swatch to copy its CSS token.</p>
+<div class="ds-tones">
+<div class="ds-tone ds-tone-ok"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg><strong>Sage</strong><span>Supported · approved</span></div>
+<div class="ds-tone ds-tone-warn"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#alert"/></svg><strong>Honey</strong><span>Needs input · evidence</span></div>
+<div class="ds-tone ds-tone-bad"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg><strong>Rose</strong><span>Contradicted · error</span></div>
+<div class="ds-tone ds-tone-info"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg><strong>Blue</strong><span>Information · guidance</span></div></div>
+<div class="ds-split">
+<div class="ds-specimen ">
+<h3>Space with rhythm</h3>
+<p class="muted">A 4 px base. Keep related details close and give decisions room.</p>
+<div class="ds-spacing">
+<div class="ds-space"><span style="--space:var(--space-1)"></span><code>4</code></div>
+<div class="ds-space"><span style="--space:var(--space-2)"></span><code>8</code></div>
+<div class="ds-space"><span style="--space:var(--space-3)"></span><code>12</code></div>
+<div class="ds-space"><span style="--space:var(--space-4)"></span><code>16</code></div>
+<div class="ds-space"><span style="--space:var(--space-6)"></span><code>24</code></div>
+<div class="ds-space"><span style="--space:var(--space-8)"></span><code>32</code></div>
+<div class="ds-space"><span style="--space:var(--space-12)"></span><code>48</code></div>
+<div class="ds-space"><span style="--space:var(--space-16)"></span><code>64</code></div></div></div>
+<div class="ds-specimen ">
+<h3>Soft, with structure</h3>
+<p class="muted">Nested surfaces use a smaller radius than their container.</p>
+<div class="ds-radii">
+<div class="ds-radius" style="--sample-radius:var(--radius-xs)"><strong>8</strong><span>Inset</span></div>
+<div class="ds-radius" style="--sample-radius:var(--radius-sm)"><strong>12</strong><span>Control</span></div>
+<div class="ds-radius" style="--sample-radius:var(--radius)"><strong>20</strong><span>Card</span></div>
+<div class="ds-radius" style="--sample-radius:var(--radius-large)"><strong>28</strong><span>Feature</span></div></div></div></div></section>
+
+<section id="typography" class="ds-section" aria-labelledby="typography-title">
+<div class="ds-section-head"><span class="ds-number">02</span>
+<div>
+<h2 id="typography-title">Familiar voice. Clear hierarchy.</h2>
+<p>Our existing Switzer family, with measured spacing and a comfortable reading rhythm.</p></div></div>
+<div class="ds-type-sheet">
+<div class="ds-type-display"><span class="ds-kicker">SWITZER / LOCAL FONT FILES</span>
+<p>Aa</p>
+<div class="row"><span>Regular</span><strong>Medium</strong><b>Semibold</b></div></div>
+<div class="ds-type-scale">
+<div><span class="ds-type-example" style="--sample-size:var(--text-title)">Every conversation matters.</span><span class="ds-type-meta">Page · 24 / 32 · 600</span></div>
+<div><span class="ds-type-example" style="--sample-size:var(--text-panel)">A little more clarity.</span><span class="ds-type-meta">Panel · 20 / 28 · 600</span></div>
+<div><span class="ds-type-example" style="--sample-size:var(--text-section)">The next best step</span><span class="ds-type-meta">Section · 16 / 24 · 600</span></div>
+<div><span class="ds-type-example" style="--sample-size:var(--text-body)">Read the evidence. Make the call.</span><span class="ds-type-meta">Body · 14 / 21 · 400</span></div>
+<div><span class="ds-type-example" style="--sample-size:var(--text-small)">Saved on this device</span><span class="ds-type-meta">Supporting · 13 / 20 · 400</span></div>
+<div><span class="ds-type-example" style="--sample-size:var(--text-caption)">TRANSCRIPT · 02:34</span><span class="ds-type-meta">Caption · 12 / 18 · 500</span></div></div></div></section>
+
+<section id="buttons" class="ds-section" aria-labelledby="buttons-title">
+<div class="ds-section-head"><span class="ds-number">03</span>
+<div>
+<h2 id="buttons-title">A little depth. A clear invitation.</h2>
+<p>Charcoal over charcoal, with an inset highlight and a gentle press. Reserve the primary treatment for the next meaningful action.</p></div></div>
+<div class="ds-split">
+<div class="ds-specimen ">
+<h3>Action hierarchy</h3>
+<div class="ds-control-row">
+<button class="primary" data-notice="Primary action selected."><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#add"/></svg> New call</button><span>Primary / charcoal gradient</span></div>
+<div class="ds-control-row">
+<button data-notice="Secondary action selected.">Review details</button><span>Secondary / white surface</span></div>
+<div class="ds-control-row">
+<button class="ghost" data-notice="Quiet action selected.">Maybe later</button><span>Ghost / low emphasis</span></div>
+<div class="ds-control-row">
+<button class="danger" data-notice="Destructive style preview only. No call was ended."><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#hangup"/></svg> End call</button><span>Destructive / explicit intent</span></div></div>
+<div class="ds-specimen ">
+<h3>Every state is considered</h3>
+<div class="ds-button-states">
+<div>
+<button class="primary" data-notice="Try hovering, focusing with Tab, and pressing this button.">Continue</button><span>Default · hover · press</span></div>
+<div>
+<button class="primary" id="loading-demo"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Save example</button><span>Loading → success</span></div>
+<div>
+<button class="primary" disabled>Continue</button><span>Disabled</span></div>
+<div>
+<button class="small" data-notice="Compact control: 36 px high."><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#play"/></svg> 02:34</button><span>Compact · 36 px</span></div></div>
+<p class="ds-caption">Use Tab to see keyboard focus. Full-size controls are 40 px high.</p></div></div></section>
+
+<section id="cards" class="ds-section" aria-labelledby="cards-title">
+<div class="ds-section-head"><span class="ds-number">04</span>
+<div>
+<h2 id="cards-title">The surface tells the story.</h2>
+<p>White, softly rounded, and deliberately quiet. A state should explain what changed without competing with the content.</p></div></div>
+<div class="ds-bento-intro">
+<div>
+<p class="ds-kicker">COMPOSE WITH INTENTION</p>
+<h3>A little space. A better perspective.</h3></div>
+<p class="muted small">An asymmetric bento, built from the same card family.<br>Try opening the detail or selecting the recording.</p></div>
+<div class="ds-bento">
+<article class="card ds-bento-anchor">
+<div class="row"><span class="pill pill-info"><svg class="solar-icon" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/solar-icons.svg#target"/></svg> Coaching</span><span class="muted small">Example conversation</span></div>
+<div>
+<p class="ds-bento-title">Good conversations<br>start with listening.</p>
+<p class="ds-bento-copy">Make space for the answer.<br>Then ask the question that matters.</p></div>
+<div class="ds-listening-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><details class="ds-bento-detail"><summary>One small thing to try <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/solar-icons.svg#add"/></svg></summary>
+<div>
+<p>After your next open question, pause before responding. Listen for the customer’s priorities before introducing a solution.</p><span class="pill pill-neutral">Example guidance</span></div></details></article>
+<button class="card is-interactive ds-bento-recording" id="bento-recording" aria-pressed="false"><span class="ds-bento-icon"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/solar-icons.svg#phone"/></svg></span><span class="ds-bento-small-title">A conversation.<br>A clearer next step.</span><span class="muted small">Discovery call · illustrative recording</span><span class="ds-bento-action">Select example <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/solar-icons.svg#add"/></svg></span></button>
+<article class="card ds-bento-assurance">
+<div class="ds-bento-icon"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/solar-icons.svg#lock"/></svg></div>
+<h3>Your space.<br>Your decisions.</h3>
+<p>Reviewed by you.<br>Stored on your device.</p><a href="#feedback" class="ds-text-link">Designed for trust</a></article></div>
+<div class="ds-card-lab">
+<div class="ds-state-controls">
+<h3>Try a card state</h3>
+<div class="ds-state-options" role="group" aria-label="Card state">
+<button class="small ghost" data-card-state="default" aria-pressed="true">Default</button>
+<button class="small ghost" data-card-state="selected" aria-pressed="false">Selected</button>
+<button class="small ghost" data-card-state="evidence" aria-pressed="false">Evidence</button>
+<button class="small ghost" data-card-state="loading" aria-pressed="false">Loading</button>
+<button class="small ghost" data-card-state="empty" aria-pressed="false">Empty</button>
+<button class="small ghost" data-card-state="error" aria-pressed="false">Error</button>
+<button class="small ghost" data-card-state="success" aria-pressed="false">Success</button>
+<button class="small ghost" data-card-state="dismissed" aria-pressed="false">Dismissed</button></div>
+<p id="card-state-help" class="muted small" aria-live="polite">A resting surface. Content stays still; only actionable cards lift on hover.</p></div>
+<div class="ds-state-stage">
+<article class="card" id="state-card" tabindex="0" aria-labelledby="state-card-title"><span class="pill pill-neutral card-tag" id="state-pill">Coaching</span>
+<div class="card-head"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#target"/></svg>
+<div class="card-head-text">
+<h3 class="summary" id="state-card-title">Make room for the customer.</h3>
+<p class="card-sub">Example coaching point · Listening</p></div></div>
+<p id="state-description">Pause after an open question. A little space gives the customer time to tell you what matters.</p>
+<div class="card-actions">
+<button class="small" id="state-action"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#play"/></svg> Preview evidence</button><span class="muted small" id="state-meta">Example · 02:34</span></div></article></div></div>
+<div class="ds-split ds-card-examples">
+<div class="ds-specimen ">
+<h3>A card can be an action</h3>
+<button class="card is-interactive" id="select-card" aria-pressed="false"><span class="row"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#phone"/></svg><strong>Discovery call</strong></span><span class="muted">Example recording · 12 minutes</span><span class="ds-text-link">Select recording</span></button>
+<p class="ds-caption">Hover, press, or select. The whole surface is a single button.</p></div>
+<div class="ds-specimen ">
+<h3>A card can hold actions</h3>
+<article class="card">
+<div class="row"><span class="pill pill-warn">Needs input</span></div>
+<h3>Confirm a time before approving.</h3>
+<p class="muted">“Next week” is a window, not a confirmed appointment.</p>
+<div class="card-actions">
+<button class="small" id="jump-form">Add details <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg></button></div></article>
+<p class="ds-caption">Content cards stay still. Their controls carry the interaction.</p></div></div></section>
+
+<section id="forms" class="ds-section" aria-labelledby="forms-title">
+<div class="ds-section-head"><span class="ds-number">05</span>
+<div>
+<h2 id="forms-title">Easy to enter. Easy to correct.</h2>
+<p>Visible labels, useful hints, and feedback beside the field. Never make someone guess why an action is unavailable.</p></div></div>
+<div class="ds-split">
+<div class="ds-specimen ">
+<h3>A small, complete form</h3>
+<form id="example-form" novalidate>
+<div class="field">
+<label for="example-name">Contact name</label><input id="example-name" name="name" autocomplete="off" placeholder="e.g. Maya" required aria-describedby="name-hint name-error">
+<p id="name-hint" class="hint small">Used only in this preview.</p>
+<p id="name-error" class="form-error" hidden>Enter a name to preview the saved state.</p></div>
+<div class="field">
+<label for="example-note">Follow-up note <span class="muted">(optional)</span></label><textarea id="example-note" rows="3" placeholder="What did you agree to do next?"></textarea></div>
+<div class="row">
+<button class="primary" type="submit">Save example</button><span id="form-status" class="small muted" role="status"></span></div></form></div>
+<div class="ds-specimen ">
+<h3>Controls that feel familiar</h3>
+<div class="field">
+<label for="demo-select">Business pack</label><select id="demo-select"><option>Solar installation · example</option>Point of sale · example</option></select></div><fieldset class="ds-fieldset"><legend>Your side of the call</legend>
+<div class="segmented"><input id="role-rep" name="demo-role" type="radio" value="rep" checked>
+<label for="role-rep">Rep</label><input id="role-customer" name="demo-role" type="radio" value="customer">
+<label for="role-customer">Customer</label></div></fieldset>
+<label class="ds-switch-label" for="motion-toggle"><span><strong>Preview animations</strong><span class="muted small">Your system’s reduced-motion setting always wins.</span></span><input id="motion-toggle" class="ds-switch" type="checkbox" role="switch" checked></label>
+<label class="ds-check-label"><input type="checkbox" checked> Include evidence in the preview</label>
+<div class="field">
+<label for="disabled-field">Storage location</label><input id="disabled-field" value="On this device" disabled></div></div></div></section>
+
+<section id="feedback" class="ds-section" aria-labelledby="feedback-title">
+<div class="ds-section-head"><span class="ds-number">06</span>
+<div>
+<h2 id="feedback-title">Reassuring, never distracting.</h2>
+<p>Pair soft colors with explicit language. Loading, errors, and completion are part of the design—not afterthoughts.</p></div></div>
+<div class="ds-split">
+<div class="ds-specimen ">
+<h3>Status vocabulary</h3>
+<div class="ds-status-list">
+<div><span class="pill pill-ok"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Supported</span><span class="muted small">Backed by a business source</span></div>
+<div><span class="pill pill-bad"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg> Contradicted</span><span class="muted small">The source disagrees</span></div>
+<div><span class="pill pill-warn"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#question"/></svg> Ambiguous</span><span class="muted small">More information is needed</span></div>
+<div><span class="pill pill-info"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg> Ready for approval</span><span class="muted small">A person decides what happens next</span></div>
+<div><span class="pill pill-neutral"><svg class="solar-icon" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#ban"/></svg> Dismissed</span><span class="muted small">Recoverable, never erased</span></div></div></div>
+<div class="ds-specimen ">
+<h3>Feedback in context</h3>
+<div class="ds-inline-note"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lock"/></svg>
+<p><strong>You are in control.</strong><br>Sel never sends an email or creates an event for you.</p></div>
+<div class="row">
+<button id="toast-demo"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Preview toast</button>
+<button id="dialog-demo">Preview dialog</button></div><details class="ds-disclosure"><summary>When should a dialog be used?</summary>
+<p>Use a dialog for a focused decision that needs context. Keep simple edits and validation inline. Escape closes a dialog and focus returns to its trigger.</p></details></div></div></section>
+
+<section id="patterns" class="ds-section" aria-labelledby="patterns-title">
+<div class="ds-section-head"><span class="ds-number">07</span>
+<div>
+<h2 id="patterns-title">Built around real work.</h2>
+<p>Shared primitives come together in the places that matter: evidence, claims, and follow-up.</p></div></div>
+<div class="ds-pattern-panel">
+<div class="ds-pattern-header">
+<div>
+<h3>Call review</h3>
+<p class="muted small">Illustrative content · no call data is changed</p></div><span class="pill pill-neutral">Example</span></div>
+<div class="tabs" role="tablist" aria-label="Pattern previews">
+<button class="tab is-selected" id="pattern-evidence" role="tab" aria-selected="true" aria-controls="pattern-panel" data-pattern="evidence">Evidence</button>
+<button class="tab" id="pattern-claims" role="tab" aria-selected="false" aria-controls="pattern-panel" data-pattern="claims" tabindex="-1">Claims</button>
+<button class="tab" id="pattern-followup" role="tab" aria-selected="false" aria-controls="pattern-panel" data-pattern="followup" tabindex="-1">Follow-up</button></div>
+<div id="pattern-panel" role="tabpanel" aria-labelledby="pattern-evidence" tabindex="0"></div></div>
+<div class="ds-pattern-panel ds-today-example">
+<div class="ds-pattern-header">
+<div>
+<h3>Today</h3>
+<p class="muted small">Illustrative content · a passive summary strip, then a bento: coaching anchors, follow-ups support</p></div><span class="pill pill-neutral">Example</span></div>
+<dl class="stat-strip" aria-label="Example summary"><div class="stat is-warn"><dt>Follow-ups needing input</dt><dd>2</dd></div><div class="stat"><dt>Ready for approval</dt><dd>1</dd></div><div class="stat"><dt>Being analysed</dt><dd>0</dd></div></dl>
+<div class="bento">
+<section class="list-card page-section bento-anchor" aria-label="Skills to work on example"><div class="page-section-body"><ul class="skills"><li class="skill"><div class="skill-head"><span class="strong">Discovery before price</span><span class="pill pill-bad">Short on 3 of 5 calls</span></div><p class="muted small">Learn the customer's monthly bill before quoting a price.</p><div class="skill-calls"><a class="chip-link" href="#patterns">Example call · Missed</a></div></li></ul></div></section>
+<section class="list-card page-section" aria-label="Follow-ups example"><div class="page-section-body"><ul class="page-rows"><li class="page-row"><div class="page-row-main"><span class="strong">Site visit</span><span class="muted small">Needs date, time</span></div><span class="pill pill-warn">Needs input</span></li></ul></div></section></div>
+<p class="muted small">Sidebar: <span class="scope-toggle" role="group" aria-label="Example scope"><button type="button" class="scope-btn is-on" aria-pressed="true">Mine</button><button type="button" class="scope-btn" aria-pressed="false">All</button></span> filters the call list to the person viewing.</p></div></section>
+
+<section id="icons" class="ds-section" aria-labelledby="icons-title">
+<div class="ds-section-head"><span class="ds-number">08</span>
+<div>
+<h2 id="icons-title">One family. A familiar rhythm.</h2>
+<p>Solar Linear for navigation and meaning. Bold playback symbols for instant recognition. Our waveform remains the Sel signature.</p></div></div>
+<div class="ds-icons">
+<button data-icon="phone" aria-label="Copy phone icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#phone"/></svg><span>phone</span></button>
+<button data-icon="mic" aria-label="Copy mic icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#mic"/></svg><span>mic</span></button>
+<button data-icon="play" aria-label="Copy play icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#play"/></svg><span>play</span></button>
+<button data-icon="target" aria-label="Copy target icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#target"/></svg><span>target</span></button>
+<button data-icon="mail" aria-label="Copy mail icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#mail"/></svg><span>mail</span></button>
+<button data-icon="calendar" aria-label="Copy calendar icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg><span>calendar</span></button>
+<button data-icon="doc" aria-label="Copy doc icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg><span>doc</span></button>
+<button data-icon="lock" aria-label="Copy lock icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lock"/></svg><span>lock</span></button>
+<button data-icon="user" aria-label="Copy user icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#user"/></svg><span>user</span></button>
+<button data-icon="check" aria-label="Copy check icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg><span>check</span></button>
+<button data-icon="alert" aria-label="Copy alert icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#alert"/></svg><span>alert</span></button>
+<button data-icon="question" aria-label="Copy question icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#question"/></svg><span>question</span></button>
+<button data-icon="pin" aria-label="Copy pin icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#pin"/></svg><span>pin</span></button>
+<button data-icon="lines" aria-label="Copy lines icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lines"/></svg><span>lines</span></button>
+<button data-icon="gauge" aria-label="Copy gauge icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#gauge"/></svg><span>gauge</span></button>
+<button data-icon="link" aria-label="Copy link icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#link"/></svg><span>link</span></button>
+<button data-icon="keyboard" aria-label="Copy keyboard icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#keyboard"/></svg><span>keyboard</span></button>
+<button data-icon="add" aria-label="Copy add icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#add"/></svg><span>add</span></button>
+<button data-icon="send" aria-label="Copy send icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#send"/></svg><span>send</span></button>
+<button data-icon="ban" aria-label="Copy ban icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#ban"/></svg><span>ban</span></button>
+<button data-icon="micoff" aria-label="Copy micoff icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#micoff"/></svg><span>micoff</span></button>
+<button data-icon="hangup" aria-label="Copy hangup icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#hangup"/></svg><span>hangup</span></button>
+<button data-icon="x" aria-label="Copy x icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg><span>x</span></button>
+<button data-icon="bolt" aria-label="Copy bolt icon reference"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#bolt"/></svg><span>bolt</span></button></div>
+<p class="ds-caption">16 px in compact controls · 20 px in navigation · 24 px in larger surfaces. Icons inherit the text color. Every icon-only control needs an accessible name.</p>
+<p class="ds-caption">Solar artwork by <a href="https://www.figma.com/community/file/1166831539721848736">480 Design</a>, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Select any icon to copy its sprite reference.</p></section>
+
+<section id="motion" class="ds-section" aria-labelledby="motion-title">
+<div class="ds-section-head"><span class="ds-number">09</span>
+<div>
+<h2 id="motion-title">Felt, more than seen.</h2>
+<p>Fast feedback and a gentle settle. No bounce, no decorative loops, no movement that gets between someone and their work.</p></div></div>
+<div class="ds-split">
+<div class="ds-specimen ">
+<h3>An interaction, in three beats</h3>
+<div class="ds-motion-stage">
+<div class="ds-motion-object" id="motion-object"><svg class="solar-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg></div></div>
+<div class="row">
+<button id="motion-replay">Replay transition</button><span id="motion-status" class="muted small" role="status">280 ms · gentle settle</span></div>
+<div class="ds-timings">
+<div><strong>120 ms</strong><span>Press</span></div>
+<div><strong>180 ms</strong><span>Hover & focus</span></div>
+<div><strong>280 ms</strong><span>Reveal</span></div></div></div>
+<div class="ds-specimen ">
+<h3>Consideration is a feature.</h3><ul class="ds-principles"><li><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#keyboard"/></svg>
+<div><strong>Keyboard is a first-class input.</strong>
+<p>Visible focus, native controls, logical order, and arrow keys inside tab groups.</p></div></li><li><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg>
+<div><strong>Meaning goes beyond color.</strong>
+<p>Readable text, explicit status labels, and independent evidence and playback states.</p></div></li><li><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#user"/></svg>
+<div><strong>Comfort follows the person.</strong>
+<p>Reduced motion, responsive layouts, browser zoom, and readable text at every size.</p></div></li></ul></div></div></section>
+<footer class="ds-footer"><span>Sel design language</span><span>Made with care. Built for clarity.</span></footer></main></div><dialog id="preview-dialog" class="ds-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+<div class="row ds-dialog-head"><span class="pill pill-info">Design preview</span>
+<button class="ghost small" id="close-dialog" aria-label="Close preview"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg></button></div>
+<h2 id="dialog-title">A follow-up, ready for your review.</h2>
+<p id="dialog-description">This is an interactive design example. Approving it only changes this preview.</p>
+<div class="ds-inline-note"><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#mail"/></svg>
+<p>Thanks for the conversation. As promised, I’ll share the proposal tomorrow morning.</p></div>
+<div class="row">
+<button class="primary" id="approve-example"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg> Approve example</button>
+<button class="ghost" id="cancel-dialog">Keep reviewing</button></div></dialog>
+<div id="ds-toast" class="ds-toast" role="status" aria-live="polite" hidden><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#check"/></svg><span id="toast-text"></span>
+<button class="ghost small" id="close-toast" aria-label="Dismiss notification"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg></button></div></body></html>

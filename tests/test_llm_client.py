@@ -5,7 +5,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
-from sel.llm import GROQ_BASE_URL, LLMError, OpenAICompatClient, client_from_env
+from sel.llm import GROQ_BASE_URL, LLMError, ChatCompletionsClient, client_from_env
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
           "additionalProperties": False}
@@ -50,7 +50,7 @@ def ok(content, finish="stop"):
                  "usage": {"prompt_tokens": 10, "completion_tokens": 3}}, {}
 
 
-class OpenAICompatClientTests(unittest.TestCase):
+class ChatCompletionsClientTests(unittest.TestCase):
     def serve(self, *responses):
         server = FakeServer(responses)
         self.addCleanup(server.close)
@@ -58,7 +58,7 @@ class OpenAICompatClientTests(unittest.TestCase):
 
     def test_strict_json_schema_by_default(self):
         server = self.serve(ok('{"ok": true}'))
-        client = OpenAICompatClient(base_url=server.url, model="m", api_key="k")
+        client = ChatCompletionsClient(base_url=server.url, model="m", api_key="k")
         self.assertEqual(client.complete_json("sys", "user", SCHEMA, "check"), {"ok": True})
         body = server.requests[0]["body"]
         self.assertEqual(body["response_format"]["type"], "json_schema")
@@ -70,7 +70,7 @@ class OpenAICompatClientTests(unittest.TestCase):
     def test_falls_back_to_json_mode_when_schema_is_refused(self):
         refused = (400, {"error": {"message": "response_format `json_schema` is not supported by this model"}}, {})
         server = self.serve(refused, ok('{"ok": true}'), ok('{"ok": false}'))
-        client = OpenAICompatClient(base_url=server.url, model="m")
+        client = ChatCompletionsClient(base_url=server.url, model="m")
         self.assertEqual(client.complete_json("sys", "user", SCHEMA, "check"), {"ok": True})
         retry = server.requests[1]["body"]
         self.assertEqual(retry["response_format"], {"type": "json_object"})
@@ -82,7 +82,7 @@ class OpenAICompatClientTests(unittest.TestCase):
 
     def test_other_client_errors_are_not_retried(self):
         server = self.serve((401, {"error": {"message": "invalid api key"}}, {}))
-        client = OpenAICompatClient(base_url=server.url, model="m")
+        client = ChatCompletionsClient(base_url=server.url, model="m")
         with self.assertRaisesRegex(LLMError, "HTTP 401.*invalid api key"):
             client.complete_json("sys", "user", SCHEMA, "check")
         self.assertEqual(len(server.requests), 1)
@@ -91,7 +91,7 @@ class OpenAICompatClientTests(unittest.TestCase):
         limited = (429, {"error": {"message": "rate limit"}}, {"Retry-After": "7"})
         server = self.serve(limited, ok('{"ok": true}'))
         waits = []
-        client = OpenAICompatClient(base_url=server.url, model="m", sleep=waits.append)
+        client = ChatCompletionsClient(base_url=server.url, model="m", sleep=waits.append)
         self.assertEqual(client.complete_json("sys", "user", SCHEMA, "check"), {"ok": True})
         self.assertEqual(waits, [7.0])
         self.assertEqual(client.stats.retries, 1)
@@ -100,21 +100,21 @@ class OpenAICompatClientTests(unittest.TestCase):
         limited = (429, {"error": {"message": "rate limit"}}, {"Retry-After": "999"})
         server = self.serve(limited, limited)
         waits = []
-        client = OpenAICompatClient(base_url=server.url, model="m", rate_limit_retries=1, sleep=waits.append)
+        client = ChatCompletionsClient(base_url=server.url, model="m", rate_limit_retries=1, sleep=waits.append)
         with self.assertRaisesRegex(LLMError, "HTTP 429"):
             client.complete_json("sys", "user", SCHEMA, "check")
         self.assertEqual(waits, [30.0])  # capped
 
     def test_truncated_reply_is_reported_not_retried(self):
         server = self.serve(ok('{"ok": tr', finish="length"))
-        client = OpenAICompatClient(base_url=server.url, model="m")
+        client = ChatCompletionsClient(base_url=server.url, model="m")
         with self.assertRaisesRegex(LLMError, "max_tokens"):
             client.complete_json("sys", "user", SCHEMA, "check")
         self.assertEqual(len(server.requests), 1)
 
     def test_reasoning_effort_is_sent_when_set(self):
         server = self.serve(ok('{"ok": true}'))
-        OpenAICompatClient(base_url=server.url, model="m", reasoning_effort="low").complete_json(
+        ChatCompletionsClient(base_url=server.url, model="m", reasoning_effort="low").complete_json(
             "sys", "user", SCHEMA, "check")
         self.assertEqual(server.requests[0]["body"]["reasoning_effort"], "low")
 
@@ -154,6 +154,24 @@ class ProviderFromEnvTests(unittest.TestCase):
         self.env()
         client = client_from_env()
         self.assertEqual((client.base_url, client.model, client.api_key), ("http://127.0.0.1:11434/v1", "qwen2.5:7b", None))
+
+    def test_openai_is_an_alias_for_local(self):
+        self.env(SEL_LLM_PROVIDER="openai", SEL_LLM_BASE_URL="http://10.0.0.5:8000/v1")
+        self.assertEqual(client_from_env().base_url, "http://10.0.0.5:8000/v1")
+
+    def test_proprietary_services_are_refused(self):
+        for url in ("https://api.openai.com/v1", "https://x.openai.azure.com/openai", "https://api.anthropic.com/v1",
+                    "https://generativelanguage.googleapis.com/v1beta/openai"):
+            for provider in ("local", "groq"):
+                with self.subTest(url=url, provider=provider):
+                    self.env(SEL_LLM_PROVIDER=provider, SEL_LLM_BASE_URL=url, GROQ_API_KEY="k")
+                    with self.assertRaisesRegex(LLMError, "open-weight models only"):
+                        client_from_env()
+
+    def test_claude_provider_is_gone(self):
+        self.env(SEL_LLM_PROVIDER="anthropic")
+        with self.assertRaisesRegex(LLMError, "unknown SEL_LLM_PROVIDER"):
+            client_from_env()
 
     def test_unknown_provider(self):
         self.env(SEL_LLM_PROVIDER="nope")

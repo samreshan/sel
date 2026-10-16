@@ -11,8 +11,9 @@ directly over WebRTC; Sel's server only relays their connection setup
 * **Transcribed live.** Each browser streams its own microphone as 16 kHz PCM.
   ``PcmSegmenter`` cuts it into utterances at pauses and a single worker
   thread runs Whisper on them (``WhisperTranscriber.transcribe_pcm``). Without
-  faster-whisper, participants type their lines, or opt in to the browser's
-  own captions; all three feed the same transcript.
+  faster-whisper, participants type their lines; both feed the same
+  transcript. (Browser captions were removed: Chrome sends that audio to its
+  vendor's speech service, and Sel only uses open models.)
 * **Scored live.** Every new line re-runs the rules in ``sel.live`` and the
   scorecard grade, and both tabs get the score and the next best actions.
 * **Filed with next actions.** Hanging up uploads the recording; Sel files a
@@ -414,8 +415,8 @@ class SimulatorHub:
         text = _clean(text, MAX_LINE_CHARS)
         if not text:
             raise ValueError("text is required")
-        if source not in ("typed", "captions"):
-            raise ValueError("source must be 'typed' or 'captions'")
+        if source != "typed":
+            raise ValueError("source must be 'typed'")
         with room.lock:
             me = self._who(room, client)
             if room.state != "live":

@@ -32,8 +32,15 @@ whose follow-up drafts wait for approval.
 - **No invented dates, no false "supported".** Unclear due phrases become
   `ambiguous` with a reason and window. `RuleAnalyzer` never returns
   `supported` or `contradicted` (see [Rules analyzer](#rules-analyzer)).
+- **Open-weight models only, everywhere** (Frogtoberfest rule and the privacy
+  promise): a local `/chat/completions` server by default, Groq-hosted
+  open-weight models as an opt-in. No proprietary model service anywhere,
+  including small auxiliary calls (embeddings, classification, browser speech
+  services). `sel/llm.py` refuses known proprietary hosts; `python -m sel
+  doctor` must say OK. List every new model or AI dependency in MODELS.md
+  with its licence.
 - **Standard library only** for the engine and server (`dependencies = []` in
-  pyproject). faster-whisper, Piper, anthropic and Playwright are optional.
+  pyproject). faster-whisper, Piper and Playwright are optional.
 - **No external resources in the web app**: vanilla JS, no build step, works
   offline. Server text goes into the DOM with `textContent` (via `el()`); the
   only `innerHTML` is constant markup (the transcript row template).
@@ -46,8 +53,9 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 109 tests; the 3 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 117 tests; the 3 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
+python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
@@ -71,7 +79,8 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/dates.py` | Due-phrase resolution; `due_phrase_in` finds the spoken due words in a line |
 | `sel/drafts.py` | Email/calendar drafts, edits, approval, `.ics` |
 | `sel/retrieval.py` | BM25 over pack facts/docs; passages are verbatim substrings |
-| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained), clients for OpenAI-compatible servers (local, or Groq with `SEL_LLM_PROVIDER=groq`) and Claude |
+| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained); one `/chat/completions` client for local servers or Groq (`SEL_LLM_PROVIDER=groq`), proprietary hosts refused |
+| `sel/doctor.py` | `sel doctor`: model, endpoint, where it runs, licence; exit 1 on a proprietary service |
 | `sel/asr.py` | faster-whisper: whole recordings (`transcribe`) and live windows (`transcribe_pcm`) |
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
@@ -108,7 +117,7 @@ Call folder (`calls/<id>/`): `call.json`, `audio.<ext>`, `live_transcript.json`
 4. **Transcribe and score live.** Each browser streams its *own* microphone as
    16 kHz PCM (worklet, 0.5 s chunks, `POST .../audio?t=`). `PcmSegmenter` cuts
    utterances at pauses; one worker thread runs Whisper on them. Typed lines
-   and opt-in browser captions feed the same transcript. Every line re-runs
+   feed the same transcript. Every line re-runs
    `LiveScorer` and both tabs get the score, next best actions and a feed.
 5. **Hang up and file.** The rep's browser uploads the recording to
    `.../finish`; the hub flushes the segmenters, waits (up to 90 s) for queued
@@ -157,8 +166,9 @@ Workflow rail in the UI: Join → Talk → Score live → Save → Analyse → N
   audio chunk, 200 rooms per server, 40 utterances queued for Whisper per room
   (newer audio is dropped rather than building a backlog).
 - Rooms live in memory: a server restart forgets open calls (filed calls stay).
-- Browser captions (`webkitSpeechRecognition`) are **opt-in** and labelled,
-  because Chrome sends the audio to its vendor's service.
+- Browser captions (`webkitSpeechRecognition`) were **removed**: Chrome sends
+  the audio to its vendor's speech service, which breaks the open-models rule.
+  The server accepts only `source: typed` lines; speech goes through Whisper.
 - Testing without hardware: Chromium flags `--use-fake-ui-for-media-stream
   --use-fake-device-for-media-stream` give a beeping fake mic;
   `--use-file-for-fake-audio-capture=x.wav` plays a file as the mic (it loops

@@ -42,7 +42,7 @@ scripts/setup_local.sh          # Linux: .venv with faster-whisper, Ollama in .t
 .venv/bin/python -m sel serve   # http://127.0.0.1:8765
 ```
 
-Then choose **New call**, pick a recording and a business pack, and wait for the analysis. Details, configuration (including other local servers and the Claude API) and the command-line tools are in [docs/running.md](docs/running.md).
+Then choose **New call**, pick a recording and a business pack, and wait for the analysis. Details, configuration (including other local servers and Groq-hosted open-weight models) and the command-line tools are in [docs/running.md](docs/running.md). `python -m sel doctor` shows every model Sel will use, where it runs and its licence; see [MODELS.md](MODELS.md).
 
 To try the **call simulator**, open http://127.0.0.1:8765/#sim in two windows: start a call in one, join it from the other, turn on the microphones (or type lines) and talk. Without faster-whisper installed people type their lines; without a language model the filed call is analysed by Sel's rules. Across two computers, serve over https (`--host 0.0.0.0 --tls-cert … --tls-key …`) so browsers allow the microphone. See [docs/running.md](docs/running.md#call-simulator).
 
@@ -95,7 +95,8 @@ See [docs/business-pack.md](docs/business-pack.md).
 ```
 sel/            engine: data models, pack loader, retrieval, dates, evidence gate, drafts, pipeline, eval, CLI
 sel/asr.py      speech recognition (faster-whisper)
-sel/llm.py      LLM clients: OpenAI-compatible (local servers) and Claude
+sel/llm.py      LLM client for /chat/completions servers: local (Ollama, llama.cpp, LM Studio, vLLM) or Groq; proprietary services refused
+sel/doctor.py   `sel doctor`: models, where they run, licences
 sel/analyzer_llm.py  model-backed analysis
 sel/server.py, sel/service.py, sel/web/   local review app and call storage
 sel/simulator.py, sel/live.py, sel/scoring.py, sel/events.py   call simulator, live scoring and rules, scorecard, event stream
@@ -114,8 +115,13 @@ docs/           running, scope, architecture, pack format, evaluation plan, open
 - [docs/business-pack.md](docs/business-pack.md): how to describe a new business
 - [docs/evaluation.md](docs/evaluation.md): what we will measure, and how to build a shareable benchmark
 - [docs/decisions.md](docs/decisions.md): decisions made so far and questions still open
+- [MODELS.md](MODELS.md): every model and AI dependency, its licence, and how to verify what Sel runs
 - [CLAUDE.md](CLAUDE.md): working notes for contributors: invariants, code map, measurements and every finding so far
 
 ## Data and consent
 
 Real call recordings must not be committed to this repo; `.gitignore` excludes common audio formats and `recordings/`. A recording goes into a published benchmark only if every speaker agreed to share it. Re-enacted calls are the default for public examples. All businesses, people, prices and policies in `packs/` and `examples/` are fictional, and the example recordings are text-to-speech.
+
+## Licence
+
+Apache-2.0 ([LICENSE](LICENSE)). Models and optional dependencies have their own licences, listed in [MODELS.md](MODELS.md).

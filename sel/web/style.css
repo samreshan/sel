@@ -2226,11 +2226,6 @@ button.danger:hover:not(:disabled) {
   padding: 0 18px 12px;
 }
 
-.sim-interim {
-  padding: 0 18px 8px;
-  font-style: italic;
-  color: var(--muted);
-}
 
 .sim-composer {
   display: grid;
@@ -2249,19 +2244,6 @@ button.danger:hover:not(:disabled) {
   width: 48px;
 }
 
-.sim-captions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-weight: 500;
-  color: var(--muted);
-}
-
-.sim-captions input {
-  width: auto;
-  min-height: 0;
-}
 
 .sim-side {
   position: sticky;

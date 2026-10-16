@@ -1,22 +1,22 @@
 """Language-model clients that return JSON constrained by a schema.
 
-Three backends, chosen with ``SEL_LLM_PROVIDER``:
+Sel uses open-weight models only. Two providers, chosen with
+``SEL_LLM_PROVIDER``, share one standard-library client for the
+``/chat/completions`` protocol:
 
-* ``openai`` (default): any OpenAI-compatible ``/chat/completions`` endpoint.
-  This is how Sel talks to *local* models (Ollama, llama.cpp ``llama-server``,
-  LM Studio, vLLM) and also to hosted OpenAI-compatible APIs. Uses only the
-  standard library.
-* ``groq``: open-weight models hosted by Groq, through the same client
-  (``GROQ_API_KEY``). Transcripts and pack text go to Groq's servers.
-* ``anthropic``: the Claude API through the official ``anthropic`` SDK
-  (``pip install anthropic``), using structured outputs.
+* ``local`` (default): a server on this machine or your network: Ollama,
+  llama.cpp ``llama-server``, LM Studio, vLLM. A call never leaves the
+  machine. (``openai`` is accepted as an old name for this provider; it
+  means the protocol, not the company.)
+* ``groq``: open-weight models hosted by Groq (``GROQ_API_KEY``).
+  Transcripts and pack text go to Groq's servers.
+
+Proprietary model services (OpenAI, Anthropic, Google, Azure OpenAI, Cohere)
+are refused by host name: see ``PROPRIETARY_HOSTS``.
 
 Servers that refuse a strict ``json_schema`` response format (some
 OpenAI-compatible servers, and Groq for most models) get JSON mode with the
 schema in the prompt instead; the reply is parsed the same way.
-
-Sel's default is a local model, so a call never leaves the machine unless
-the user points ``SEL_LLM_BASE_URL`` or the provider at a hosted service.
 """
 
 from __future__ import annotations
@@ -26,16 +26,19 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"  # Ollama
 DEFAULT_LOCAL_MODEL = "qwen2.5:7b"
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"  # open weights (Apache-2.0); supports strict json_schema on Groq
 MAX_RATE_LIMIT_WAIT_S = 30.0
+# Closed, paid model services. Sel's rule is open-weight models everywhere, so these are refused even
+# when someone points SEL_LLM_BASE_URL at them.
+PROPRIETARY_HOSTS = ("openai.com", "openai.azure.com", "anthropic.com", "googleapis.com", "cohere.ai", "cohere.com")
 
 
 class LLMError(RuntimeError):
@@ -97,14 +100,14 @@ def _retry_after(error: urllib.error.HTTPError, attempt: int) -> float:
 
 
 @dataclass
-class OpenAICompatClient:
+class ChatCompletionsClient:
     base_url: str = DEFAULT_BASE_URL
     model: str = DEFAULT_LOCAL_MODEL
     api_key: str | None = None
     timeout: float = 900.0
     temperature: float = 0.0
     reasoning_effort: str | None = None  # sent only when set (Groq's gpt-oss models: low/medium/high)
-    label: str = "openai-compatible"
+    label: str = "local"
     rate_limit_retries: int = 3
     stats: LLMStats = field(default_factory=LLMStats)
     sleep: Any = field(default=time.sleep, repr=False)
@@ -208,66 +211,20 @@ class OpenAICompatClient:
             return {"ok": False, "models": [], "error": str(e)}
 
 
-@dataclass
-class AnthropicClient:
-    model: str = DEFAULT_ANTHROPIC_MODEL
-    effort: str | None = None
-    stats: LLMStats = field(default_factory=LLMStats)
+def is_proprietary(base_url: str) -> bool:
+    host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in PROPRIETARY_HOSTS)
 
-    def __post_init__(self) -> None:
-        try:
-            import anthropic
-        except ImportError as e:
-            raise LLMError("SEL_LLM_PROVIDER=anthropic needs the SDK: pip install anthropic") from e
-        self._anthropic = anthropic
-        self._client = anthropic.Anthropic()
 
-    @property
-    def name(self) -> str:
-        return f"anthropic:{self.model}"
-
-    def complete_json(self, system: str, user: str, schema: dict[str, Any], name: str,
-                      max_tokens: int = 2048) -> dict[str, Any]:
-        output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": schema}}
-        if self.effort:
-            output_config["effort"] = self.effort
-        t = time.perf_counter()
-        try:
-            response = self._client.messages.create(
-                model=self.model,
-                # Thinking tokens share this budget; leave headroom beyond the JSON itself.
-                max_tokens=max(max_tokens * 4, 16000),
-                system=system,
-                messages=[{"role": "user", "content": user}],
-                output_config=output_config,
-            )
-        except self._anthropic.APIStatusError as e:
-            raise LLMError(f"Claude API error {e.status_code}: {e.message}") from e
-        except self._anthropic.APIConnectionError as e:
-            raise LLMError(f"cannot reach the Claude API: {e}") from e
-        finally:
-            self.stats.seconds += time.perf_counter() - t
-        self.stats.calls += 1
-        self.stats.prompt_tokens += response.usage.input_tokens
-        self.stats.completion_tokens += response.usage.output_tokens
-        if response.stop_reason == "refusal":
-            raise LLMError(f"Claude declined the {name} request")
-        if response.stop_reason == "max_tokens":
-            raise LLMError(f"Claude hit max_tokens on {name}")
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        return _parse_json(text)
-
-    def health(self) -> dict[str, Any]:
-        return {"ok": True, "models": [self.model], "error": None}
+def _checked(base_url: str) -> str:
+    if is_proprietary(base_url):
+        raise LLMError(f"{base_url} is a proprietary model service; Sel uses open-weight models only "
+                       "(a local server, or SEL_LLM_PROVIDER=groq)")
+    return base_url
 
 
 def client_from_env() -> LLMClient:
-    provider = os.environ.get("SEL_LLM_PROVIDER", "openai").lower()
-    if provider == "anthropic":
-        return AnthropicClient(
-            model=os.environ.get("SEL_LLM_MODEL", DEFAULT_ANTHROPIC_MODEL),
-            effort=os.environ.get("SEL_LLM_EFFORT") or None,
-        )
+    provider = os.environ.get("SEL_LLM_PROVIDER", "local").lower()
     if provider == "groq":
         key = os.environ.get("SEL_LLM_API_KEY") or os.environ.get("GROQ_API_KEY")
         if not key:
@@ -276,18 +233,18 @@ def client_from_env() -> LLMClient:
         effort = os.environ.get("SEL_LLM_EFFORT") or None
         if effort is None and model.startswith("openai/gpt-oss"):
             effort = "low"  # its reasoning tokens share max_tokens; low leaves room for the JSON
-        return OpenAICompatClient(
-            base_url=os.environ.get("SEL_LLM_BASE_URL", GROQ_BASE_URL),
+        return ChatCompletionsClient(
+            base_url=_checked(os.environ.get("SEL_LLM_BASE_URL", GROQ_BASE_URL)),
             model=model,
             api_key=key,
             timeout=120.0,
             reasoning_effort=effort,
             label="groq",
         )
-    if provider != "openai":
-        raise LLMError(f"unknown SEL_LLM_PROVIDER {provider!r}; use 'openai', 'groq' or 'anthropic'")
-    return OpenAICompatClient(
-        base_url=os.environ.get("SEL_LLM_BASE_URL", DEFAULT_BASE_URL),
+    if provider not in ("local", "openai"):
+        raise LLMError(f"unknown SEL_LLM_PROVIDER {provider!r}; use 'local' or 'groq'")
+    return ChatCompletionsClient(
+        base_url=_checked(os.environ.get("SEL_LLM_BASE_URL", DEFAULT_BASE_URL)),
         model=os.environ.get("SEL_LLM_MODEL", DEFAULT_LOCAL_MODEL),
         api_key=os.environ.get("SEL_LLM_API_KEY") or None,
         reasoning_effort=os.environ.get("SEL_LLM_EFFORT") or None,

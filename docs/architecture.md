@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 1. Transcribe | audio → timed text | faster-whisper, on device (`sel/asr.py`) | built; `small` by default |
 | 2. Speakers | timed text → rep / customer per segment | separate channels of a stereo recording, or the language model reading the words (`label_speakers`) | built |
-| 3. Analyze | `Transcript` + pack → proposed findings, claim checks, commitments | local LLM through an OpenAI-compatible API, or Claude (`sel/analyzer_llm.py`, `sel/llm.py`) | built; Qwen 2.5 7B via Ollama by default |
+| 3. Analyze | `Transcript` + pack → proposed findings, claim checks, commitments | open-weight LLM on a local `/chat/completions` server, or Groq-hosted (`sel/analyzer_llm.py`, `sel/llm.py`) | built; Qwen 2.5 7B via Ollama by default |
 | 3a. Retrieval | claim → candidate pack passages | BM25 over facts, paragraphs and table rows (`sel/retrieval.py`) | built |
 | 4. Evidence gate | proposals → kept + `Rejection`s | code (`sel/grounding.py`) | built |
 | 5. Due dates | spoken phrase → `DueResolution` | code (`sel/dates.py`) | built (English and Nepali relative dates) |
@@ -67,7 +67,7 @@ Code then:
 
 Measured on the example calls (4 CPU cores, no GPU): see [running.md](running.md#measured-so-far).
 
-**Providers.** `SEL_LLM_PROVIDER=openai` talks to any OpenAI-compatible endpoint with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM, hosted APIs); a server that refuses the schema with HTTP 400 gets JSON mode with the schema in the system prompt instead, and HTTP 429 is retried after `Retry-After` (at most 30 s, three times). `SEL_LLM_PROVIDER=groq` uses the same client against Groq's hosted open-weight models (`GROQ_API_KEY`, default `openai/gpt-oss-20b` with `reasoning_effort: low`). `SEL_LLM_PROVIDER=anthropic` uses the official `anthropic` SDK with structured outputs. Hosted providers receive transcripts and pack documents; the default sends nothing off the machine.
+**Providers.** Open-weight models only. `SEL_LLM_PROVIDER=local` (the default; `openai` is an old alias that names the protocol) talks to any `/chat/completions` server with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM); a server that refuses the schema with HTTP 400 gets JSON mode with the schema in the system prompt instead, and HTTP 429 is retried after `Retry-After` (at most 30 s, three times). `SEL_LLM_PROVIDER=groq` uses the same client against Groq's hosted open-weight models (`GROQ_API_KEY`, default `openai/gpt-oss-20b` with `reasoning_effort: low`); Groq receives transcripts and pack documents. Proprietary services are refused by host name (`PROPRIETARY_HOSTS` in `sel/llm.py`), and `python -m sel doctor` reports the model, where it runs and its licence.
 
 ## Without a language model
 
@@ -79,7 +79,7 @@ Five signals can be measured by code: discovery (questions before the price), ob
 
 ## Call simulator
 
-Two browser sessions join a room on the Sel server. Audio goes browser to browser over WebRTC; the server relays only the connection setup (offer, answer, ICE candidates) through each tab's event stream. The rep's browser records stereo (rep left, customer right). Each browser streams its own microphone as 16 kHz PCM; a pause detector (`PcmSegmenter`) cuts utterances and one worker runs Whisper on them, so speaker labels are exact. Typed lines and opt-in browser captions feed the same transcript. Every new line re-runs the rules and the grade, and both tabs get the score and the next best actions. Hanging up uploads the recording; once queued speech is transcribed, the hub files a call (`source: simulator`) whose job reads the live transcript and runs stages 3–6. Rooms live in memory.
+Two browser sessions join a room on the Sel server. Audio goes browser to browser over WebRTC; the server relays only the connection setup (offer, answer, ICE candidates) through each tab's event stream. The rep's browser records stereo (rep left, customer right). Each browser streams its own microphone as 16 kHz PCM; a pause detector (`PcmSegmenter`) cuts utterances and one worker runs Whisper on them, so speaker labels are exact. Typed lines feed the same transcript. Every new line re-runs the rules and the grade, and both tabs get the score and the next best actions. Hanging up uploads the recording; once queued speech is transcribed, the hub files a call (`source: simulator`) whose job reads the live transcript and runs stages 3–6. Rooms live in memory.
 
 ## App and storage
 

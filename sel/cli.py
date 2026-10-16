@@ -101,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--transcript", type=Path, help="skip speech recognition and analyse this transcript.json")
     p.add_argument("--out", type=Path, help="write the report JSON here")
 
+    p = sub.add_parser("doctor", help="show which models Sel uses, where they run and their licences")
+    p.add_argument("--json", action="store_true", help="print the report as JSON")
+    p.add_argument("--offline", action="store_true", help="don't contact the model server")
+
     p = sub.add_parser("serve", help="start the local review app")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
@@ -122,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(pack.scorecard)} scorecard criteria, templates: {', '.join(pack.templates) or 'defaults'}")
         return 0
 
+    if args.cmd == "doctor":
+        from .doctor import check, render
+        report = check(probe=not args.offline)
+        print(json.dumps(report, indent=2) if args.json else render(report))
+        return 0 if report["ok"] else 1
     if args.cmd == "serve":
         return _serve(args)
     if args.cmd == "analyze":

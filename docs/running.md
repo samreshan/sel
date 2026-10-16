@@ -5,7 +5,7 @@ Sel runs as a small local web app. Its parts:
 | Part | Default | Alternatives |
 |---|---|---|
 | Speech recognition | faster-whisper `small`, CPU, int8 | `SEL_WHISPER_MODEL=large-v3-turbo` (more accurate on English, about 3× slower, unreliable on Nepali in our tests) |
-| Analysis model | Qwen 2.5 7B through Ollama, on the same machine | Any OpenAI-compatible server (llama.cpp `llama-server`, LM Studio, vLLM) or hosted API; or Claude through the Anthropic SDK |
+| Analysis model | Qwen 2.5 7B through Ollama, on the same machine | Any open-weight model on a `/chat/completions` server (llama.cpp `llama-server`, LM Studio, vLLM), or Groq-hosted open-weight models. Proprietary services are refused; check with `python -m sel doctor` |
 | Review app | `python -m sel serve` at http://127.0.0.1:8765 | — |
 | Storage | one folder per call under `calls/` | `SEL_CALLS_DIR` |
 
@@ -58,7 +58,7 @@ What it needs:
 
 A self-signed certificate for testing: `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 30 -subj /CN=sel.local` (each browser has to accept it once). `--host 0.0.0.0` makes Sel reachable from the network with no login; use it only on a network you trust. Audio goes directly between the browsers; without a STUN server (`SEL_ICE_SERVERS`) that works on one machine or one local network.
 
-On one computer, use headphones: both windows hear the speakers. Browser captions (Chrome) can stand in for Whisper but send audio to the browser vendor's service, so they are off unless ticked.
+On one computer, use headphones: both windows hear the speakers. Without faster-whisper, type your lines (browser captions were removed: they send audio to the browser vendor's service).
 
 Sel never sends anything: the drafts wait for approval as with any other call.
 
@@ -66,11 +66,11 @@ Sel never sends anything: the drafts wait for approval as with any other call.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEL_LLM_PROVIDER` | `openai` | `openai` = any OpenAI-compatible `/chat/completions` endpoint; `groq` = open-weight models hosted by Groq (`GROQ_API_KEY`; transcripts leave the machine); `anthropic` = Claude API (`pip install -e ".[anthropic]"`, `ANTHROPIC_API_KEY`) |
+| `SEL_LLM_PROVIDER` | `local` | `local` = a `/chat/completions` server you run (`openai` is accepted as an old name); `groq` = open-weight models hosted by Groq (`GROQ_API_KEY`; transcripts leave the machine). Proprietary services are refused |
 | `SEL_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | Ollama's OpenAI-compatible endpoint (`https://api.groq.com/openai/v1` for `groq`) |
-| `SEL_LLM_MODEL` | `qwen2.5:7b` (`openai/gpt-oss-20b` for `groq`, `claude-opus-5-5` for `anthropic`) | model name on that server |
+| `SEL_LLM_MODEL` | `qwen2.5:7b` (`openai/gpt-oss-20b` for `groq`) | model name on that server |
 | `SEL_LLM_API_KEY` | — | bearer token for hosted OpenAI-compatible APIs; for `groq` it overrides `GROQ_API_KEY` |
-| `SEL_LLM_EFFORT` | — (`low` for Groq's `openai/gpt-oss-*`) | reasoning effort: `anthropic` takes `low` … `max`; OpenAI-compatible servers get `reasoning_effort` only when set |
+| `SEL_LLM_EFFORT` | — (`low` for Groq's `openai/gpt-oss-*`) | sent as `reasoning_effort` only when set (Groq's gpt-oss models take `low`, `medium`, `high`) |
 | `SEL_WHISPER_MODEL` | `small` | any faster-whisper model name |
 | `SEL_WHISPER_DIR` | `models/whisper` | where Whisper models are cached |
 | `SEL_WHISPER_LANGUAGE` | auto-detect | `en`, `ne`, …; set it, auto-detection misfired on short Nepali clips |

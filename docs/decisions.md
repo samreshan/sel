@@ -7,7 +7,8 @@
 | The engine and review app use only the standard library; models are optional extras | Easy to run anywhere. Speech and LLM backends install separately |
 | Models sit behind two protocols, `Transcriber` and `Analyzer` | Candidates can be swapped in and measured with the same harness |
 | Defaults: faster-whisper `small`, Qwen 2.5 7B through Ollama, both on CPU | 3B was fast but missed most questions and promises on the English test call; 7B found them. See [running.md](running.md#measured-so-far) |
-| LLM backends: any OpenAI-compatible endpoint, or Claude via the official SDK | One code path covers local servers and most hosted APIs |
+| Open-weight models only, everywhere: a local `/chat/completions` server by default, Groq-hosted open-weight models as an opt-in. Proprietary model services (OpenAI, Anthropic, Google, Azure OpenAI, Cohere) are refused by host name, and browser captions were removed because Chrome sends that audio to its vendor | Frogtoberfest rule (open, self-hostable AI across the whole pipeline) and the privacy promise. `sel doctor` checks it; [MODELS.md](../MODELS.md) lists every model and licence |
+| Licence: Apache-2.0 | Permissive, compatible with the Apache-2.0 models Sel defaults to, usable by businesses |
 | The model points at segments; code supplies the quoted words | Small models under schema-constrained decoding paraphrased and looped when asked to copy text |
 | Three narrow extraction prompts per chunk instead of one broad one | The broad prompt returned nothing useful from a 3B model; narrow ones did |
 | A `supported` verdict must share its numbers with the cited passage | Cheap guard against the costliest error; caught a wrong "supported" on NPR 2,000 vs 2,500 |
@@ -30,7 +31,7 @@
 
 ## Open
 
-1. **Licence.** The repo has none yet; choose one before the first public release. Apache-2.0 and MIT are common for this kind of tool; AGPL would keep hosted forks open.
+1. ~~**Licence.**~~ Decided: Apache-2.0 (table above).
 2. **Desktop packaging.** The app runs as a local web server today. Wrapping it in Tauri or Electron, and bundling Ollama and the models, is open.
 3. **Operating systems.** Which ones are supported in v1?
 4. **Speech model for Nepali.** Whisper `small` and `large-v3-turbo` were both weak on a synthetic Nepali clip. Needs measuring on real code-switched calls; Nepali fine-tunes are candidates. Script (romanized or Devanagari) also affects date phrases.

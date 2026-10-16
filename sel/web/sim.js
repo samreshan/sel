@@ -5,8 +5,7 @@
  * connection setup, through the tab's event stream. The rep's browser
  * records the call in stereo (rep left, customer right). Each browser
  * streams its own microphone to Sel for live transcription when the server
- * has faster-whisper; otherwise people type their lines or opt in to the
- * browser's captions. Every line is scored live; on hang-up the recording
+ * has faster-whisper; otherwise people type their lines. Every line is scored live; on hang-up the recording
  * and transcript become a normal Sel call with follow-up drafts.
  *
  * Rendering is batched to one animation frame and done per part; new lines
@@ -31,7 +30,7 @@
     failed: ["bad", "Not saved"],
   };
   const FLOW = ["Join", "Talk", "Score live", "Save", "Analyse", "Next actions"];
-  const SOURCE_LABEL = { speech: "speech", typed: "typed", captions: "captions" };
+  const SOURCE_LABEL = { speech: "speech", typed: "typed" };
   const EVENT_LABEL = {
     question: ["info", "Question"],
     objection: ["warn", "Objection"],
@@ -69,7 +68,6 @@
     pcmQueue: [],
     pcmBusy: false,
     pcmBase: null,
-    captions: { on: false, rec: null, startAt: null, interim: "", lang: "en-US" },
     uploadFrac: null,
     clock: { at: 0, elapsed: 0 },
     timer: 0,
@@ -447,11 +445,9 @@
       error: el("p", { class: "form-error", role: "alert", hidden: !sim.error, text: sim.error || "" }),
       lines: el("ol", { class: "sim-lines", "aria-label": "Live transcript", "aria-live": "polite" }),
       empty: el("p", { class: "muted sim-lines-empty" }),
-      interim: el("p", { class: "sim-interim", hidden: true }),
       composer: el("form", { class: "sim-composer", novalidate: true }),
       say: el("input", { type: "text", id: "sim-say", autocomplete: "off", "aria-label": "Your line" }),
       send: el("button", { type: "submit", class: "small primary", "aria-label": "Add line" }, icon("send", 15)),
-      capBox: el("input", { type: "checkbox", id: "sim-captions" }),
       score: el("section", { class: "sim-score", "aria-labelledby": "sim-score-title" }),
       actions: el("section", { class: "sim-actions", "aria-labelledby": "sim-actions-title" }),
       feed: el("section", { class: "sim-feed", "aria-labelledby": "sim-feed-title" }),
@@ -489,20 +485,12 @@
           ),
           refs.lines,
           refs.empty,
-          refs.interim,
           refs.composer
         )
       ),
       el("aside", { class: "sim-side", "aria-label": "Live review" }, refs.score, refs.actions, refs.feed)
     );
-    const capsSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-    refs.composer.append(
-      el("div", { class: "sim-say-row" }, refs.say, refs.send),
-      capsSupported
-        ? el("label", { class: "sim-captions", for: "sim-captions" }, refs.capBox, el("span", { text: "Browser captions (your browser's speech service may send audio off this computer)" }))
-        : ""
-    );
-    refs.capBox.addEventListener("change", () => setCaptions(refs.capBox.checked));
+    refs.composer.append(el("div", { class: "sim-say-row" }, refs.say, refs.send));
     refs.composer.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = refs.say.value.trim();
@@ -708,7 +696,7 @@
     else if (sim.mic === "unavailable") notes.push("No microphone was found. Type your lines below.");
     if (st === "live" && myRole() === "rep") notes.push(sim.recorder ? "Recording: you on the left channel, the customer on the right." : "This browser is not recording; the transcript is still filed.");
     if (st === "live" && myRole() !== "rep") notes.push("The rep's browser records the call.");
-    if (st === "live" && sim.mic === "on" && !speechLive()) notes.push("Speech is not transcribed on this server: type what you say, or turn on browser captions.");
+    if (st === "live" && sim.mic === "on" && !speechLive()) notes.push("Speech is not transcribed on this server: type what you say.");
     if (sim.pc && st !== "saved") notes.push(`Audio link: ${sim.pc.connectionState}.`);
     if (st === "ended") notes.push(myRole() === "rep" ? "Saving the recording…" : "Waiting for the rep's browser to save the recording…");
     r.devNote.textContent = notes.join(" ");
@@ -722,8 +710,6 @@
     const wasDisabled = r.say.disabled;
     r.say.disabled = !isLive;
     r.send.disabled = !isLive;
-    r.capBox.disabled = !isLive;
-    r.capBox.checked = sim.captions.on;
     r.say.placeholder = isLive
       ? `Type what you say as the ${(S.ROLE_LABEL[myRole()] || "").toLowerCase()}, then press Enter`
       : "Lines can be added once the call has started";
@@ -1081,11 +1067,9 @@
     sim.clock = { at: performance.now(), elapsed: sim.room.elapsed || 0 };
     if (myRole() === "rep") startRecording();
     startPcm();
-    if (sim.captions.on) startCaptions();
   }
 
   async function onEnded() {
-    stopCaptions();
     stopPcm();
     if (myRole() !== "rep" || sim.finishing || ["saved", "saving"].includes(sim.room.state)) return;
     sim.finishing = true;
@@ -1422,75 +1406,9 @@
     sim.pcmBusy = false;
   }
 
-  // ---------- browser captions (opt-in) ----------
-
-  function setCaptions(on_) {
-    sim.captions.on = on_;
-    if (on_ && live()) startCaptions();
-    else stopCaptions();
-  }
-
-  function startCaptions() {
-    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!R || sim.captions.rec) return;
-    const rec = new R();
-    rec.continuous = true;
-    rec.interimResults = true;
-    const langs = (S.packs().find((p) => p.id === (sim.room && sim.room.pack_id)) || {}).languages || [];
-    rec.lang = langs[0] === "ne" ? "ne-NP" : "en-US";
-    rec.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (sim.captions.startAt === null) sim.captions.startAt = callNow();
-        if (r.isFinal) {
-          const text = r[0].transcript.trim();
-          if (text) postLine(text, sim.captions.startAt, callNow(), "captions");
-          sim.captions.startAt = null;
-        } else interim += r[0].transcript;
-      }
-      if (sim.refs) {
-        sim.refs.interim.textContent = interim;
-        sim.refs.interim.hidden = !interim;
-      }
-    };
-    rec.onerror = (e) => {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        sim.captions.on = false;
-        setError("Browser captions were blocked.");
-        dirty("composer");
-      }
-    };
-    rec.onend = () => {
-      sim.captions.rec = null;
-      if (sim.captions.on && live()) startCaptions();
-    };
-    try {
-      rec.start();
-      sim.captions.rec = rec;
-    } catch (_) {
-      sim.captions.rec = null;
-    }
-  }
-
-  function stopCaptions() {
-    const rec = sim.captions.rec;
-    sim.captions.rec = null;
-    if (rec) {
-      rec.onend = null;
-      try {
-        rec.stop();
-      } catch (_) {
-        /* already stopped */
-      }
-    }
-    if (sim.refs) sim.refs.interim.hidden = true;
-  }
-
   // ---------- teardown ----------
 
   function resetCall() {
-    stopCaptions();
     stopPcm();
     if (sim.recorder && sim.recorder.state !== "inactive") {
       try {

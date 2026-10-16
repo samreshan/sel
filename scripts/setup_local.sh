@@ -2,7 +2,7 @@
 # Set up Sel's local models on Linux x86_64 (CPU only, no root needed).
 #
 #   scripts/setup_local.sh            # speech + Ollama + qwen2.5:7b
-#   SEL_LLM_MODEL=qwen2.5:3b scripts/setup_local.sh   # faster, much weaker
+#   SEL_LLM_MODEL=qwen2.5:3b scripts/setup_local.sh   # faster, much weaker; non-commercial licence (MODELS.md)
 #
 # Installs into the repository: .venv/ (Python packages), .tools/ollama/
 # (the Ollama binary), models/ (Whisper, Piper voices, Ollama models).

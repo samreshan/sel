@@ -1,0 +1,12 @@
+{
+  "_note": "Transfer checks: did the focus skill show up on a later real call? Each case is solar-01 with some lines replaced, and the verdict a careful reviewer would give for the criterion. Written with the test call, not an independent annotation. Used by `python -m sel eval --transfer`.",
+  "criterion": "objection-handling",
+  "cases": [
+    {"name": "as recorded: defends the price with warranty claims", "edits": {}, "verdict": "fail"},
+    {"name": "asks what the other quote includes", "edits": {"s05": "What does the other quote include: which panel brand and inverter, and how many years of warranty?"}, "verdict": "pass"},
+    {"name": "asks, then explains the value", "edits": {"s05": "Can I ask what the other quote includes? Ours has a 25-year performance warranty on the panels."}, "verdict": "pass"},
+    {"name": "a tag question is not asking", "edits": {"s05": "Ours is the better system, right?"}, "verdict": "fail"},
+    {"name": "no price objection on this call", "edits": {"s04": "Okay, that sounds reasonable for my house."}, "verdict": "not_applicable"},
+    {"name": "defends first, asks on the next turn", "edits": {"s05": "Our panels come with a 25-year performance warranty.", "s07": "Which inverter and warranty does the other quote include?"}, "verdict": "fail"}
+  ]
+}

@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--coaching", choices=["fixture", "rules", "llm"],
                    help="score coaching moments and better lines against coaching_gold.json instead: the example's "
                         "hand-written coaching.json, Sel's rules, or the configured language model (SEL_LLM_*)")
+    p.add_argument("--transfer", choices=["rules", "llm"],
+                   help="score the Judge's transfer verdicts against transfer_gold.json: Sel's rules, or the "
+                        "configured language model (SEL_LLM_*) checked by the rules")
 
     p = sub.add_parser("analyze", help="run the real pipeline on a recording (local speech + language models)")
     p.add_argument("audio", type=Path)
@@ -155,6 +158,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     report = _report_for_example(args.example, args.pack, args.analyzer)
+    if args.cmd == "eval" and args.transfer:
+        print(json.dumps(_eval_transfer(args), indent=2, ensure_ascii=False))
+        return 0
     if args.cmd == "eval" and args.coaching:
         print(json.dumps(_eval_coaching(args, report), indent=2, ensure_ascii=False))
         return 0
@@ -205,6 +211,43 @@ def _eval_coaching(args, report) -> dict:
     return out
 
 
+def _eval_transfer(args) -> dict:
+    """The Judge on labelled variants of an example call (transfer_gold.json): accuracy and false passes."""
+    import copy
+
+    from .drills import judge
+    from .live import RuleAnalyzer
+    from .models import Transcript
+    from .pipeline import build_report
+    from .scoring import score_report
+
+    pack = load_pack(args.pack)
+    gold = json.loads((args.example / "transfer_gold.json").read_text(encoding="utf-8"))
+    base = json.loads((args.example / "transcript.json").read_text(encoding="utf-8"))
+    llm = None
+    if args.transfer == "llm":
+        from .llm import client_from_env
+        llm = client_from_env()
+    cases = []
+    for case in gold["cases"]:
+        data = copy.deepcopy(base)
+        for seg in data["segments"]:
+            seg["text"] = case["edits"].get(seg["id"], seg["text"])
+        transcript = Transcript.from_dict(data)
+        report = build_report(transcript, RuleAnalyzer().analyze(transcript, pack), pack)
+        v = judge(transcript, score_report(report, pack), pack, gold["criterion"], llm)
+        cases.append({"case": case["name"], "expected": case["verdict"], "verdict": v["verdict"],
+                      "right": v["verdict"] == case["verdict"], "segment_ids": v["segment_ids"], "why": v["why"],
+                      "by": v["by"], "rules_said": (v.get("code") or {}).get("verdict")})
+    n = len(cases)
+    return {"criterion": gold["criterion"], "judge": args.transfer, "cases": n,
+            "accuracy": round(sum(c["right"] for c in cases) / n, 3) if n else None,
+            "unsure": sum(c["verdict"] == "unsure" for c in cases),
+            # The costliest error: a pass that closes a focus the rep has not earned.
+            "false_pass": sum(c["verdict"] == "pass" and c["expected"] != "pass" for c in cases),
+            "llm_usage": llm.stats.to_dict() if llm else None, "results": cases}
+
+
 def _health():
     from .llm import client_from_env
     out = {"asr": {"model": os.environ.get("SEL_WHISPER_MODEL", "small")}}
@@ -223,9 +266,9 @@ def _health():
 
 def _serve(args) -> int:
     from .server import serve
-    from .service import CallService, default_coach_factory
+    from .service import CallService, default_chat_factory
 
-    service = CallService(args.calls_dir, args.packs_dir, coach_factory=default_coach_factory)
+    service = CallService(args.calls_dir, args.packs_dir, chat_factory=default_chat_factory)
     if not args.no_examples:
         root = Path(__file__).resolve().parent.parent / "examples" / "calls"
         for example, pack_id in (("solar-01", "demo-solar"), ("pos-01", "demo-pos")):

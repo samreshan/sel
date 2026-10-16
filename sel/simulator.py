@@ -21,6 +21,13 @@ directly over WebRTC; Sel's server only relays their connection setup
   (the LLM if reachable, else rules), evidence gate, due dates and follow-up
   drafts waiting for approval. Nothing is ever sent.
 
+A **drill room** (``create_drill_room``) has an AI customer instead of a
+second person (``sel.ai_customer``): it opens with the persona's line when the
+call starts, and every line the rep adds (typed or spoken) queues one reply on
+the AI worker thread, so a slow model never blocks a request. When the AI
+customer ends the call, the room ends; the rep's tab then files it as a
+practice call, and ``on_drill_finished`` hands the transcript to the debrief.
+
 Rooms live in memory only; a server restart forgets them (filed calls stay).
 """
 
@@ -69,6 +76,7 @@ class Participant:
     person_id: str | None = None  # who this is on the team (people.json), when the browser said
     streams: int = 0  # open event streams (tabs); online while > 0
     mic: bool = False
+    ai: bool = False  # the AI customer of a drill room
 
 
 @dataclass
@@ -91,6 +99,11 @@ class Room:
     error: str | None = None
     pending_speech: int = 0
     segmenters: dict[str, PcmSegmenter] = field(default_factory=dict)
+    drill_id: str | None = None
+    agent: Any = None  # AICustomer in a drill room
+    ai_busy: bool = False  # a reply is being written
+    ai_again: bool = False  # the rep spoke again while it was
+    ai_seconds: list[float] = field(default_factory=list)  # time from the rep's line to the AI's reply
     lock: threading.RLock = field(default_factory=threading.RLock)
     idle: threading.Condition = field(init=False)
     next_id: int = 1
@@ -222,6 +235,11 @@ class SimulatorHub:
         self._engine = None
         self._asr: queue.Queue[tuple[Room, str, float, bytes] | None] = queue.Queue()
         self._asr_thread: threading.Thread | None = None
+        self._ai: queue.Queue[tuple[Room, float] | None] = queue.Queue()
+        self._ai_thread: threading.Thread | None = None
+        # Called with (room, transcript, final score, call id) after a drill room is filed.
+        self.on_drill_finished: Callable[[Room, Transcript, dict[str, Any], str], None] | None = \
+            getattr(service, "drill_finished", None)
         if ice_servers is None:
             try:
                 ice_servers = json.loads(os.environ.get("SEL_ICE_SERVERS", "[]"))
@@ -270,8 +288,9 @@ class SimulatorHub:
                 "created_at": datetime.fromtimestamp(room.created, timezone.utc).isoformat(timespec="seconds"),
                 "started_at": room.started_at, "elapsed": round(self._elapsed(room), 2),
                 "participants": [{"role": p.role, "name": p.name, "email": p.email, "online": p.streams > 0,
-                                  "mic": p.mic} for p in sorted(room.participants.values(), key=lambda p: p.role != "rep")],
+                                  "mic": p.mic, "ai": p.ai} for p in sorted(room.participants.values(), key=lambda p: p.role != "rep")],
                 "you": you, "live": room.live, "call_id": room.call_id, "error": room.error,
+                "drill_id": room.drill_id, "ai_busy": room.ai_busy,
                 "pending_speech": room.pending_speech, "speech": dict(self.speech), "ice_servers": self.ice_servers,
             }
             if lines:
@@ -336,6 +355,27 @@ class SimulatorHub:
                                                   person_id=person_id)
             self.rooms[code] = room
         self._lobby_changed()
+        return room, client
+
+    def create_drill_room(self, pack_id: str, agent: Any, drill_id: str, rep_name: str | None, person_id: str | None,
+                          customer_name: str | None, offset: str | None) -> tuple[Room, str]:
+        """A practice room: the rep (this browser) and an AI customer, ready to start."""
+        pack = self.service.pack(pack_id)
+        person_id = self._person(person_id)
+        self._reap()
+        with self._lock:
+            if len(self.rooms) >= MAX_ROOMS:
+                raise RoomStateError("too many open calls on this server; try again later")
+            code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
+            while code in self.rooms:
+                code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
+            room = Room(code=code, pack_id=pack.id, pack_name=pack.name, offset=_offset(offset), scorer=LiveScorer(pack),
+                        state="ready", drill_id=drill_id, agent=agent)
+            client = secrets.token_hex(16)
+            room.participants["rep"] = Participant("rep", client, _clean(rep_name, 80), None, _iso_now(), person_id=person_id)
+            room.participants["customer"] = Participant("customer", secrets.token_hex(16), _clean(customer_name, 80), None,
+                                                        _iso_now(), streams=1, ai=True)
+            self.rooms[code] = room
         return room, client
 
     def join(self, code: str, role: str | None, name: str | None, email: str | None,
@@ -418,6 +458,10 @@ class SimulatorHub:
             room.live = room.scorer.snapshot(self._transcript(room), now=0.0)
             self._broadcast(room)
         self._lobby_changed()
+        if room.agent is not None:
+            opening = room.agent.opening()
+            self._add(room, "customer", 0.0, max(1.0, len(opening["say"].split()) / 2.5), opening["say"], "ai",
+                      mood=opening.get("mood"))
         if self.speech["live"]:
             self._ensure_asr()
             self._asr.put((room, "", 0.0, b""))  # warm-up: load the model before the first utterance
@@ -449,20 +493,34 @@ class SimulatorHub:
             return self._add(room, me.role, s, e, text, source)
 
     def _add(self, room: Room, role: str, start: float, end: float, text: str, source: str,
-             confidence: float | None = None) -> dict[str, Any]:
+             confidence: float | None = None, mood: str | None = None) -> dict[str, Any]:
         with room.lock:
             if len(room.lines) >= MAX_LINES:
                 raise RoomStateError("this call has reached the line limit")
+            if source in ("typed", "ai") and room.lines and start <= room.lines[-1]["start"]:
+                # Typed and AI lines are said now: never before the latest line (speech can arrive late; these can't).
+                end += room.lines[-1]["start"] + 0.01 - start
+                start = room.lines[-1]["start"] + 0.01
             line = {"id": f"l{room.next_id}", "role": role, "speaker": "S1" if role == "rep" else "S2",
                     "start": round(start, 2), "end": round(end, 2), "text": text, "source": source,
-                    "confidence": None if confidence is None else round(confidence, 3)}
+                    "confidence": None if confidence is None else round(confidence, 3), "room": room.code}
+            if mood:
+                line["mood"] = mood
             room.next_id += 1
             room.lines.append(line)
-            room.lines.sort(key=lambda x: (x["start"], x["end"]))
+            room.lines.sort(key=_order)
             room.live = room.scorer.snapshot(self._transcript(room), now=self._elapsed(room))
             topic = f"room:{room.code}"
             self.bus.publish(topic, "line", line)
             self.bus.publish(topic, "live", room.live)
+            if room.agent is not None and role == "rep" and room.state == "live":
+                if room.ai_busy:
+                    room.ai_again = True
+                else:
+                    room.ai_busy = True
+                    self._broadcast(room)
+                    self._ensure_ai()
+                    self._ai.put((room, time.monotonic()))
             return line
 
     def add_audio(self, code: str, client: str, pcm: bytes, t: float | None) -> int:
@@ -525,9 +583,12 @@ class SimulatorHub:
                 live = room.scorer.snapshot(transcript, now=room.duration or 0.0, final=True)
                 room.live = {**(room.live or {}), "final_score": live["score"]}
                 rep = room.participants.get("rep")
-            call_id = self.service.create_simulated(transcript, audio, filename, {
-                "pack_id": room.pack_id, "room": room.code, "live_score": live["score"], "analyzer": "auto",
-                "rep_id": rep.person_id if rep else None})
+            meta = {"pack_id": room.pack_id, "room": room.code, "live_score": live["score"], "analyzer": "auto",
+                    "rep_id": rep.person_id if rep else None, "kind": "practice"}
+            if room.drill_id:
+                # A drill is filed for its debrief; the rules analyse it so the machine stays free for the next one.
+                meta.update(analyzer="rules", drill_id=room.drill_id)
+            call_id = self.service.create_simulated(transcript, audio, filename, meta)
         except Exception as e:  # noqa: BLE001 - shown in both tabs
             with room.lock:
                 room.state, room.error = "failed", f"{type(e).__name__}: {e}"
@@ -537,6 +598,8 @@ class SimulatorHub:
             room.state, room.call_id = "saved", call_id
             self._broadcast(room)
         self._lobby_changed()
+        if room.drill_id and self.on_drill_finished is not None:
+            self.on_drill_finished(room, transcript, live["score"], call_id)
         return self.view(room, lines=False)
 
     def _transcript(self, room: Room, final: bool = False) -> Transcript:
@@ -544,7 +607,7 @@ class SimulatorHub:
         cust = room.participants.get("customer")
         speakers = [Speaker("S1", "rep", rep.name if rep else None),
                     Speaker("S2", "customer", cust.name if cust else None, cust.email if cust else None)]
-        lines = sorted(room.lines, key=lambda x: (x["start"], x["end"]))
+        lines = sorted(room.lines, key=_order)
         width = max(2, len(str(len(lines))))
         segments = [Segment(id=f"s{i + 1:0{width}d}" if final else x["id"], start=x["start"], end=x["end"],
                             speaker=x["speaker"], text=x["text"], confidence=x.get("confidence"))
@@ -584,14 +647,61 @@ class SimulatorHub:
                         room.pending_speech = max(0, room.pending_speech - 1)
                         room.idle.notify_all()
 
+    # -- the AI customer -------------------------------------------------------------
+
+    def _ensure_ai(self) -> None:
+        with self._lock:
+            if self._ai_thread is None or not self._ai_thread.is_alive():
+                self._ai_thread = threading.Thread(target=self._ai_loop, name="sel-ai-customer", daemon=True)
+                self._ai_thread.start()
+
+    def _ai_loop(self) -> None:
+        while True:
+            item = self._ai.get()
+            if item is None:
+                return
+            room, asked = item
+            try:
+                while True:
+                    with room.lock:
+                        room.ai_again = False
+                        lines = [{"role": x["role"], "text": x["text"], "mood": x.get("mood")} for x in room.lines]
+                    reply = room.agent.reply(lines)  # outside the lock: a model may take seconds
+                    with room.lock:
+                        if room.state != "live":
+                            break
+                        if room.ai_again:
+                            continue  # the rep said more meanwhile: answer all of it
+                        room.ai_seconds.append(round(time.monotonic() - asked, 2))
+                        room.ai_busy = False  # under the same lock as the reply, so no rep line falls in between
+                        now = self._elapsed(room)
+                        self._add(room, "customer", now, now + max(1.0, len(reply["say"].split()) / 2.5), reply["say"],
+                                  "ai", mood=reply.get("mood"))
+                        if reply.get("end_call"):
+                            self._end(room)
+                        break
+            except Exception as e:  # noqa: BLE001 - the drill goes on; the rep sees why the customer went quiet
+                with room.lock:
+                    room.error = f"The AI customer failed: {type(e).__name__}: {e}"
+            finally:
+                with room.lock:
+                    room.ai_busy = False
+                    self._broadcast(room)
+
     def close(self) -> None:
         self._asr.put(None)
+        self._ai.put(None)
 
 
 def _default_speech_factory():
     from .asr import WhisperTranscriber, live_model_name
 
     return WhisperTranscriber(speakers=[], model=live_model_name())
+
+
+def _order(line: dict[str, Any]) -> tuple[float, int]:
+    """Lines in call order; lines that start together keep the order they arrived in (a reply after its question)."""
+    return line["start"], int(line["id"][1:])
 
 
 def _iso_now() -> str:

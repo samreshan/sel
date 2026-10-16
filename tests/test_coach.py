@@ -316,8 +316,10 @@ class CoachAgentTests(unittest.TestCase):
         self.assertTrue(log[0]["applied"])
         self.assertEqual(coach_file["focus"]["criterion"], "objection-handling")
         self.assertEqual(coach_file["focus"]["reason"], "Two calls lost on price.")
-        # Already focused: the Coach doesn't ask, and a forced action is refused.
-        self.assertEqual(ModelCoach(llm).decide({**self.state, "focus": coach_file["focus"]}), [])
+        # Already focused: no new focus is proposed (a drill for it is), and a forced one is refused.
+        later = ModelCoach(llm).decide({**self.state, "focus": coach_file["focus"]})
+        self.assertNotIn("set_focus", [a["action"] for a in later])
+        self.assertIn("create_drill", [a["action"] for a in later])
         log = apply_actions([{"action": "set_focus", "skill": "demo-solar/discovery"}], self.state, coach_file, "x")
         self.assertIn("already active", log[0]["refused"])
 
@@ -325,7 +327,8 @@ class CoachAgentTests(unittest.TestCase):
         coach_file = {"focus": None}
         log = apply_actions([{"action": "send_email", "to": "ramesh@example.com"},
                              {"action": "set_focus", "skill": "demo-solar/closing"},
-                             {"action": "escalate_to_manager"}], self.state, coach_file, "coach:model")
+                             {"action": "escalate_to_manager", "reason": "low score"}], self.state, coach_file,
+                            "coach:model")
         self.assertEqual([e["applied"] for e in log], [False, False, False])
         self.assertIn("not an action", log[0]["refused"])
         self.assertIn("not a skill", log[1]["refused"])
@@ -404,7 +407,9 @@ class CoachingServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((coach["focus"]["criterion"], coach["focus"]["set_by_name"]), ("clear-next-step", "Sita Coach"))
         self.assertEqual(coach["history"][-1]["status"], "replaced")
-        self.assertEqual(self.service.run_coach(rep["id"]), [])
+        log = self.service.run_coach(rep["id"])
+        self.assertNotIn("set_focus", [e["action"] for e in log if e["applied"]])
+        self.assertEqual(self.service.coach_store.get(rep["id"])["focus"]["criterion"], "clear-next-step")
         team = self.req("GET", f"/api/today?person={boss['id']}")[1]["team"]
         self.assertEqual(next(r for r in team if r["id"] == rep["id"])["focus"]["criterion"], "clear-next-step")
         self.assertEqual(self.req("PUT", f"/api/coach/{rep['id']}/focus", {"pack_id": "demo-solar", "criterion": "nope"})[0], 400)

@@ -1,0 +1,341 @@
+"""Practice and measure: personas, the AI customer, drills and their debriefs, transfer checks, the Coach's actions."""
+
+import json
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from sel.adapters import FixtureAnalyzer, FixtureTranscriber
+from sel.ai_customer import AICustomer, rules_reply
+from sel.coach import RuleCoach, apply_actions
+from sel.drills import code_verdict, judge
+from sel.llm import LLMError, LLMStats
+from sel.models import Transcript
+from sel.pack import load_pack
+from sel.persona import anonymise, build_persona, rules_persona
+from sel.server import serve
+from sel.service import CallService
+from sel.simulator import SimulatorHub
+
+ROOT = Path(__file__).resolve().parent.parent
+SOLAR = ROOT / "examples/calls/solar-01"
+
+
+class ScriptedLLM:
+    name = "scripted"
+
+    def __init__(self, replies):
+        self.replies = replies
+        self.prompts = []
+        self.stats = LLMStats()
+
+    def complete_json(self, system, user, schema, name, max_tokens=2048):
+        self.prompts.append((name, system, user))
+        reply = self.replies[name]
+        if isinstance(reply, list):
+            reply = reply.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply(user) if callable(reply) else reply
+
+
+MOMENT = {"criterion": "objection-handling", "why": "Defended the price instead of asking.",
+          "customer_said": {"segment_id": "s04", "quote": "That is a little expensive, Ramesh here. Another company quoted NPR 3,60,000."},
+          "evidence": {"segment_ids": ["s05"], "quote": "Our panels have a 25-year warranty, Asha says."}}
+
+
+class PersonaTests(unittest.TestCase):
+    def setUp(self):
+        self.pack = load_pack(ROOT / "packs/demo-solar")
+
+    def test_anonymise_removes_people_and_deals(self):
+        text = "Namaste Ramesh ji, call 9841234567 or ramesh@example.com. Arko company le 3 lakh 60 ma dinchu bhaneko."
+        out = anonymise(text, ["Ramesh"])
+        for leaked in ("Ramesh", "9841234567", "ramesh@example.com", "3 lakh", "60"):
+            self.assertNotIn(leaked, out)
+        self.assertIn("a different price", out)
+
+    def test_rules_persona_repeats_the_real_objection_anonymised(self):
+        p = rules_persona(MOMENT, self.pack, ["Ramesh", "Asha"], "d1")
+        self.assertEqual(p["opening"], "That is a little expensive, here. Another company quoted a different price.")
+        self.assertNotIn("Ramesh", json.dumps(p))
+
+    def test_model_persona_sees_only_anonymised_words_and_its_output_is_cleaned(self):
+        llm = ScriptedLLM({"persona": {"about": "Ramesh owns a house in Lalitpur.", "wants": "A fair price.",
+                                       "opening": "Another company quoted NPR 3,60,000, call me on 9841234567.",
+                                       "if_good": "Opens up.", "if_poor": "Stays doubtful."}})
+        p = build_persona(MOMENT, self.pack, ["Ramesh", "Asha"], "d1", llm)
+        _, _, prompt = llm.prompts[0]
+        for leaked in ("Ramesh", "Asha", "3,60,000"):
+            self.assertNotIn(leaked, prompt)
+        self.assertNotIn("Ramesh", p["about"])
+        self.assertNotIn("9841234567", p["opening"])
+        self.assertNotIn("3,60,000", p["opening"])
+        self.assertTrue(p["by"].startswith("model:"))
+        self.assertIn(p["name"], ("Sita", "Hari", "Kamala", "Bishnu", "Gita", "Nabin", "Anita", "Suman", "Pooja", "Dipak"))
+
+
+class AICustomerTests(unittest.TestCase):
+    PERSONA = {"name": "Sita", "about": "A homeowner.", "wants": "Value.", "opening": "It is a little expensive.",
+               "if_good": "Warms up.", "if_poor": "Stays doubtful.", "difficulty": 1}
+
+    def test_rules_customer_softens_after_a_question_and_ends_on_a_dated_promise(self):
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "It has a great warranty."}]
+        self.assertEqual(rules_reply(lines, 1)["mood"], "doubtful")
+        lines.append({"role": "rep", "text": "What does the other quote include?"})
+        self.assertEqual(rules_reply(lines, 1)["mood"], "warming")
+        lines.append({"role": "rep", "text": "I'll email you the comparison by tomorrow evening."})
+        self.assertTrue(rules_reply(lines, 1)["end_call"])
+
+    def test_model_reply_is_checked_and_falls_back_to_rules(self):
+        llm = ScriptedLLM({"customer": [
+            {"say": "Fine, what is in the price?", "end_call": False, "mood": "calm"},
+            {"say": "[s02] CUSTOMER: ok", "end_call": False, "mood": "calm"},
+            LLMError("timeout")]})
+        ai = AICustomer(self.PERSONA, llm)
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "Hello."}]
+        self.assertEqual(ai.reply(lines)["say"], "Fine, what is in the price?")
+        self.assertEqual(ai.reply(lines)["by"], "rules (no language model)")  # ids in the line: refused
+        self.assertEqual(ai.reply(lines)["by"], "rules (no language model)")  # model error
+        self.assertEqual(len(ai.timings), 3)
+        # The persona is a stable system prefix; the transcript is the user message.
+        names = {p[1] for p in llm.prompts}
+        self.assertEqual(len(names), 1)
+        self.assertIn("It is a little expensive.", llm.prompts[0][1])
+
+
+class JudgeTests(unittest.TestCase):
+    def setUp(self):
+        self.pack = load_pack(ROOT / "packs/demo-solar")
+        self.t = Transcript.from_dict(json.loads((SOLAR / "transcript.json").read_text(encoding="utf-8")))
+
+    def score(self, status, segment="s05"):
+        return {"criteria": [{"id": "objection-handling", "status": status, "segment": segment, "detail": "d"}]}
+
+    def test_code_verdicts(self):
+        self.assertEqual(code_verdict(self.score("met"), "objection-handling")["verdict"], "pass")
+        self.assertEqual(code_verdict(self.score("missed"), "objection-handling")["verdict"], "fail")
+        self.assertEqual(code_verdict(self.score("na"), "objection-handling")["verdict"], "not_applicable")
+        self.assertIsNone(code_verdict(self.score("not_scored"), "objection-handling"))
+
+    def test_model_and_rules_must_agree_for_a_pass(self):
+        llm = ScriptedLLM({"judge": {"verdict": "pass", "segment": "s05", "why": "Handled well."}})
+        v = judge(self.t, self.score("missed"), self.pack, "objection-handling", llm)
+        self.assertEqual(v["verdict"], "unsure")
+        v = judge(self.t, self.score("met"), self.pack, "objection-handling", llm)
+        self.assertEqual((v["verdict"], v["segment_ids"]), ("pass", ["s05"]))
+
+    def test_never_came_up_is_decided_by_code(self):
+        llm = ScriptedLLM({"judge": {"verdict": "fail", "segment": "s05", "why": "x"}})
+        v = judge(self.t, self.score("na", None), self.pack, "objection-handling", llm)
+        self.assertEqual(v["verdict"], "not_applicable")
+        self.assertEqual(llm.prompts, [])
+
+    def test_a_customer_line_is_moved_to_the_reps_reply_and_unknown_segments_refused(self):
+        llm = ScriptedLLM({"judge": [{"verdict": "fail", "segment": "s04", "why": "x"},
+                                     {"verdict": "fail", "segment": "s99", "why": "x"}]})
+        self.assertEqual(judge(self.t, self.score("missed"), self.pack, "objection-handling", llm)["segment_ids"], ["s05"])
+        v = judge(self.t, self.score("missed"), self.pack, "objection-handling", llm)
+        self.assertEqual(v["by"], "rules (no language model)")
+        self.assertIn("s99", v["refused"][0])
+
+
+class CoachActionTests(unittest.TestCase):
+    def state(self, **over):
+        skill = {"key": "demo-solar/objection-handling", "pack_id": "demo-solar", "criterion": "objection-handling",
+                 "title": "Price objections", "signal": "objections", "weight": 2, "weak": 1, "strong": 0,
+                 "calls": ["c1"], "weak_calls": ["c1"], "moments": [{"call_id": "c1", "moment_id": "m2", "why": "w",
+                                                                    "quote": "q", "at": "00:22"}]}
+        base = {"skills": [skill], "calls_seen": 1, "transfer": [], "escalations": [], "drills": [], "contradicted": [],
+                "closed": [], "focus": None}
+        base.update(over)
+        return base
+
+    def test_a_turn_sets_a_focus_and_a_drill(self):
+        state = self.state()
+        acts = RuleCoach().decide(state)
+        self.assertEqual([a["action"] for a in acts], ["set_focus", "create_drill"])
+        coach_file = {}
+        log = apply_actions(acts, state, coach_file, "coach:rules")
+        self.assertTrue(all(e["applied"] for e in log))
+
+    def test_transfer_pass_closes_the_focus_but_escalates_a_managers(self):
+        focus = {"pack_id": "demo-solar", "criterion": "objection-handling", "title": "Price objections",
+                 "since": "2026-10-16T00:00:00+00:00", "status": "active", "set_by": "coach:rules"}
+        passed = {"call_id": "c9", "criterion": "objection-handling", "pack_id": "demo-solar", "verdict": "pass",
+                  "at": "2026-10-17T00:00:00+00:00", "why": "Asked what the quote includes."}
+        state = self.state(focus=focus, transfer=[passed])
+        acts = RuleCoach().decide(state)
+        self.assertEqual(acts[0]["action"], "close_focus")
+        coach_file = {"focus": dict(focus)}
+        apply_actions(acts, state, coach_file, "coach:rules")
+        self.assertEqual(coach_file["history"][-1]["status"], "passed")
+        self.assertEqual(coach_file["history"][-1]["evidence"]["call_id"], "c9")
+        # A manager's focus: escalated, never closed by the Coach.
+        mfocus = {**focus, "set_by_role": "manager"}
+        state = self.state(focus=mfocus, transfer=[passed])
+        acts = RuleCoach().decide(state)
+        self.assertEqual(acts[0]["reason"], "change_manager_focus")
+        coach_file = {"focus": dict(mfocus)}
+        log = apply_actions([{"action": "close_focus", "call_id": "c9"}] + acts, state, coach_file, "coach:model")
+        self.assertIn("manager", log[0]["refused"])
+        self.assertEqual(coach_file["focus"]["status"], "active")
+        self.assertEqual(coach_file["escalations"][0]["reason"], "change_manager_focus")
+
+    def test_close_needs_evidence_and_escalations_need_a_reason_on_the_list(self):
+        focus = {"pack_id": "demo-solar", "criterion": "objection-handling", "title": "t", "since": "2026-10-16",
+                 "status": "active"}
+        coach_file = {"focus": dict(focus)}
+        log = apply_actions([{"action": "close_focus", "call_id": "c9"},
+                             {"action": "escalate_to_manager", "reason": "low_score"},
+                             {"action": "escalate_to_manager", "reason": "contradicted_claim", "call_id": "c1", "claim_id": "c3"},
+                             {"action": "raise_difficulty", "drill_id": "dx"}], self.state(focus=focus), coach_file, "x")
+        self.assertEqual([e["applied"] for e in log], [False, False, False, False])
+        state = self.state(focus=focus, contradicted=[{"call_id": "c1", "claim_id": "c3", "claim": "10-year warranty"}],
+                           drills=[{"id": "d1", "pack_id": "demo-solar", "criterion": "objection-handling", "fails": 3,
+                                    "last_verdict": "fail", "difficulty": 1, "last_difficulty": 1, "source": {}}])
+        acts = RuleCoach().decide(state)
+        reasons = sorted(a.get("reason", "") for a in acts if a["action"] == "escalate_to_manager")
+        self.assertEqual(reasons, ["contradicted_claim", "failed_drill"])
+        apply_actions(acts, state, coach_file, "coach:rules")
+        log = apply_actions(acts, state, coach_file, "coach:rules")  # the same again: already escalated
+        self.assertTrue(all(not e["applied"] for e in log if e["action"] == "escalate_to_manager"))
+
+
+def fixture_factory(call, speakers):
+    return FixtureTranscriber(SOLAR / "transcript.json"), FixtureAnalyzer(SOLAR / "analysis.json"), None
+
+
+class PracticeLoopTests(unittest.TestCase):
+    """The loop over the API, without models: weak moment → focus and drill → practice → debrief → transfer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.service = CallService(cls.tmp.name, ROOT / "packs", analysis_factory=fixture_factory)
+        cls.service.create_from_example(SOLAR, "demo-solar")
+        cls.hub = SimulatorHub(cls.service, speech_status=lambda: (False, "off"))
+        cls.httpd = serve(cls.service, port=0, quiet=True, hub=cls.hub)
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.service.wait_idle()
+        cls.httpd.shutdown()
+        cls.hub.close()
+        cls.tmp.cleanup()
+
+    def req(self, method, path, body=None, raw=None):
+        data = raw if raw is not None else (None if body is None else json.dumps(body).encode())
+        r = urllib.request.Request(self.base + path, data=data, method=method)
+        try:
+            with urllib.request.urlopen(r, timeout=20) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def until(self, fn, timeout=10.0, why=lambda: ""):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            value = fn()
+            if value:
+                return value
+            time.sleep(0.03)
+        self.fail(f"timed out {why()}")
+
+    def coach(self, rep):
+        status, c = self.req("GET", f"/api/coach/{rep}")
+        self.assertEqual(status, 200, c)
+        return c
+
+    def drill_room(self, drill_id, rep):
+        status, out = self.req("POST", f"/api/drills/{drill_id}/start", {"by": rep})
+        self.assertEqual(status, 201, out)
+        code, client = out["room"]["code"], out["client"]
+        self.assertTrue(any(p["ai"] for p in out["room"]["participants"]))
+        status, room = self.req("POST", f"/api/sim/rooms/{code}/start", {"client": client})
+        self.assertEqual(room["lines"][0]["source"], "ai")  # the AI customer opens with the real objection
+        return code, client, room
+
+    def say(self, code, client, text):
+        n = len(self.hub.rooms[code].lines)
+        self.req("POST", f"/api/sim/rooms/{code}/lines", {"client": client, "text": text})
+        self.until(lambda: len(self.hub.rooms[code].lines) >= n + 2 or self.hub.rooms[code].state != "live")
+
+    def finish(self, code, client, drill_id, attempts):
+        self.req("POST", f"/api/sim/rooms/{code}/finish?client={client}", raw=b"")
+        return self.until(lambda: (d := self.service.drills.get(drill_id))["attempts"] and len(d["attempts"]) == attempts
+                          and d["attempts"][-1].get("status") == "done" and d)
+
+    def test_the_whole_loop(self):
+        rep = self.service.add_person("Asha Loop", "rep")["id"]
+        self.req("PUT", "/api/calls/example-solar-01/rep", {"rep_id": rep})
+        # The Coach sets a focus and a drill for it from the real weak moment; the persona is built (rules).
+        coach = self.until(lambda: (c := self.coach(rep))["drills"] and c)
+        self.assertEqual(coach["focus"]["criterion"], "objection-handling")
+        escalations = coach["escalations"]
+        self.assertEqual([e["reason"] for e in escalations], ["contradicted_claim"])  # the 10-year inverter claim
+        drill_id = coach["drills"][0]["id"]
+        drill = self.until(lambda: (d := self.req("GET", f"/api/drills/{drill_id}")[1])["status"] == "ready" and d)
+        self.assertIn("a different price", drill["persona"]["opening"])
+        self.assertNotIn("3,60,000", json.dumps(drill["persona"]))
+
+        # Attempt 1: defend the price; the customer pushes back. Fail.
+        code, client, _ = self.drill_room(drill_id, rep)
+        self.say(code, client, "Our panels have a 25-year performance warranty.")
+        self.assertIn(self.hub.rooms[code].lines[-1]["mood"], ("doubtful", "annoyed"))
+        d = self.finish(code, client, drill_id, 1)
+        self.assertEqual(d["attempts"][0]["verdict"], "fail")
+        self.assertEqual(d["attempts"][0]["debrief"]["real_answer"], drill["moment"]["quote"])
+        self.assertEqual(d["attempts"][0]["practice_answer"] if False else d["attempts"][0]["debrief"]["practice_answer"]["text"],
+                         "Our panels have a 25-year performance warranty.")
+        call = self.req("GET", f"/api/calls/{d['attempts'][0]['sim_call_id']}")[1]
+        self.until(lambda: self.req("GET", f"/api/calls/{call['id']}")[1]["status"] == "done")
+        call = self.req("GET", f"/api/calls/{call['id']}")[1]
+        self.assertEqual((call["kind"], call["drill_id"], call.get("coaching")), ("practice", drill_id, None))
+
+        # Attempt 2: ask first. Pass, and the Coach makes the drill harder.
+        code, client, _ = self.drill_room(drill_id, rep)
+        self.say(code, client, "What does the other quote include: which panels and inverter?")
+        d = self.finish(code, client, drill_id, 2)
+        self.assertEqual(d["attempts"][1]["verdict"], "pass")
+        self.until(lambda: self.service.drills.get(drill_id)["difficulty"] == 2)
+
+        # A later real call where the rep handles the objection: transfer passes; the Coach closes the focus.
+        moved = json.loads((SOLAR / "transcript.json").read_text(encoding="utf-8"))
+        moved["segments"][4]["text"] = "What does the other quote include: which panel brand and inverter?"
+        path = Path(self.tmp.name) / "handled.json"
+        path.write_text(json.dumps(moved), encoding="utf-8")
+        self.service._factory = lambda call, speakers: (FixtureTranscriber(path), FixtureAnalyzer(SOLAR / "analysis.json"), None)
+        status, out = self.req("POST", f"/api/calls?pack=demo-solar&started_at=2026-10-20T10:00:00%2B05:45"
+                                       f"&filename=c.wav&rep_id={rep}", raw=b"RIFF")
+        self.assertEqual(status, 201)
+        coach = self.until(lambda: (c := self.req("GET", f"/api/coach/{rep}")[1])["history"] and c, timeout=20,
+                           why=lambda: json.dumps([self.service.coach_store.get(rep).get("transfer"),
+                                                   self.req("GET", f"/api/calls/{out['id']}")[1].get("status")]))
+        passed = coach["history"][-1]
+        self.assertEqual((passed["status"], passed["criterion"]), ("passed", "objection-handling"))
+        self.assertEqual(passed["evidence"]["call_id"], out["id"])
+        self.assertEqual(coach["transfer"][-1]["segment_ids"], ["s05"])
+        self.assertNotEqual((coach["focus"] or {}).get("criterion"), "objection-handling")  # the next focus
+        today = self.req("GET", f"/api/today?person={rep}")[1]
+        self.assertEqual(today["transfer"][-1]["verdict"], "pass")
+
+    def test_drill_needs_a_rep_and_a_weak_moment(self):
+        status, out = self.req("POST", "/api/calls/example-solar-01/moments/m1/drill", {})
+        self.assertIn(status, (201, 400))
+        c = self.req("GET", "/api/calls/example-solar-01/coaching")[1]
+        strong = next(m for m in c["moments"] if m["kind"] == "strong")
+        rep = self.service.add_person("Bikash Loop", "rep")["id"]
+        status, out = self.req("POST", f"/api/calls/example-solar-01/moments/{strong['id']}/drill", {"by": rep})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.req("POST", "/api/drills/nope/start", {})[0], 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

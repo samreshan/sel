@@ -67,13 +67,15 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 154 tests; the 5 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 169 tests; the 6 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm)
+python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules    # Judge vs transfer_gold.json (rules|llm)
+python scripts/drill_latency.py                            # AI customer reply times (--model, --rules)
 python scripts/perf_ui.py                                 # UI performance on a generated 2-hour call (Playwright)
 python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base   # two browsers, live Whisper
 ```
@@ -99,6 +101,11 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/asr.py` | faster-whisper: whole recordings (`transcribe`) and live windows (`transcribe_pcm`) |
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
+| `sel/persona.py`, `sel/ai_customer.py` | Anonymised practice personas; the AI customer (`{say, end_call, mood}`, rules fallback) |
+| `sel/drills.py`, `sel/transfer.py` | Drill store, Judge, debrief; transfer checks on real calls |
+| `sel/files.py` | JSON reads and atomic replaces that retry Windows sharing violations |
+| `sel/web/practice.js` | Practice (`#practice`, `#practice/<id>`): drills, the AI customer room, debrief; lazy-loaded |
+| `scripts/drill_latency.py` | AI customer reply times on this machine |
 | `sel/coach.py` | Coaching: `check_line` (gate for suggested lines), moments (rules, `MomentFinder`, `gate_moments`), `LineWriter` (RAG), `diagnose`, moment actions, `CoachStore`, `RuleCoach` / `ModelCoach`, `apply_actions` |
 | `sel/simulator.py` | `SimulatorHub`: rooms, presence, WebRTC signal relay, lines, `PcmSegmenter`, live Whisper worker, filing the call |
 | `sel/events.py` | In-process pub/sub behind the Server-Sent Events stream |
@@ -116,7 +123,9 @@ Next to the call folders: `calls/people.json` (the team) and
 `calls/coach/<person>.json` (focus, history, the Coach's actions log). Call
 folder (`calls/<id>/`): `call.json` (with `coaching_status`), `audio.<ext>`,
 `live_transcript.json` (simulated calls), `transcript.json`, `analysis.json`,
-`review.json`, `report.json` (with a `score` key), `coaching.json`. Example
+`review.json`, `report.json` (with a `score` key), `coaching.json`; `call.json` has
+`kind` (real | practice) and, for drills, `drill_id`. `calls/drills/<id>.json`
+holds drills and their attempts. Example
 calls carry `coaching.json` (hand-written stand-in for the coaching models,
 with deliberate mistakes) and `coaching_gold.json`.
 
@@ -380,6 +389,114 @@ written with the fixtures, not independently.
 - Tests must wait for the job queue before deleting temp folders now that
   coaching runs after `done` (`CallService.wait_idle`); Windows refuses to
   delete a file another thread is writing.
+
+## Practice and measure (Phase 3)
+
+The loop continues: **practise** (a drill with an AI customer built from the
+weak moment) → **perform** (the next real call) → **measure** (a transfer
+check on that call) → the Coach closes the focus or keeps going.
+
+- **Drills** (`sel/drills.py`, `drills/<id>.json`): one weak moment of a real
+  call, for that call's rep. Created by the Coach (`create_drill` for the
+  focus) or by "Practise this (90 s)" on a moment or on Today. The persona is
+  built on the agent queue (status preparing → ready).
+- **Persona** (`sel/persona.py`): code anonymises first (`anonymise`: the
+  call's and the team's names, phone numbers, emails, amounts such as "NPR
+  3,60,000" or "3 lakh 60" become "a different price"), then the chat model
+  writes about/wants/opening/if_good/if_poor; code anonymises its output again
+  and picks the name from a fictional list that avoids every real name. Without
+  a model the opening is the anonymised customer line itself.
+- **AI customer** (`sel/ai_customer.py`) in a `SimulatorHub` drill room
+  (`create_drill_room`): the rep and an AI participant, ready to start. The
+  persona is a constant system prompt (prompt-cache friendly), the transcript
+  the user message, replies capped (80 tokens) as `{say, end_call, mood}`. A
+  rep line queues one reply on the AI worker thread; a reply that arrives
+  while the rep spoke again is recomputed; `ai_busy` is cleared under the same
+  lock that adds the reply. A model error, an empty line or a line with ids
+  falls back to the rules customer (softens after `difficulty` real
+  questions, pushes back otherwise, says goodbye when a dated next step is
+  agreed or after 8 turns). `end_call` ends the room; the rep's tab files it.
+- **Filing and debrief.** A drill room is filed as a call of kind
+  `practice` with `drill_id`, analysed by the rules (keeps the CPU free) and
+  never coached; `on_drill_finished` records the attempt (status judging) and
+  queues the debrief: the Judge on the practice transcript, the practice
+  answer it cites, the real answer and the better line. Then a Coach turn.
+- **Judge** (`drills.judge`): code verdict from the scorecard grade (met →
+  pass, partly/missed → fail, not raised → not_applicable). A model verdict
+  must cite a real segment (a customer line moves to the rep's reply). Where
+  code measures the skill and disagrees, the verdict is `unsure` and counts
+  for nothing; "never came up" is code's call alone.
+- **Transfer** (`sel/transfer.py`): after a real call of a rep with an active
+  focus set before the call is coached (or when its rep is set later), the
+  Judge grades the focus criterion on it (analysis model in the job; chat
+  model when the rep is set later). Stored in the coach file; a pass lets the
+  Coach close the focus.
+- **Coach actions** (`COACH_ACTIONS`): `set_focus`, `close_focus` (needs a
+  transfer pass since the focus was set; never a manager's focus),
+  `create_drill` (a weak moment of the focus, one drill per moment),
+  `raise_difficulty` (last attempt passed at the current level, max 3),
+  `escalate_to_manager` (only `contradicted_claim` on a real call,
+  `failed_drill` after three fails, `change_manager_focus`; each once).
+  `RuleCoach` runs the triggers in that order; `ModelCoach` only chooses the
+  next focus. Applied create/raise actions are carried out by the service.
+- **Kinds.** `call_kind`: real (uploads, examples) or practice (the
+  simulator, drills). Skills, the Coach, transfer checks and Today's skills
+  and averages count real calls only.
+- **UI**: `sel/web/practice.js` (lazy, `#practice`, `#practice/<id>`), "Practise
+  this" on weak moments and Today's focus, manager Today "Needs you".
+- **API**: `POST /api/calls/<id>/moments/<m>/drill`, `GET /api/drills?person=`,
+  `GET /api/drills/<id>`, `POST /api/drills/<id>/start` (→ room + client),
+  `POST /api/drills/<id>/debrief` (re-run); event `drill` on `calls`.
+
+### Practice: measured
+
+`python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules|llm`
+runs the Judge on six labelled variants of solar-01 (`transfer_gold.json`):
+the call as recorded, asking first, asking then explaining, a tag question,
+no objection at all, and defending first then asking a turn later.
+
+| Judge | Right | Unsure | False pass | Time |
+|---|---|---|---|---|
+| Rules, before the fix below | 5/6 | 0 | 1 (defended first, asked later) | < 0.1 s |
+| Rules, now | 6/6 | 0 | 0 | < 0.1 s |
+| qwen2.5:7b checked by the rules (two runs, same result) | 4/6 | 2 | 0 | 235 s for 5 requests |
+
+The model said "pass" on both calls where the rep defended the price before
+asking; the rules disagreed, so the verdict became "unsure" instead of a pass
+that would have closed the focus.
+
+`scripts/drill_latency.py` (the solar-01 price objection, four rep lines, the
+AI worker of a real drill room), Intel i7-1255U, CPU only, Ollama, Windows:
+
+| AI customer | Reply after the rep's line | First reply (cold) | Persona |
+|---|---|---|---|
+| Rules (no model) | under 0.01 s | – | under 0.01 s |
+| qwen2.5:7b (the chat client inherits the analysis model) | median 12.0 s, p90 17.3 s (4 replies) | 28.4 s | 52 s |
+
+Target: 2 to 3 s. A 7B model on this CPU is four to six times too slow for a
+conversation; the chat model has to be a small one (an owner decision,
+docs/decisions.md 14). The replies themselves were in character ("Can you tell
+me what their quote includes, like panel brand and warranty details?"), but
+one ended with the stage direction "End call.", now stripped.
+
+### Practice: findings
+
+- **Typed and AI lines can start in the same 10 ms.** Sorting by (start, end)
+  put a reply before its question. Lines now tie-break by arrival, and typed
+  and AI lines never start before the latest line.
+- **A rep line could fall between "reply added" and "busy cleared"** and get
+  no answer (and a later reply was duplicated). The flag is now cleared under
+  the lock that adds the reply.
+- **The objection rule passed a rep who defended first and asked a turn
+  later** (the transfer eval's "false pass", the error that would close a
+  focus unearned). A reply that makes a claim before any question now counts
+  as not handled. Rules analyzer numbers on the gold files are unchanged.
+- **Windows: `os.replace` and a reader collide** (`PermissionError`, which the
+  server maps to 403). `sel/files.py` retries reads and replaces briefly, and
+  uses a unique temp name per write.
+- The drill page rendered before the team list arrived and showed "choose who
+  you are"; it re-renders on `people-changed`.
+- Today's skills counted practice calls; they count real calls only.
 
 ## Performance
 

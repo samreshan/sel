@@ -34,6 +34,12 @@
 | The Coach only proposes; code validates against a whitelist and state; one active focus; it never replaces an active focus (a manager's included) | Agents act through code, so a wrong model answer cannot change a rep's plan |
 | Focus ranking without a model: calls fell short on, then objections, discovery, next step, talk ratio, claims | Practice drills train conversation skills; wrong claims are fixed by the playbook and escalated |
 | Two clients: `SEL_LLM_*` for analysis and coaching, `SEL_CHAT_LLM_*` for the Coach and AI customer | Conversation needs a fast model; analysis can be slower and more accurate |
+| Practice personas are anonymised by code before any prompt and named from a fictional list | Real calls are private; the practice customer must not carry a real customer's name, number or price |
+| Drills are typed first, in English; the AI customer is labelled on every line | Text works on any machine and is easy to test; voice and Nepali are a stretch |
+| The Judge's pass needs Sel's rules to agree where they measure the skill; disagreement is "unsure" | A false pass would close a focus the rep has not earned |
+| A transfer pass on one later real call closes the focus | The loop's measure is the skill showing up on a real call; more calls can be required later |
+| Escalate to a manager only for a contradicted claim on a real call, a drill failed three times, or moving on from a manager's focus | Managers see what needs them; the Coach handles the rest |
+| Practice calls (simulator, drills) never count towards skills, focus or transfer | Practice is where reps try things out |
 
 ## Open
 
@@ -52,3 +58,4 @@
 13. **Live Nepali transcription.** Whisper `base` garbles romanized Nepali; try `initial_prompt` with pack vocabulary and time words, or a Nepali model.
 14. **Chat model and demo laptop.** The AI customer needs replies in 2 to 3 s. On an i7-1255U (CPU) qwen2.5:7b took 35 to 70 s per coaching request. Which small open-weight model (for example qwen2.5:1.5b, Apache-2.0) and which laptop?
 15. **Who confirms a focus.** Today the Coach sets it and a person can change it; should a manager confirm each one?
+16. **How many real-call passes close a focus.** One today.

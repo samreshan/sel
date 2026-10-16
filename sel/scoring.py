@@ -114,7 +114,9 @@ def _grade_signal(signal: str, sig: dict[str, Any], final: bool) -> tuple[float 
         handled = sum(1 for o in judged if o["handled"])
         miss = next((o for o in judged if not o["handled"]), None)
         detail = f"{handled} of {_plural(len(judged), 'objection')} answered with a question first"
-        return handled / len(judged), detail, (miss.get("reply") or miss["segment"]) if miss else judged[-1]["segment"], ""
+        # A miss points at the reply that missed; all handled points at the last reply that did it.
+        cited = miss if miss else judged[-1]
+        return handled / len(judged), detail, cited.get("reply") or cited["segment"], ""
 
     if signal == "claims":
         claims = sig["claims"]

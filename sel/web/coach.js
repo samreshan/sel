@@ -168,6 +168,7 @@
       ),
       page.todayErr ? el("p", { class: "form-error", role: "alert", text: page.todayErr }) : null,
       counts(t),
+      manager ? escalations(t) : null,
       t.focus
         ? el("div", { class: "bento" }, focusCard(t.focus), followUps(t, manager))
         : el("div", { class: "bento" }, skills(t, manager), followUps(t, manager)),
@@ -248,11 +249,53 @@
                 el("p", { class: "better-line-text", text: S.quoted(line.text) })
               )
             : null,
-          el("div", { class: "row" }, el("a", { class: "button small", href: `#call/${enc(m.call_id)}`, text: "Open the call" }))
+          el("div", { class: "row" }, practiseButton(f), el("a", { class: "button small", href: `#call/${enc(m.call_id)}`, text: "Open the call" }))
         )
       );
     } else body.push(muted("The moments behind this focus will show here after your next reviewed call."));
+    if (page.today && page.today.transfer && page.today.transfer.length) body.push(lastTransfer(page.today));
     return sectionOf("list-card page-section bento-anchor focus-card", "This week's focus", sub, "target", "violet", ...body);
+  }
+
+  // The focus's drill if the Coach made one, else a new one from its latest moment.
+  function practiseButton(f) {
+    const drills = (page.today && page.today.drills) || [];
+    const d = drills.find((x) => x.pack_id === f.pack_id && x.criterion === f.criterion);
+    if (d) return el("a", { class: "button primary small", href: `#practice/${enc(d.id)}`, text: d.attempts ? "Practise again" : "Practise this (90 s)" });
+    const btn = el("button", { type: "button", class: "primary small", text: "Practise this (90 s)" });
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const nd = await api(`/api/calls/${enc(f.latest.call_id)}/moments/${enc(f.latest.moment_id)}/drill`, { method: "POST", json: { by: S.viewer() ? S.viewer().id : null } });
+        navigate(`#practice/${enc(nd.id)}`);
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = e.message;
+      }
+    });
+    return f.latest ? btn : null;
+  }
+
+  function lastTransfer(t) {
+    const x = (t.transfer || [])[t.transfer.length - 1];
+    if (!x) return null;
+    const label = { pass: ["ok", "Showed up on a real call"], fail: ["bad", "Not yet on a real call"], not_applicable: ["neutral", "Did not come up on your last call"], unsure: ["warn", "Unclear on your last call"] }[x.verdict] || ["neutral", x.verdict];
+    return el("div", { class: "focus-moment" }, el("div", { class: "better-line-head" }, el("span", { class: "label", text: "On your real calls" }), pill(label[0], label[1])), x.quote ? el("p", { class: "said-line role-rep" }, el("span", { class: "said-who", text: `You, on the call with ${x.customer_name || "a customer"}` }), S.quoted(x.quote)) : null, x.why ? el("p", { class: "muted small", text: x.why }) : null);
+  }
+
+  function escalations(t) {
+    if (!t.escalations || !t.escalations.length) return null;
+    const why = { contradicted_claim: "A contradicted claim reached a customer", failed_drill: "Failed the same drill three times", change_manager_focus: "Wants to move on from the focus you set" };
+    const rows = t.escalations.map((e) =>
+      el(
+        "li",
+        { class: "page-row" },
+        icon("alert", 18),
+        el("div", { class: "page-row-main" }, el("span", { class: "strong", text: `${e.person_name}: ${why[e.reason] || e.reason}` }), el("span", { class: "muted small", text: e.note || "" })),
+        e.call_id ? el("a", { class: "button small", href: `#call/${enc(e.call_id)}`, text: "Open the call" }) : e.drill_id ? el("a", { class: "button small", href: `#practice/${enc(e.drill_id)}`, text: "Open the drill" }) : null
+      )
+    );
+    return section("Needs you", "Sel's coach escalates only these three things; everything else it handles itself.", "alert", "warn", el("ul", { class: "page-rows" }, ...rows));
   }
 
   async function setFocus(skill, btn) {
@@ -304,7 +347,7 @@
         el(
           "div",
           { class: "row" },
-          el("button", { type: "button", class: "small ghost", text: "Practise this", on: { click: () => navigate("#sim") } }),
+          el("button", { type: "button", class: "small ghost", text: "Practise this", on: { click: () => navigate("#practice") } }),
           !manager && !(t.focus && t.focus.pack_id === s.pack_id && t.focus.criterion === s.criterion_id)
             ? el("button", { type: "button", class: "small ghost", text: t.focus ? "Make this my focus" : "Focus on this", on: { click: (e) => setFocus(s, e.currentTarget) } })
             : null
@@ -487,8 +530,12 @@
         "div",
         { class: "page" },
         header("Team", "People", "Reps and managers. Calls belong to a rep; managers see the whole team on Today. There is no login, so anyone on this computer can switch."),
-        section("Add a person", null, "user", "accent", personForm((p) => (!S.viewer() ? S.setViewer(p.id) : null), "Add")),
-        people.length ? section("The team", null, "user", "accent", el("ul", { class: "page-rows" }, ...rows)) : null
+        el(
+          "div",
+          { class: "people-grid" },
+          section("Add a person", null, "user", "accent", personForm((p) => (!S.viewer() ? S.setViewer(p.id) : null), "Add")),
+          people.length ? section("The team", null, "user", "accent", el("ul", { class: "page-rows" }, ...rows)) : null
+        )
       )
     );
   }
@@ -550,9 +597,17 @@
         { class: "page" },
         header("Playbook", detail.name, detail.description, el("a", { class: "button", href: "#sim", text: "Practise a call" })),
         packs.length > 1 ? tabs : null,
-        section("Skills", "The scorecard every call is graded on. Reps see these words when they fall short.", "target", "violet", skillsList),
-        section("Approved facts", "Claims on calls are checked against these and the documents below.", "check", "ok", detail.facts.length ? facts : muted("No facts in this pack.")),
-        section("Documents", null, "doc", "accent", detail.docs.length ? docs : muted("No documents in this pack.")),
+        el(
+          "div",
+          { class: "bento" },
+          sectionOf("list-card page-section bento-anchor", "Skills", "The scorecard every call is graded on. Reps see these words when they fall short.", "target", "violet", skillsList),
+          el(
+            "div",
+            { class: "playbook-side" },
+            section("Approved facts", "Claims on calls are checked against these and the documents below.", "check", "ok", detail.facts.length ? facts : muted("No facts in this pack.")),
+            section("Documents", null, "doc", "accent", detail.docs.length ? docs : muted("No documents in this pack."))
+          )
+        ),
         el("p", { class: "muted small", text: `Languages: ${detail.languages.join(", ") || "not set"} · week starts on ${detail.week_starts_on}` })
       )
     );

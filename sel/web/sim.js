@@ -1467,7 +1467,9 @@
   S.on("room", (v) => {
     if (sim.session && v.code === sim.session.code) applyRoom({ ...v, you: myRole() });
   });
-  S.on("line", (line) => addLine(line));
+  S.on("line", (line) => {
+    if (!line.room || (sim.session && line.room === sim.session.code)) addLine(line);
+  });
   S.on("live", (snap) => {
     if (!mine()) return;
     sim.live = snap;

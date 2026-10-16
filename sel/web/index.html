@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <link rel="prefetch" href="/static/sim.js" as="script">
   <link rel="prefetch" href="/static/coach.js" as="script">
+  <link rel="prefetch" href="/static/practice.js" as="script">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -36,7 +37,7 @@
           <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg>
           Today
         </a>
-        <a href="#sim" data-nav="sim" id="open-sim">
+        <a href="#practice" data-nav="practice" id="open-sim">
           <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#phone"/></svg>
           Practice
           <span class="live-dot" aria-hidden="true"></span>
@@ -76,6 +77,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-worklet="/static/pcm-worklet.js"></script>
+  <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-practice="/static/practice.js" data-worklet="/static/pcm-worklet.js"></script>
 </body>
 </html>

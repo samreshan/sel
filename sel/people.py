@@ -7,14 +7,14 @@ to the calls (``<calls dir>/people.json``).
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .files import read_json, write_json
 
 ROLES = ("rep", "manager")
 MAX_PEOPLE = 200
@@ -38,7 +38,7 @@ class PeopleStore:
         except OSError:
             return []
         if self._cache is None or self._cache[0] != mtime:
-            people = json.loads(self.path.read_text(encoding="utf-8"))
+            people = read_json(self.path)
             self._cache = (mtime, people)
         return [dict(p) for p in self._cache[1]]
 
@@ -46,9 +46,9 @@ class PeopleStore:
         return next((p for p in self.list() if p["id"] == person_id), None) if person_id else None
 
     def _save(self, people: list[dict[str, Any]]) -> None:
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(people, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        write_json(self.path, people)
+        # Two writes can share an mtime; this process's own write must never be served stale.
+        self._cache = (self.path.stat().st_mtime_ns, [dict(p) for p in people])
 
     @staticmethod
     def _clean(name: Any, role: Any) -> tuple[str, str]:

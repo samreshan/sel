@@ -116,6 +116,27 @@ compact insets. Existing mobile sidebar behavior remains intact.
   the real moment (`.said`) and the better line. Skills to work on moves below.
   The manager's team table gains a Focus column. Example under `#patterns`.
 
+## Practice: drills, the AI customer and the debrief
+
+- Navigation **Practice** opens `#practice` (the rep's focus and drills; free
+  practice with a person stays at `#sim`). A drill page shows the scenario as a
+  `.bento-anchor` card: the real moment (`.said`), what fell short, the better
+  line, and `.drill-persona` (who the AI customer is, labelled "AI persona" or
+  "Built by Sel's rules", with the anonymisation note).
+- The practice call reuses `.transcript-card`, `.sim-lines`/`.sim-line` and
+  `.sim-composer`. Customer lines carry an "AI" tag; `.drill-skill` shows the
+  drill criterion's live status; `.drill-status` says when the customer is
+  replying. One action at a time: Start the call, then End and get feedback.
+- The debrief is a `.card.debrief` (`.is-success` on a pass): the verdict pill
+  and who judged it ("Judged by AI and Sel's rules" or "by Sel's rules"), then
+  `.compare`: the real answer and the practice answer stacked on the left, the
+  better line as the larger card on the right (one column below 900 px).
+  Verdicts: Passed (sage), Not yet (rose), Did not come up (neutral), Unclear
+  (honey). Example under `#patterns`.
+- Manager Today starts with **Needs you**: escalations only (a contradicted
+  claim reached a customer, a drill failed three times, the Coach wants to move
+  on from a manager's focus).
+
 ## Buttons
 
 - Default height: 40 px; compact height: 36 px.

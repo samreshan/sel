@@ -3356,3 +3356,78 @@ button.person-pick {
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
+
+/* ---------- practice: drills with the AI customer, debrief ---------- */
+
+.drill-persona {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.drill-skill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+.drill-skill:empty {
+  display: none;
+}
+
+.drill-status {
+  min-height: 18px;
+  padding: 0 var(--space-4);
+}
+
+/* The debrief: the verdict, then three answers side by side, in reading order. */
+.debrief {
+  gap: var(--space-3);
+}
+
+.compare {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: var(--space-3);
+}
+
+.compare > li {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+
+/* The better line is the answer to keep: the larger card, beside the two it improves on. */
+.compare > li:last-child:nth-child(3) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: var(--surface);
+  border-color: var(--border-2);
+}
+
+.compare-text {
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compare > li:last-child:nth-child(3) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}

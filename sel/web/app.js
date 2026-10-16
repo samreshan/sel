@@ -22,8 +22,8 @@
   const CACHE_MAX = 24;
   const TAB = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const SCRIPT = document.currentScript;
-  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "people", "rooms", "room", "line", "live", "signal"];
-  const COACH_PAGES = new Set(["today", "playbook", "people"]);
+  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "drill", "people", "rooms", "room", "line", "live", "signal"];
+  const COACH_PAGES = new Set(["today", "playbook", "people", "practice"]);
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -871,7 +871,7 @@
   }
 
   function renderNav() {
-    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "sim" : null;
+    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "practice" : null;
     for (const a of document.querySelectorAll(".primary-nav a[data-nav]")) {
       const on_ = a.dataset.nav === active;
       a.classList.toggle("is-active", on_);
@@ -2203,6 +2203,7 @@
         );
       }
       actions.push(el("button", { type: "button", class: "small moment-edit", text: line ? "Edit line" : "Write a line", dataset: { action: "edit" }, disabled: busy, on: { click: () => openMomentForm(m.id, "edit") } }));
+      if (state.call.kind !== "practice") actions.push(el("button", { type: "button", class: "small", text: "Practise this (90 s)", dataset: { action: "drill" }, disabled: busy, on: { click: () => practise(m.id) } }));
     }
     if (!dismissed) actions.push(el("button", { type: "button", class: "small ghost", text: m.note ? "Edit note" : "Add note", dataset: { action: "note" }, disabled: busy, on: { click: () => openMomentForm(m.id, "note") } }));
     actions.push(
@@ -2231,6 +2232,18 @@
       msg ? el("p", { class: `form-status is-${msg.kind}`, role: "status", text: msg.text }) : null,
       el("div", { class: "card-actions" }, ...actions)
     );
+  }
+
+  // A drill on this moment for the call's rep (or the viewer), then its page.
+  async function practise(momentId) {
+    const me = viewer();
+    try {
+      const d = await api(`/api/calls/${enc(state.callId)}/moments/${enc(momentId)}/drill`, { method: "POST", json: { by: me ? me.id : null } });
+      navigate(`#practice/${enc(d.id)}`);
+    } catch (e) {
+      state.momentMsg[momentId] = { kind: "error", text: e.status === 400 ? `${e.message}. Choose whose call this is above.` : e.message };
+      renderPanel();
+    }
   }
 
   async function momentAction(momentId, action, body) {
@@ -2950,6 +2963,19 @@
   }
 
   function renderCoach(main) {
+    if (state.coachPage === "practice") {
+      if (window.Sel.practice) {
+        window.Sel.practice.render(main, state.coachArg);
+        return;
+      }
+      main.replaceChildren(skeleton());
+      loadModule("practice", "Practice")
+        .then(() => {
+          if (state.view === "coach" && state.coachPage === "practice") renderMain();
+        })
+        .catch((e) => main.replaceChildren(el("div", { class: "error-box", role: "alert" }, el("p", { class: "strong", text: e.message }))));
+      return;
+    }
     if (window.Sel.coach) {
       window.Sel.coach.render(main, state.coachPage, state.coachArg);
       return;

@@ -175,9 +175,32 @@ class BrowserE2E(unittest.TestCase):
         page.wait_for_selector(".focus-card .focus-title", timeout=15000)
         self.assertEqual(page.errors, [])
 
-    def post(self, path, body):
+    def test_drill_with_the_ai_customer_and_debrief(self):
+        person = json.loads(self.post("/api/people", {"name": "Drill E2E", "role": "rep"}))
+        self.post(f"/api/calls/example-solar-01/rep", {"rep_id": person["id"]}, method="PUT")
+        for _ in range(200):  # the Coach sets a focus and makes a drill for it
+            drills = json.loads(self.get(f"/api/drills?person={person['id']}"))
+            if drills and drills[0]["status"] == "ready":
+                break
+            time.sleep(0.05)
+        page = self.page()
+        page.add_init_script(f"localStorage.setItem('sel.viewer', JSON.stringify('{person['id']}'))")
+        page.goto(f"{self.base}/#practice")
+        page.locator(".page-row-link").first.click()
+        page.click("text=Start the drill")
+        page.click("text=Start the call")
+        page.wait_for_selector(".sim-line.role-customer .lang:text('AI')")  # the AI customer opens, labelled
+        page.fill("#drill-say", "What does the other quote include: which panels and inverter?")
+        page.press("#drill-say", "Enter")
+        page.wait_for_function("document.querySelectorAll('.sim-line.role-customer').length >= 2")
+        page.click("text=End and get feedback")
+        page.wait_for_selector(".debrief :text('Passed')", timeout=15000)
+        self.assertIn("What does the other quote include", page.locator(".debrief .compare").inner_text())
+        self.assertEqual(page.errors, [])
+
+    def post(self, path, body, method="POST"):
         import urllib.request
-        r = urllib.request.Request(f"{self.base}{path}", data=json.dumps(body).encode(), method="POST",
+        r = urllib.request.Request(f"{self.base}{path}", data=json.dumps(body).encode(), method=method,
                                    headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(r, timeout=10) as resp:
             return resp.read()

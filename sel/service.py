@@ -12,8 +12,11 @@ Each call is a folder under ``SEL_CALLS_DIR`` (default ``calls/``)::
     coaching.json        weak and strong moments, better lines and what the line gate refused (sel/coach.py),
                          with each person's endorsements, edits, dismissals and notes
 
-and next to the call folders: ``people.json`` holds the team (``sel/people.py``)
-and ``coach/<person>.json`` each rep's focus and the Coach's actions log.
+and next to the call folders: ``people.json`` holds the team (``sel/people.py``),
+``coach/<person>.json`` each rep's focus, transfer checks, escalations and the
+Coach's actions log, and ``drills/<id>.json`` the practice drills
+(``sel/drills.py``). A call is ``kind`` real (uploaded, examples) or practice
+(the simulator); only real calls count towards skills and transfer checks.
 A call's ``rep_id`` says whose call it is; Today (``today()``) gathers what
 needs each person's attention across their calls.
 
@@ -46,7 +49,11 @@ from pathlib import Path
 from typing import Any
 
 from . import coach as coaching_mod
-from .coach import CoachStore, LineWriter, MomentFinder, RuleCoach
+from . import drills as drills_mod
+from . import transfer as transfer_mod
+from .files import read_json, write_json
+from .coach import CoachStore, LineWriter, ModelCoach, MomentFinder, RuleCoach
+from .drills import DrillStore
 from .drafts import apply_edits, approve
 from .events import EventBus
 from .live import pack_index
@@ -58,7 +65,8 @@ from .scoring import score_report
 
 AUDIO_TYPES = {".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".mp4"}
 SUMMARY_FIELDS = ("id", "pack_id", "source", "status", "stage", "progress", "started_at", "customer_name",
-                  "original_filename", "created_at", "updated_at", "rep_id", "rep_name", "coaching_status")
+                  "original_filename", "created_at", "updated_at", "rep_id", "rep_name", "coaching_status", "kind",
+                  "drill_id")
 MOMENT_ACTIONS = ("endorse", "dismiss", "edit", "note")
 TODAY_RECENT = 8  # calls listed under "Recent calls"
 SKILL_WINDOW = 10  # a person's latest finished calls that "Skills to work on" counts over
@@ -69,13 +77,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def call_kind(call: dict[str, Any]) -> str:
+    """real (a customer call) or practice (the simulator). Calls filed before kinds existed: by source."""
+    return call.get("kind") or ("practice" if call.get("source") == "simulator" else "real")
+
+
 def _new_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
 
 
 class CallService:
     def __init__(self, calls_dir: str | Path, packs_dir: str | Path, analysis_factory=None,
-                 bus: EventBus | None = None, coaching_factory=None, coach_factory=None):
+                 bus: EventBus | None = None, coaching_factory=None, coach_factory=None, chat_factory=None):
         self.root = Path(calls_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self.packs_dir = Path(packs_dir)
@@ -89,13 +102,17 @@ class CallService:
         self._coachings: dict[str, tuple[int, dict[str, Any]]] = {}
         self.people = PeopleStore(self.root / "people.json")
         self.coach_store = CoachStore(self.root / "coach")
+        self.drills = DrillStore(self.root / "drills")
         # Builds (transcriber, analyzer, speaker_labeler) for a call; injectable for tests.
         self._factory = analysis_factory or default_factory
         # The language model that coaches a call (moments, better lines), or None for rules.
         # Default: the analysis model the call was analysed with, so rules-analysed calls get rules coaching.
         self._coaching_factory = coaching_factory or (lambda call, analyzer: getattr(analyzer, "llm", None))
-        # The Coach agent that picks a focus. Rules unless one is given (``sel serve`` passes the chat model).
-        self._coach_factory = coach_factory or RuleCoach
+        # The fast chat model (``SEL_CHAT_LLM_*``) for personas, the AI customer and debriefs, or None for
+        # rules. None unless given: ``sel serve`` passes ``default_chat_factory``; tests stay deterministic.
+        self._chat_factory = chat_factory or (lambda: None)
+        # The Coach: on the chat model when there is one, else rules.
+        self._coach_factory = coach_factory or (lambda: ModelCoach(llm) if (llm := self._chat_factory()) else RuleCoach())
         self._worker = threading.Thread(target=self._work, daemon=True)
         self._worker.start()
         self._agent_worker = threading.Thread(target=self._agent_work, daemon=True)
@@ -154,13 +171,15 @@ class CallService:
         path = self.root / call_id / name
         if not path.is_file():
             return default
-        return json.loads(path.read_text(encoding="utf-8"))
+        return read_json(path)
 
     def _write(self, call_id: str, name: str, value: Any) -> None:
         path = self.root / call_id / name
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(path)
+        write_json(path, value)
+        # Caches are keyed by mtime, and two writes can share one: drop this call's entry on every write.
+        cache = {"call.json": self._summaries, "report.json": self._reports, "coaching.json": self._coachings}.get(name)
+        if cache is not None:
+            cache.pop(call_id, None)
 
     def _set_status(self, call_id: str, **changes: Any) -> None:
         with self._lock:
@@ -236,6 +255,7 @@ class CallService:
             "rep_id": rep_id, "rep_name": rep_name, "customer_name": meta.get("customer_name") or None,
             "customer_email": meta.get("customer_email") or None,
             "channels": meta.get("channels", "auto"), "rep_channel": int(meta.get("rep_channel", 0)),
+            "kind": "real",
             "status": "queued", "stage": "waiting", "progress": 0.0, "error": None,
             "created_at": _now(), "updated_at": _now(),
         }
@@ -278,6 +298,7 @@ class CallService:
             "channels": "split", "rep_channel": 0,
             "transcribe": "live" if transcript.segments or audio_file is None else "recording",
             "analyzer": meta.get("analyzer", "auto"), "room": meta.get("room"), "live_score": meta.get("live_score"),
+            "kind": meta.get("kind", "practice"), "drill_id": meta.get("drill_id"),
             "status": "queued", "stage": "waiting", "progress": 0.0, "error": None,
             "created_at": _now(), "updated_at": _now(),
         }
@@ -311,7 +332,7 @@ class CallService:
         call = {
             "id": call_id, "pack_id": pack_id, "source": "fixture", "original_filename": None,
             "audio_file": audio_file, "started_at": transcript["started_at"],
-            "rep_id": None, "rep_name": rep.get("name"), "customer_name": cust.get("name"),
+            "rep_id": None, "rep_name": rep.get("name"), "customer_name": cust.get("name"), "kind": "real",
             "status": "done", "stage": "done", "progress": 1.0, "error": None,
             "created_at": _now(), "updated_at": _now(),
             "report_meta": {"transcriber": "fixture-transcript", "analyzer": "fixture-analysis (hand-written, not model output)"},
@@ -386,6 +407,10 @@ class CallService:
         self._write(call_id, "analysis.json", asdict(proposed))
         self._set_status(call_id, report_meta=report.meta)
         self._rebuild(call_id)
+        if call_kind(call) == "practice":
+            # Practice is debriefed (drills) or reviewed as it is; it does not count towards coaching.
+            self._set_status(call_id, status="done", stage="done", progress=1.0)
+            return
         # The review is ready now; coaching follows in the same job and shows on the Coaching tab when done.
         self._set_status(call_id, status="done", stage="done", progress=1.0, coaching_status="queued")
         try:
@@ -430,7 +455,27 @@ class CallService:
                          coaching_error=error)
         self.bus.publish("calls", "coaching", {"id": call_id})
         if call.get("rep_id"):
+            self.check_transfer(call_id, llm)
             self.request_coach(call["rep_id"])
+
+    def check_transfer(self, call_id: str, llm: Any = None) -> dict[str, Any] | None:
+        """If this real call's rep has a focus set before the call, judge that skill on it (sel/transfer.py)."""
+        call = self._read(call_id, "call.json")
+        rep_id = call.get("rep_id") if call else None
+        if not rep_id or call.get("status") != "done":
+            return None
+        data = self.coach_store.get(rep_id)
+        if not transfer_mod.due({**call, "kind": call_kind(call)}, data.get("focus"), data.get("transfer", [])):
+            return None
+        report = self._read(call_id, "report.json")
+        result = transfer_mod.check(call, report, self.pack(call["pack_id"]), data["focus"], llm)
+        with self.coach_store.lock:
+            data = self.coach_store.get(rep_id)
+            data.setdefault("transfer", []).append(result)
+            data["transfer"] = data["transfer"][-100:]
+            self.coach_store.save(rep_id, data)
+        self.bus.publish("calls", "coach", {"person_id": rep_id, "transfer": result})
+        return result
 
     def coaching(self, call_id: str) -> dict[str, Any] | None:
         self._dir(call_id)
@@ -445,7 +490,7 @@ class CallService:
             return None
         cached = self._coachings.get(call_id)
         if cached is None or cached[0] != mtime:
-            cached = (mtime, json.loads(path.read_text(encoding="utf-8")))
+            cached = (mtime, read_json(path))
             self._coachings[call_id] = cached
         return cached[1]
 
@@ -472,14 +517,25 @@ class CallService:
 
     def request_coach(self, person_id: str) -> None:
         """Ask the Coach to look at this rep (runs on the agent queue)."""
-        self._agents.put(person_id)
+        self._agents.put(("coach", person_id))
 
     def _agent_work(self) -> None:
+        """Agent work that must not wait behind a long analysis: Coach turns, personas, debriefs, transfer checks."""
         while True:
-            person_id = self._agents.get()
+            kind, arg = self._agents.get()
             try:
-                self.run_coach(person_id)
-            except Exception:  # noqa: BLE001 - the Coach is best effort; the next call asks again
+                if kind == "coach":
+                    self.run_coach(arg)
+                elif kind == "persona":
+                    self.prepare_drill(arg)
+                elif kind == "debrief":
+                    self.run_debrief(arg)
+                elif kind == "transfer":
+                    if self.check_transfer(arg, self._chat_factory()):
+                        rep_id = (self._read(arg, "call.json") or {}).get("rep_id")
+                        if rep_id:
+                            self.run_coach(rep_id)
+            except Exception:  # noqa: BLE001 - agents are best effort; the next event asks again
                 traceback.print_exc()
             finally:
                 self._agents.task_done()
@@ -489,12 +545,29 @@ class CallService:
         person = self.people.get(person_id)
         if person is None:
             raise KeyError(f"no person {person_id!r}")
-        calls = [c for c in self.list() if c.get("rep_id") == person_id and c.get("status") == "done"]
+        calls = [c for c in self.list() if c.get("rep_id") == person_id and c.get("status") == "done"
+                 and call_kind(c) == "real"]
         calls.sort(key=lambda c: c.get("started_at") or "", reverse=True)
         coached = [(c, x) for c in calls[:SKILL_WINDOW] if (x := self._coaching(c["id"]))]
         packs = {p.id: p for p in self.packs()}
-        return {"person_id": person_id, "name": person["name"], "focus": self.coach_store.get(person_id).get("focus"),
-                "skills": coaching_mod.skill_candidates(coached, packs.get), "calls_seen": len(coached)}
+        data = self.coach_store.get(person_id)
+        contradicted = []
+        for c in calls[:SKILL_WINDOW]:
+            for claim in (self._report(c["id"]) or {}).get("claims", []):
+                if claim.get("verdict") == "contradicted":
+                    contradicted.append({"call_id": c["id"], "claim_id": claim["id"], "claim": claim["claim"]})
+        closed = [f"{h['pack_id']}/{h['criterion']}" for h in data.get("history", [])[-3:] if h.get("status") == "passed"]
+        return {"person_id": person_id, "name": person["name"], "focus": data.get("focus"),
+                "skills": coaching_mod.skill_candidates(coached, packs.get), "calls_seen": len(coached),
+                "transfer": data.get("transfer", []), "escalations": data.get("escalations", []),
+                "drills": [self._drill_state(d) for d in self.drills.list(person_id)],
+                "contradicted": contradicted, "closed": closed}
+
+    @staticmethod
+    def _drill_state(d: dict[str, Any]) -> dict[str, Any]:
+        s = drills_mod.summary(d)
+        last = (d.get("attempts") or [{}])[-1] if d.get("attempts") else {}
+        return {**s, "last_difficulty": last.get("difficulty")}
 
     def run_coach(self, person_id: str) -> list[dict[str, Any]]:
         """One Coach turn for a rep: it proposes actions, code validates and applies them."""
@@ -515,9 +588,155 @@ class CallService:
             data = self.coach_store.get(person_id)
             log = coaching_mod.apply_actions(actions, state, data, agent.name)
             self.coach_store.save(person_id, data)
+        for entry in log:
+            if not entry["applied"]:
+                continue
+            args = entry["args"]
+            if entry["action"] == "create_drill":
+                self.create_drill(args["call_id"], args["moment_id"], person_id, by=agent.name)
+            elif entry["action"] == "raise_difficulty":
+                self.raise_difficulty(args["drill_id"])
         if any(e["applied"] for e in log):
             self.bus.publish("calls", "coach", {"person_id": person_id, "focus": data.get("focus")})
         return log
+
+    # -- drills -------------------------------------------------------------------
+
+    def create_drill(self, call_id: str, moment_id: str, person_id: str | None = None, by: str | None = None,
+                     origin: str | None = None) -> dict[str, Any]:
+        """A drill on a weak moment of a real call, for the call's rep (or ``person_id``). One per rep and moment."""
+        call = self._read(self._dir(call_id).name, "call.json")
+        person_id = call.get("rep_id") or person_id
+        person = self.people.get(person_id) if person_id else None
+        if person is None or person["role"] != "rep":
+            raise ValueError("say whose call this is first: a drill belongs to a rep")
+        coaching = self._read(call_id, "coaching.json") or {}
+        moment = next((m for m in coaching.get("moments", []) if m["id"] == moment_id), None)
+        if moment is None:
+            raise KeyError(moment_id)
+        if moment["kind"] != "weak":
+            raise ValueError("drills practise moments where the rep fell short")
+        for d in self.drills.list(person_id):
+            if d.get("source") == {"call_id": call_id, "moment_id": moment_id}:
+                return d
+        line = moment.get("better_line") if (moment.get("better_line") or {}).get("check") == "ok" else None
+        drill = {
+            "id": self.drills.new_id(), "person_id": person_id, "pack_id": coaching.get("pack_id") or call["pack_id"],
+            "criterion": moment["criterion"], "title": moment["title"],
+            "source": {"call_id": call_id, "moment_id": moment_id},
+            "moment": {"customer_said": (moment.get("customer_said") or {}).get("quote"), "quote": moment["evidence"]["quote"],
+                       "why": moment.get("why"), "better_line": {"text": line["text"], "by": line.get("by")} if line else None,
+                       "customer_name": call.get("customer_name"), "started_at": call.get("started_at")},
+            "persona": None, "difficulty": 1, "status": "preparing", "created_at": _now(),
+            "created_by": by or "person", "attempts": [],
+        }
+        self.drills.save(drill)
+        self._agents.put(("persona", drill["id"]))
+        self.bus.publish("calls", "drill", drills_mod.summary(drill), origin=origin)
+        return drill
+
+    def _real_names(self, call: dict[str, Any]) -> list[str]:
+        names = [call.get("customer_name"), call.get("rep_name")] + [p["name"] for p in self.people.list()]
+        transcript = self._read(call["id"], "transcript.json") or {}
+        names += [s.get("name") for s in transcript.get("speakers", [])]
+        return [n for n in names if n]
+
+    def prepare_drill(self, drill_id: str) -> dict[str, Any]:
+        """Build the drill's persona (chat model, else rules) from the anonymised moment."""
+        from .persona import build_persona
+
+        drill = self.drills.get(drill_id)
+        call = self._read(drill["source"]["call_id"], "call.json") or {"id": drill["source"]["call_id"]}
+        pack = self.pack(drill["pack_id"])
+        moment = {"criterion": drill["criterion"], "why": drill["moment"].get("why"),
+                  "customer_said": {"quote": drill["moment"].get("customer_said")} if drill["moment"].get("customer_said") else None,
+                  "evidence": {"quote": drill["moment"]["quote"]}}
+        names = self._real_names(call) if call.get("pack_id") else []
+        llm = self._chat_factory()
+        try:
+            persona = build_persona(moment, pack, names, drill_id, llm, drill["difficulty"])
+        except Exception as e:  # noqa: BLE001 - a model error leaves the rules persona; the drill still works
+            persona = build_persona(moment, pack, names, drill_id, None, drill["difficulty"])
+            persona["model_error"] = f"{type(e).__name__}: {e}"
+        with self.drills.lock:
+            drill = self.drills.get(drill_id)
+            drill.update(persona=persona, status="ready")
+            self.drills.save(drill)
+        self.bus.publish("calls", "drill", drills_mod.summary(drill))
+        return drill
+
+    def raise_difficulty(self, drill_id: str) -> dict[str, Any]:
+        with self.drills.lock:
+            drill = self.drills.get(drill_id)
+            drill["difficulty"] = min(drills_mod.MAX_DIFFICULTY, int(drill.get("difficulty") or 1) + 1)
+            if drill.get("persona"):
+                drill["persona"]["difficulty"] = drill["difficulty"]
+            self.drills.save(drill)
+        self.bus.publish("calls", "drill", drills_mod.summary(drill))
+        return drill
+
+    def drill(self, drill_id: str) -> dict[str, Any]:
+        drill = self.drills.get(drill_id)
+        person = self.people.get(drill["person_id"])
+        return {**drill, "person_name": person["name"] if person else None}
+
+    def list_drills(self, person_id: str | None) -> list[dict[str, Any]]:
+        return [drills_mod.summary(d) for d in self.drills.list(person_id)]
+
+    def start_drill(self, drill_id: str, hub, by: str | None = None, offset: str | None = None) -> tuple[Any, str]:
+        """A practice room with the AI customer for this drill; returns (room, the rep's client token)."""
+        from .ai_customer import AICustomer
+
+        drill = self.drills.get(drill_id)
+        if drill.get("status") != "ready" or not drill.get("persona"):
+            raise ValueError("the customer for this drill is still being prepared; try again in a moment")
+        person = self.people.get(drill["person_id"])
+        persona = {**drill["persona"], "difficulty": drill.get("difficulty") or 1}
+        agent = AICustomer(persona, self._chat_factory())
+        return hub.create_drill_room(drill["pack_id"], agent, drill_id, person["name"] if person else None,
+                                     drill["person_id"], persona.get("name"), offset)
+
+    def drill_finished(self, room, transcript: Transcript, score: dict[str, Any], call_id: str) -> None:
+        """A drill room was filed (the hub calls this): record the attempt and queue its debrief."""
+        with self.drills.lock:
+            drill = self.drills.get(room.drill_id)
+            drill["attempts"].append({"at": _now(), "room": room.code, "sim_call_id": call_id, "status": "judging",
+                                      "difficulty": drill.get("difficulty") or 1,
+                                      "ai_seconds": list(room.ai_seconds), "customer_by": room.agent.name if room.agent else None})
+            self.drills.save(drill)
+        self._agents.put(("debrief", room.drill_id))
+        self.bus.publish("calls", "drill", drills_mod.summary(drill))
+
+    def run_debrief(self, drill_id: str) -> dict[str, Any]:
+        """Judge the latest attempt (chat model, else rules) and write its debrief; then a Coach turn."""
+        drill = self.drills.get(drill_id)
+        if not drill["attempts"]:
+            raise ValueError("no attempt to debrief yet")
+        attempt = drill["attempts"][-1]
+        call_id = attempt["sim_call_id"]
+        transcript = Transcript.from_dict(self._read(call_id, "live_transcript.json"))
+        pack = self.pack(drill["pack_id"])
+        score = self._read(call_id, "call.json").get("live_score") or {}
+        llm = self._chat_factory()
+        try:
+            result = drills_mod.debrief(drill, transcript, score, pack, llm)
+        except Exception as e:  # noqa: BLE001 - the rules still debrief
+            result = drills_mod.debrief(drill, transcript, score, pack, None)
+            result["model_error"] = f"{type(e).__name__}: {e}"
+        with self.drills.lock:
+            drill = self.drills.get(drill_id)
+            drill["attempts"][-1].update(status="done", verdict=result["verdict"], debrief=result)
+            self.drills.save(drill)
+        self.bus.publish("calls", "drill", drills_mod.summary(drill))
+        self.run_coach(drill["person_id"])
+        return drill
+
+    def request_debrief(self, drill_id: str) -> dict[str, Any]:
+        drill = self.drills.get(drill_id)
+        if not drill["attempts"]:
+            raise ValueError("no attempt to debrief yet")
+        self._agents.put(("debrief", drill_id))
+        return drill
 
     def set_focus(self, person_id: str, pack_id: str | None, criterion: str | None, by: str | None,
                   origin: str | None = None) -> dict[str, Any]:
@@ -582,7 +801,9 @@ class CallService:
         data = self.coach_store.get(person_id)
         return {"person": self.people.get(person_id), "focus": self._focus_detail(person_id, data.get("focus")),
                 "skills": state["skills"], "calls_seen": state["calls_seen"],
-                "history": data.get("history", [])[-10:], "actions": data.get("actions", [])[-20:]}
+                "history": data.get("history", [])[-10:], "actions": data.get("actions", [])[-20:],
+                "transfer": data.get("transfer", [])[-10:], "escalations": data.get("escalations", []),
+                "drills": self.list_drills(person_id)}
 
     # -- review ---------------------------------------------------------------
 
@@ -629,7 +850,7 @@ class CallService:
             seen.add(d.name)
             cached = self._summaries.get(d.name)
             if cached is None or cached[0] != mtime:
-                c = json.loads((d / "call.json").read_text(encoding="utf-8"))
+                c = read_json(d / "call.json")
                 cached = (mtime, {k: c.get(k) for k in SUMMARY_FIELDS})
                 self._summaries[d.name] = cached
             calls.append(cached[1])
@@ -738,6 +959,7 @@ class CallService:
             self._write(call_id, "call.json", call)
         self._publish(call, origin)
         if person and call.get("status") == "done":
+            self._agents.put(("transfer", call_id))  # a focus set before this call: did the skill show up?
             self.request_coach(person["id"])  # this call's moments now count towards their coaching
         return {k: call.get(k) for k in SUMMARY_FIELDS}
 
@@ -749,7 +971,7 @@ class CallService:
             return None
         cached = self._reports.get(call_id)
         if cached is None or cached[0] != mtime:
-            cached = (mtime, json.loads(path.read_text(encoding="utf-8")))
+            cached = (mtime, read_json(path))
             self._reports[call_id] = cached
         return cached[1]
 
@@ -778,6 +1000,7 @@ class CallService:
         follow_ups, recent, skills = [], [], {}
         done = [c for c in mine if c.get("status") == "done"]
         done.sort(key=lambda c: c.get("started_at") or "", reverse=True)
+        real_seen = 0
         for i, c in enumerate(done):
             report = self._report(c["id"])
             if not report:
@@ -790,7 +1013,10 @@ class CallService:
             score = report.get("score") or {}
             if i < TODAY_RECENT:
                 recent.append({**ref(c), "overall": score.get("overall")})
-            if i < SKILL_WINDOW:
+            # Skills count real calls only: practice is where a rep tries things out.
+            real = call_kind(c) == "real"
+            real_seen += real
+            if real and real_seen <= SKILL_WINDOW:
                 for cr in score.get("criteria", []):
                     if cr.get("status") not in ("met", "partial", "missed"):
                         continue
@@ -812,13 +1038,15 @@ class CallService:
                 "ready_for_approval": sum(f["status"] == "ready_for_approval" for f in follow_ups)},
             "focus": self._focus_detail(person["id"], self.coach_store.get(person["id"]).get("focus"))
             if person and not manager else None,
+            "drills": self.list_drills(person["id"]) if person and not manager else [],
+            "transfer": self.coach_store.get(person["id"]).get("transfer", [])[-3:] if person and not manager else [],
         }
         if manager:
             team = []
             for p in self.people.list():
                 if p["role"] != "rep":
                     continue
-                theirs = [c for c in done if c.get("rep_id") == p["id"]]
+                theirs = [c for c in done if c.get("rep_id") == p["id"] and call_kind(c) == "real"]
                 scores = [(self._report(c["id"]) or {}).get("score", {}).get("overall") for c in theirs[:SKILL_WINDOW]]
                 scores = [x for x in scores if x is not None]
                 focus = self.coach_store.get(p["id"]).get("focus")
@@ -830,6 +1058,9 @@ class CallService:
                              if focus and focus.get("status") == "active" else None})
             out["team"] = team
             out["unassigned"] = [ref(c) for c in mine if not c.get("rep_id")][:TODAY_RECENT]
+            out["escalations"] = [{**e, "person_id": p["id"], "person_name": p["name"]}
+                                  for p in self.people.list() if p["role"] == "rep"
+                                  for e in self.coach_store.get(p["id"]).get("escalations", []) if e.get("status") == "open"]
         return out
 
     def changed(self, call_id: str, origin: str | None) -> None:
@@ -837,18 +1068,23 @@ class CallService:
         self.bus.publish("calls", "call-changed", {"id": call_id}, origin=origin)
 
 
-def default_coach_factory():
-    """The Coach on the fast chat model (``SEL_CHAT_LLM_*``) when its server answers, otherwise rules."""
-    from .coach import ModelCoach
+_CHAT_HEALTH: dict[str, Any] = {"at": 0.0, "llm": None}
+
+
+def default_chat_factory():
+    """The fast chat model (``SEL_CHAT_LLM_*``) when its server answers (checked at most once a minute), else None."""
+    import time
+
     from .llm import LLMError, chat_client_from_env
 
-    try:
-        llm = chat_client_from_env()
-        if llm.health().get("ok"):
-            return ModelCoach(llm)
-    except LLMError:
-        pass
-    return RuleCoach()
+    if time.monotonic() - _CHAT_HEALTH["at"] > 60:
+        try:
+            llm = chat_client_from_env(temperature=0.3)
+            _CHAT_HEALTH["llm"] = llm if llm.health().get("ok") else None
+        except LLMError:
+            _CHAT_HEALTH["llm"] = None
+        _CHAT_HEALTH["at"] = time.monotonic()
+    return _CHAT_HEALTH["llm"]
 
 
 def default_factory(call: dict[str, Any], speakers: list[Speaker]):

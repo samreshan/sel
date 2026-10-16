@@ -38,7 +38,6 @@ what good looks like instead of inventing a line.
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
@@ -47,6 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .files import read_json, write_json
 from .grounding import normalize, numbers
 from .llm import LLMClient
 from .models import Transcript
@@ -64,7 +64,7 @@ MAX_LINE_CHARS = 400
 Progress = Callable[[str, float], None]
 
 # Coach actions the code knows how to validate and apply. Anything else a model returns is refused.
-COACH_ACTIONS = ("set_focus",)
+COACH_ACTIONS = ("set_focus", "close_focus", "create_drill", "raise_difficulty", "escalate_to_manager")
 # When skills tie, the Coach focuses on conversation skills a practice drill can train before claim accuracy,
 # which is fixed by the playbook and escalated to a manager when a wrong claim reaches a customer.
 SIGNAL_PRIORITY = ("objections", "discovery", "next_step", "talk_ratio", "claims", None)
@@ -812,7 +812,7 @@ class CoachStore:
             return {"person_id": person_id, "focus": None, "history": [], "actions": [], "transfer": []}
         hit = self._cache.get(person_id)
         if hit is None or hit[0] != mtime:
-            hit = (mtime, json.loads(path.read_text(encoding="utf-8")))
+            hit = (mtime, read_json(path))
             self._cache[person_id] = hit
         return json.loads(json.dumps(hit[1]))  # a copy the caller may change
 
@@ -820,9 +820,9 @@ class CoachStore:
         with self._lock:
             path = self._path(person_id)
             self.root.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp, path)
+            write_json(path, data)
+            # Two writes can share an mtime; this process's own write must never be served stale.
+            self._cache[person_id] = (path.stat().st_mtime_ns, json.loads(json.dumps(data)))
 
     @property
     def lock(self) -> threading.RLock:
@@ -862,39 +862,98 @@ def skill_candidates(coachings: list[tuple[dict[str, Any], dict[str, Any]]], pac
                                                  if s["signal"] in SIGNAL_PRIORITY else 99, -s["weak"], -s["weight"]))
 
 
+def _focus_key(focus: dict[str, Any] | None) -> str | None:
+    return f"{focus['pack_id']}/{focus['criterion']}" if focus else None
+
+
+def _passed_since(state: dict[str, Any], focus: dict[str, Any]) -> dict[str, Any] | None:
+    """The transfer check that shows the focus skill on a real call after the focus was set."""
+    return next((t for t in reversed(state.get("transfer", [])) if t.get("criterion") == focus["criterion"]
+                 and t.get("pack_id", focus["pack_id"]) == focus["pack_id"] and t.get("verdict") == "pass"
+                 and (t.get("at") or "") >= (focus.get("since") or "")), None)
+
+
+def _escalated(state: dict[str, Any]) -> set[str]:
+    return {e["key"] for e in state.get("escalations", [])}
+
+
 class RuleCoach:
-    """Picks a focus without a model: most weak moments, then conversation skills, then weight."""
+    """The Coach without a model. One turn, in order:
+
+    1. a transfer pass closes the focus (a manager's focus is escalated instead of changed);
+    2. a contradicted claim on a real call, or a drill failed three times, is escalated to a manager;
+    3. with no focus, the skill fell short on in most calls becomes the focus (``skill_candidates`` order);
+    4. the focus gets a drill from its latest weak moment;
+    5. a drill passed at its current difficulty gets harder.
+    """
 
     name = "coach:rules"
 
-    def decide(self, state: dict[str, Any]) -> list[dict[str, Any]]:
-        if state.get("focus") and state["focus"].get("status") == "active":
-            return []
-        weak = [s for s in state.get("skills", []) if s["weak"]]
-        if not weak:
-            return []
+    def choose(self, state: dict[str, Any], weak: list[dict[str, Any]]) -> tuple[str, str]:
         s = weak[0]
         n, seen = len(s["weak_calls"]), max(len(s["weak_calls"]), state.get("calls_seen", 0))
-        return [{"action": "set_focus", "skill": s["key"],
-                 "reason": f"Fell short on this in {n} of your last {seen} reviewed call{'' if seen == 1 else 's'}."}]
+        return s["key"], f"Fell short on this in {n} of your last {seen} reviewed call{'' if seen == 1 else 's'}."
+
+    def decide(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        acts: list[dict[str, Any]] = []
+        focus = state.get("focus") if (state.get("focus") or {}).get("status") == "active" else None
+        closed = set(state.get("closed", []))
+        done = _escalated(state)
+        if focus:
+            passed = _passed_since(state, focus)
+            if passed and focus.get("set_by_role") == "manager":
+                key = f"change_manager_focus:{focus['since']}"
+                if key not in done:
+                    acts.append({"action": "escalate_to_manager", "reason": "change_manager_focus",
+                                 "call_id": passed["call_id"],
+                                 "note": f"{focus['title']} showed up on a real call; the focus you set could move on."})
+            elif passed:
+                acts.append({"action": "close_focus", "call_id": passed["call_id"],
+                             "reason": f"Done on a real call: {passed.get('why') or focus['title']}"})
+                closed.add(_focus_key(focus))
+                focus = None
+        for c in state.get("contradicted", []):
+            if f"contradicted_claim:{c['call_id']}:{c['claim_id']}" not in done:
+                acts.append({"action": "escalate_to_manager", "reason": "contradicted_claim", "call_id": c["call_id"],
+                             "claim_id": c["claim_id"], "note": f"Said to a customer: “{c['claim']}”"})
+        for d in state.get("drills", []):
+            if d.get("fails", 0) >= 3 and f"failed_drill:{d['id']}" not in done:
+                acts.append({"action": "escalate_to_manager", "reason": "failed_drill", "drill_id": d["id"],
+                             "note": f"{d.get('title')}: {d['fails']} practice attempts without a pass."})
+        if focus is None:
+            weak = [s for s in state.get("skills", []) if s["weak"] and s["key"] not in closed]
+            if weak:
+                key, reason = self.choose(state, weak)
+                acts.append({"action": "set_focus", "skill": key, "reason": reason})
+                focus = {"key": key}
+        if focus is not None:
+            key = focus.get("key") or _focus_key(focus)
+            skill = next((s for s in state.get("skills", []) if s["key"] == key), None)
+            drills = [d for d in state.get("drills", []) if f"{d['pack_id']}/{d['criterion']}" == key]
+            if skill and skill["moments"] and not drills:
+                m = skill["moments"][0]
+                acts.append({"action": "create_drill", "call_id": m["call_id"], "moment_id": m["moment_id"]})
+            for d in drills:
+                if d.get("last_verdict") == "pass" and d.get("last_difficulty") == d.get("difficulty") \
+                        and (d.get("difficulty") or 1) < 3:
+                    acts.append({"action": "raise_difficulty", "drill_id": d["id"]})
+        return acts
 
 
-class ModelCoach:
-    """The Coach as a model on the fast chat client; its actions are validated by ``apply_actions``."""
+class ModelCoach(RuleCoach):
+    """The Coach with a model on the fast chat client choosing the focus; the rest follows the rules.
+
+    Its choice, like every action, is validated by ``apply_actions``.
+    """
 
     def __init__(self, llm: LLMClient):
         self.llm = llm
 
     @property
-    def name(self) -> str:
+    def name(self) -> str:  # type: ignore[override]
         return f"coach:model:{self.llm.name}"
 
-    def decide(self, state: dict[str, Any]) -> list[dict[str, Any]]:
-        if state.get("focus") and state["focus"].get("status") == "active":
-            return []
-        weak = [s for s in state.get("skills", []) if s["weak"]]
-        if not weak:
-            return []
+    def choose(self, state: dict[str, Any], weak: list[dict[str, Any]]) -> tuple[str, str]:
         keys = [s["key"] for s in weak]
         lines = []
         for s in weak:
@@ -906,38 +965,104 @@ class ModelCoach:
         schema = _obj({"action": {"type": "string", "enum": ["set_focus", "none"]},
                        "skill": {"type": "string", "enum": keys}, "reason": _text(200)})
         out = self.llm.complete_json(FOCUS_SYSTEM, user, schema, "focus", max_tokens=160)
-        if out.get("action") != "set_focus":
-            return []
-        return [{"action": "set_focus", "skill": out.get("skill"), "reason": " ".join(str(out.get("reason", "")).split())}]
+        if out.get("action") != "set_focus" or out.get("skill") not in keys:
+            return super().choose(state, weak)
+        return out["skill"], " ".join(str(out.get("reason", "")).split())
+
+
+ESCALATION_REASONS = ("contradicted_claim", "failed_drill", "change_manager_focus")
 
 
 def apply_actions(actions: list[dict[str, Any]], state: dict[str, Any], coach_file: dict[str, Any], by: str,
                   ) -> list[dict[str, Any]]:
-    """Validate each proposed action against a whitelist and the current state; apply the valid ones in place.
+    """Validate each proposed action against the whitelist and the current state; apply the valid ones in place.
 
     Returns the log entries (applied or refused, with the reason). Nothing a model says is applied unchecked.
+    ``create_drill`` and ``raise_difficulty`` are only checked and logged here: the service makes the change
+    for the entries marked applied.
     """
     log = []
     skills = {s["key"]: s for s in state.get("skills", [])}
-    for a in actions[:3]:
+    drills = {d["id"]: d for d in state.get("drills", [])}
+    escalated = _escalated({"escalations": coach_file.get("escalations", [])})
+    for a in actions[:6]:
         entry: dict[str, Any] = {"at": _now(), "by": by, "action": a.get("action"), "args": {
             k: v for k, v in a.items() if k != "action"}, "applied": False}
         name = a.get("action")
+        focus = coach_file.get("focus") if (coach_file.get("focus") or {}).get("status") == "active" else None
+        refused = None
         if name not in COACH_ACTIONS:
-            entry["refused"] = f"{name!r} is not an action the Coach may take"
+            refused = f"{name!r} is not an action the Coach may take"
         elif name == "set_focus":
-            current = coach_file.get("focus")
             skill = skills.get(str(a.get("skill")))
-            if current and current.get("status") == "active":
-                entry["refused"] = "a focus is already active"
+            if focus:
+                refused = "a focus is already active"
             elif skill is None or not skill["weak"]:
-                entry["refused"] = f"{a.get('skill')!r} is not a skill this rep fell short on"
+                refused = f"{a.get('skill')!r} is not a skill this rep fell short on"
             else:
                 reason = " ".join(str(a.get("reason") or "").split())[:240] or f"Fell short on {skill['title'].lower()}."
                 coach_file["focus"] = {"pack_id": skill["pack_id"], "criterion": skill["criterion"],
                                        "title": skill["title"], "since": _now(), "set_by": by, "status": "active",
                                        "reason": reason, "moments": skill["moments"][:3]}
-                entry["applied"] = True
+        elif name == "close_focus":
+            passed = _passed_since(state, focus) if focus else None
+            if not focus:
+                refused = "there is no active focus"
+            elif focus.get("set_by_role") == "manager":
+                refused = "a manager set this focus; the Coach escalates instead of changing it"
+            elif not passed or passed["call_id"] != a.get("call_id"):
+                refused = "no transfer check on a real call shows this skill since the focus was set"
+            else:
+                coach_file.setdefault("history", []).append({**focus, "status": "passed", "ended": _now(),
+                                                             "evidence": {k: passed.get(k) for k in (
+                                                                 "call_id", "segment_ids", "quote", "why")}})
+                coach_file["focus"] = None
+        elif name == "create_drill":
+            skill = skills.get(_focus_key(focus) or "")
+            refs = {(m["call_id"], m["moment_id"]) for m in (skill or {}).get("moments", [])}
+            if not focus:
+                refused = "drills follow a focus, and there is none"
+            elif (a.get("call_id"), a.get("moment_id")) not in refs:
+                refused = "the moment is not one of the rep's weak moments for the focus"
+            elif any((d.get("source") or {}).get("call_id") == a.get("call_id")
+                     and (d.get("source") or {}).get("moment_id") == a.get("moment_id") for d in drills.values()):
+                refused = "a drill for this moment already exists"
+        elif name == "raise_difficulty":
+            d = drills.get(str(a.get("drill_id")))
+            if d is None:
+                refused = f"no drill {a.get('drill_id')!r} for this rep"
+            elif not (d.get("last_verdict") == "pass" and d.get("last_difficulty") == d.get("difficulty")):
+                refused = "the last attempt at this difficulty was not a pass"
+            elif (d.get("difficulty") or 1) >= 3:
+                refused = "already at the hardest level"
+        elif name == "escalate_to_manager":
+            reason = a.get("reason")
+            key = None
+            if reason not in ESCALATION_REASONS:
+                refused = f"{reason!r} is not a reason to escalate; Sel escalates only {', '.join(ESCALATION_REASONS)}"
+            elif reason == "contradicted_claim":
+                ok = any(c["call_id"] == a.get("call_id") and c["claim_id"] == a.get("claim_id")
+                         for c in state.get("contradicted", []))
+                key = f"contradicted_claim:{a.get('call_id')}:{a.get('claim_id')}"
+                refused = None if ok else "no contradicted claim on that real call"
+            elif reason == "failed_drill":
+                d = drills.get(str(a.get("drill_id")))
+                key = f"failed_drill:{a.get('drill_id')}"
+                refused = None if d and d.get("fails", 0) >= 3 else "the drill has not been failed three times"
+            else:
+                key = f"change_manager_focus:{(focus or {}).get('since')}"
+                refused = None if focus and focus.get("set_by_role") == "manager" else "the focus was not set by a manager"
+            if not refused and key in escalated:
+                refused = "already escalated"
+            if not refused:
+                coach_file.setdefault("escalations", []).append({
+                    "key": key, "reason": reason, "at": _now(), "by": by, "status": "open",
+                    **{k: a.get(k) for k in ("call_id", "claim_id", "drill_id", "note") if a.get(k)}})
+                escalated.add(key)
+        if refused:
+            entry["refused"] = refused
+        else:
+            entry["applied"] = True
         log.append(entry)
     coach_file.setdefault("actions", []).extend(log)
     coach_file["actions"] = coach_file["actions"][-200:]

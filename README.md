@@ -91,8 +91,10 @@ real call → DIAGNOSE (moments, better line, gate) → FOCUS (one skill) → PR
 | Analyst | transcript + pack | questions, objections, claims, promises as segment ids | evidence gate → drafts, scorecard | built |
 | Moment finder | report + scorecard grade | weak and strong moments per criterion, segment ids | `gate_moments` → coaching.json, Coaching tab, the Coach | built |
 | Line writer (RAG) | a weak moment + BM25 pack passages | a better line + passage ids | `check_line` (code) → shown with its passage, or refused with the reason | built |
-| Coach | the rep's moments across calls | actions from a whitelist (`set_focus` so far) | `apply_actions` validates against state → Today's focus | built (focus only) |
-| Persona builder, AI customer, Judge | a weak moment; the drill | persona; `{say, end_call, mood}`; pass/fail per criterion | the practice room, debrief, transfer check | next |
+| Coach | the rep's moments, drills and transfer checks | actions from a whitelist: set_focus, create_drill, raise_difficulty, close_focus, escalate_to_manager | `apply_actions` validates each against state and evidence → Today, Practice | built |
+| Persona builder | a weak moment, anonymised by code | a short customer persona | the AI customer's system prompt | built |
+| AI customer | the persona + the drill so far | `{say, end_call, mood}` | the practice room as the customer (rules customer if the model fails) | built |
+| Judge | a drill transcript, or a newly filed real call | pass / fail / not applicable + a segment id | debrief; transfer check → the Coach closes the focus (needs the rules to agree) | built |
 | Librarian, Prep writer | strong moments; a lead's past reports | playbook answers; a brief | manager approval → retrieval; Prep page | later |
 
 The model points; code supplies the words and checks the facts. Quotes are the

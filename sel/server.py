@@ -493,6 +493,27 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         def moment(self, q, call_id, moment_id, action):
             self._json(service.moment_action(call_id, moment_id, action, self._json_body(), self._tab()))
 
+        def moment_drill(self, q, call_id, moment_id):
+            b = self._json_body()
+            self._json(service.create_drill(call_id, moment_id, b.get("by") or None, by=f"person:{b['by']}" if b.get("by") else None,
+                                            origin=self._tab()), 201)
+
+        # -- drills --------------------------------------------------------------
+
+        def drills(self, q):
+            self._json(service.list_drills(q.get("person") or None))
+
+        def drill(self, q, drill_id):
+            self._json(service.drill(drill_id))
+
+        def drill_start(self, q, drill_id):
+            b = self._json_body()
+            room, client = service.start_drill(drill_id, hub, b.get("by") or None, b.get("offset"))
+            self._json({"room": hub.view(room, you="rep"), "client": client}, 201)
+
+        def drill_debrief(self, q, drill_id):
+            self._json(service.request_debrief(drill_id), 202)
+
         def coach_view(self, q, person_id):
             self._json(service.coach_view(person_id))
 
@@ -607,6 +628,11 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("POST", rf"/api/calls/{C}/items/{I}/restore", Handler.restore),
         ("GET", rf"/api/calls/{C}/coaching", Handler.coaching),
         ("POST", rf"/api/calls/{C}/moments/{D}/(endorse|dismiss|edit|note)", Handler.moment),
+        ("POST", rf"/api/calls/{C}/moments/{D}/drill", Handler.moment_drill),
+        ("GET", r"/api/drills", Handler.drills),
+        ("GET", rf"/api/drills/{C}", Handler.drill),
+        ("POST", rf"/api/drills/{C}/start", Handler.drill_start),
+        ("POST", rf"/api/drills/{C}/debrief", Handler.drill_debrief),
         ("GET", rf"/api/coach/{D}", Handler.coach_view),
         ("PUT", rf"/api/coach/{D}/focus", Handler.set_focus),
         ("GET", r"/api/sim", Handler.sim_info),

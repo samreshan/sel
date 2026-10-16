@@ -232,6 +232,9 @@ def objection_reply(transcript: Transcript, seg_id: str, roles: dict[str, str]) 
     for s in after:
         if any(is_question(x) and not is_tag_question(x) for x in sentences(s.text)):
             return {"reply": s.id, "handled": True}
+        if is_claimish(s.text):
+            # Defended (a price, a warranty) before asking: not "a question first", even if a question follows.
+            return {"reply": s.id, "handled": False}
     return {"reply": after[0].id, "handled": False}
 
 

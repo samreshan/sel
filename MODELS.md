@@ -32,7 +32,8 @@ python -m sel doctor --json     # the same, machine-readable
 | Speech recognition, live simulator calls | Whisper `base` through faster-whisper | this machine | MIT | `SEL_LIVE_WHISPER_MODEL`; why `base`: [CLAUDE.md](CLAUDE.md#live-speech-measured) |
 | Analysis when no model answers | `RuleAnalyzer` (cue words + BM25) | this machine | Apache-2.0 (Sel's own code) | Not a model; named as the analyzer in the report |
 | Coaching: moment finder, line writer, line judge | the analysis model (`SEL_LLM_*`) | this machine | as above | Background, after the call is reviewable. qwen2.5:7b on an i7-1255U: about 3 minutes per 90-second call ([CLAUDE.md](CLAUDE.md#coaching-measured)) |
-| Coach (picks a focus) and, next, the AI customer | `SEL_CHAT_LLM_*`; unset values inherit `SEL_LLM_*` (so qwen2.5:7b today) | this machine | as configured | Needs a small, fast model; not chosen yet. Falls back to rules on any error or timeout (60 s) |
+| Conversation speed: the Coach's focus choice, practice personas, the AI customer, the debrief Judge | `SEL_CHAT_LLM_*`; unset values inherit `SEL_LLM_*` (so qwen2.5:7b today) | this machine | as configured | Needs a small, fast model; not chosen yet. qwen2.5:7b on an i7-1255U: median 12 s per customer reply against a 2 to 3 s target (`scripts/drill_latency.py`). Falls back to rules on any error or timeout (60 s) |
+| Transfer checks on real calls (Judge) | the analysis model (`SEL_LLM_*`) | this machine | as above | Background, after coaching; a pass needs Sel's rules to agree |
 
 ### Other open-weight models that work
 

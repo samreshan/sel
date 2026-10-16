@@ -1,19 +1,23 @@
 # Sel design language
 
-Chatbase is a visual reference for components, spacing, typography, colors,
-effects, and restrained motion. Sel keeps its existing screens, navigation,
-page layouts, information architecture, routes, and workflows. This is not a
-Chatbase page reconstruction plan.
+## Current direction · 16 October 2026
 
-Reference inspected on 16 October 2026 through the authenticated browser.
-Measured values below come from rendered UI/computed styles. Sel-specific
-semantic states remain part of Sel, including evidence, transcript playback,
-claim verdicts, approval status, recording, and local model availability.
+Sel's design language is calm, precise, and considerate: a light grey canvas,
+rounded white cards, soft semantic tones, and charcoal-on-charcoal gradient
+buttons. The user's current reference is Apple's restraint, bento compositions,
+and tactile interactions, adapted to Sel's own Switzer font and Solar icons.
+This supersedes the previous Chatbase-derived white canvas, 10 px cards, and
+flat primary action. Existing navigation, layouts and workflows remain intact.
+
+The interactive reference lives at `/static/design-system.html`, reachable
+from the product sidebar. It loads the same `style.css` as the product, so
+its component examples are a working reference rather than a separate theme.
+Its sample interactions are local to the page and never call the product API.
 
 ## Typography
 
 - Switzer for body text, transcript, forms, navigation and controls.
-- Served locally from the supplied `sel/font_switxwe/` files, with copies in
+- Served locally from the supplied `sel/font_switxwe/` files, with OpenType copies in
   `sel/web/`: Regular 400, Medium 500, Semibold 600, Bold 700 and Italic 400.
 - The supplied license says Personal Use Only. Its notice is bundled as
   `Switzer-LICENSE.txt`; commercial release requires an appropriate license.
@@ -26,32 +30,29 @@ claim verdicts, approval status, recording, and local model availability.
 
 ## Palette
 
-The neutral semantic colors are measured from the reference. State colors
-remain meaningful to Sel; do not flatten supported, contradicted, ambiguous,
-playing, and selected evidence into one indistinguishable appearance.
+Color literals belong only in the `:root` token layer of `sel/web/style.css`.
+All component and showcase styles consume those semantic variables.
 
-| Role | Token / value |
-| --- | --- |
-| Page and card | White surface |
-| Selected/hover surface | `lab(96.1634% .0993311 -.364041)` |
-| Quiet inset surface | `lab(98.2716% 0 0)` |
-| Foreground / primary action | `lab(2.51107% .242703 -.886115)` |
-| Secondary text | `lab(15.7235% .56015 -1.99021)` |
-| Muted text | `lab(47.8878% 1.65477 -5.77283)` |
-| Border | `lab(90.6853% .399232 -1.45452)` |
-| Stronger border | `lab(84.9837% .601262 -2.17986)` |
-| Focus | `lab(65.6464% 1.53497 -5.42429)` |
-| Success | `lab(59.0978% -58.6621 41.2579)` |
-| Danger | `lab(40.4273% 67.2623 53.7441)` |
+| Role | Token | Value |
+| --- | --- | --- |
+| Page canvas | `--bg`, `--canvas` | `#f3f4f6` |
+| Card / field | `--surface` | White |
+| Quiet inset | `--surface-3` | `#f7f8fa` |
+| Hover / neutral selection | `--surface-2` | `#eceef1` |
+| Foreground | `--text` | `#23262b` |
+| Supporting text | `--text-2` | `#484e58` |
+| Metadata | `--muted` | `#646b76` |
+| Hairline / strong border | `--border`, `--border-2` | `#e1e4e9`, `#b7bec8` |
+| Keyboard focus / selected card | `--focus` | `#526da8` |
+| Primary gradient | `--action-top`, `--action-bottom` | `#484c54` to `#25282e` |
+| Success | `--ok-bg`, `--ok-ink` | Sage |
+| Danger | `--bad-bg`, `--bad-ink` | Rose |
+| Missing input | `--warn-bg`, `--warn-ink` | Honey |
+| Information | `--info-bg`, `--info-ink` | Dusty blue |
 
-Use semantic variables in component rules. Define literal color values only
-in the token layer. Primary actions are near-black with white text. Selection
-is neutral. Retain green, red, amber and restrained informational blue where
-they explain real status. The customer-configured teal Chatbase widget is not
-Sel's primary brand color.
-
-The implemented reference theme is light, including on devices that prefer
-dark mode. A matching dark reference was not inspected.
+Color explains a real state and is always accompanied by text. Keep supported,
+contradicted, ambiguous, playing, and evidence states distinguishable. The light
+palette remains intentional even on devices that prefer dark mode.
 
 ## Spacing and layout treatment
 
@@ -68,7 +69,7 @@ Apply a 4 px spacing rhythm to Sel's existing layout structures:
 
 Keep existing responsive stacking, column relationships and content order.
 Normalize spacing within those layouts; do not introduce Chatbase navigation,
-workspace switchers, page templates, sheets, or new screen routes.
+workspace switchers, page templates, sheets, or new product workflow routes. The static design-system reference is linked from the sidebar.
 
 The desktop sidebar is 256 px. Preserve its real call list and device-health
 section. Navigation uses a neutral active surface, restrained borders, and
@@ -77,21 +78,22 @@ compact insets. Existing mobile sidebar behavior remains intact.
 ## Buttons
 
 - Default height: 40 px; compact height: 36 px.
-- Radius: 8 px. Icon/label gap: 8 px.
+- Radius: 12 px. Icon/label gap: 8 px.
 - Default inset: 8 px vertical, 16 px horizontal.
 - Font: Switzer, 14 px, weight 500, 20 px line height.
-- Primary: foreground fill, inverse text. Hover blends 90% primary with surface.
+- Primary: `--action-gradient`, inverse text, `--shadow-action` inset highlight.
+- Hover: `--action-gradient-hover`. Press: solid bottom tone, inset shadow, 0.98 scale.
 - Secondary: white surface, 1 px neutral border; muted surface on hover.
 - Ghost: transparent background and border; neutral hover surface.
 - Danger: semantic danger fill; existing destructive behavior only.
 - Disabled: 50% opacity and existing disabled interaction semantics.
-- Focus: visible 3 px neutral ring at 50% opacity.
-- Subtle control inset: `inset 0 -1.5px 0 rgb(0 0 0 / .04)`.
+- Focus: visible 3 px blue-grey ring. Keep the focus outline separate from semantic state.
+- Control depth uses `--shadow-control`; gradient actions use `--shadow-action`.
 - Preserve compact transcript, playback and icon-button variants.
 
 ## Inputs and forms
 
-- 40 px minimum height, 8 px corners, 1 px neutral border.
+- 40 px minimum height, 12 px corners, 1 px neutral border.
 - 12 px horizontal inset; white field surface.
 - Label: 14 px, weight 500; 8 px separation from field.
 - Textarea line height: 1.625; preserve resizing and existing field validation.
@@ -101,23 +103,29 @@ compact insets. Existing mobile sidebar behavior remains intact.
 
 ## Cards and surfaces
 
-- Card radius: 10 px; small controls/insets: 8 px.
-- Standard inset: 16 px; larger forms: 24 px.
-- White surface with a single neutral border.
-- Quiet inset areas use the soft surface token for score criteria, source
-  headers, coaching suggestions, participants and simulator action rows.
-- Ordinary review cards are flat; avoid colored glows and oversized shadows.
-- Existing sticky audio controls may use a small elevation shadow.
-- Compact shadow: `0 1px 2px rgb(0 0 0 / .05)`.
-- Raised shadow: `0 4px 12px rgb(0 0 0 / .05)`.
-- Use the same surface/radius system for upload, review, drafts, scorecards,
-  participants, simulator controls and after-call cards.
-- Keep each existing card's content, evidence actions and state feedback.
+- Card radius: `--radius` / 20 px; featured bento cards: `--radius-large` / 28 px.
+- Controls and nested surfaces: `--radius-sm` / 12 px; small tags: 8 px.
+- Standard inset: 16 px; larger cards and forms: 24 px.
+- White surface, fine neutral border, `--shadow-sm` ambient separation.
+- Content cards stay still. `.card.is-interactive` alone gains hover elevation.
+- A clickable card is a native button or link; never nest buttons inside it.
+- Selected: blue-grey border and ring. Evidence: warm amber border and ring.
+- Focus and evidence can appear together. Playback retains its own indicator.
+- Loading: stable space, `aria-busy`, visible explanation; motion is supplementary.
+- Empty: useful next action. Error: reason and recovery. Success: explicit outcome.
+- Dismissed: dashed outline, existing inactive treatment, a visible restore action.
+- Semantic variants use `.is-empty`, `.is-error`, `.is-success`, `.is-loading`.
+- Never apply a pointer cursor, lift, or press treatment to a passive content card.
+
+Bento is a composition pattern, not a requirement to put everything in cards.
+Use an asymmetric anchor surface with smaller supporting surfaces, aligned gaps,
+and fewer competing actions. Stack in reading order on phones. The reference
+includes a keyboard-operable expandable detail and reversible selection.
 
 ## Tabs and segmented controls
 
-- Muted rail, 10 px corners, 4 px inset.
-- Active item is white with 8 px corners; no heavy border or shadow.
+- Muted rail, 12 px corners, 4 px inset.
+- Active item is white with 12 px corners and a compact ambient shadow.
 - Label: 14 px, medium weight, -0.02em tracking.
 - Typical item: 28 px minimum height inside a 36 px rail.
 - Existing count badges remain compact. Dense review tabs can use 6 px
@@ -143,43 +151,59 @@ contains visible author/license credit. No runtime CDN or framework is needed.
 
 ## Effects and animation
 
-- Control background, border, text and shadow transitions: 200 ms.
+- Press: 120 ms. Hover, focus, and state transitions: 180 ms. Reveals: 280 ms.
+- Easing: `--ease`, cubic-bezier(.22, 1, .36, 1). No spring overshoot.
 - Transitions communicate hover/focus/selection; no bouncing or decorative
   page entrances.
 - Preserve existing real recording/loading feedback. A selected workflow step
   does not need a continuously pulsing effect.
 - Respect the existing reduced-motion override for all transitions/animations.
 - Preserve live meter transforms and transcript performance optimizations.
-- The simulator canvas uses a 1 px neutral dot on a 16 px repeat, on a very
-  light neutral background. Normal upload/review content remains clean white.
+- Upload, review and simulator workspaces share the quiet grey canvas.
+  White cards and inset surfaces establish hierarchy without a decorative dot grid.
 - Evidence and current-playback styling remain distinct and visible together.
 
 ## Scope and verification
 
-Implementation changes belong in the existing shared stylesheet and local
-font assets. No product logic, routing, payloads or business rules change.
-The existing package-data rule `web/*` includes the flat WOFF2/license files.
+Shared primitives belong in `sel/web/style.css`. Showcase-only layout and
+interactions live in `design-system.css`, `.html`, and `.js`. No product state,
+payloads or business rules change. The existing `web/*` package-data rule
+includes the reference and local OpenType/license assets.
 
 Check upload, review tabs, claims, drafts, simulator lobby, and live simulator
-styling at desktop and mobile sizes. Check loaded fonts, 40 px actions, 8 px
-controls, 10 px cards, overflow, focus, reduced motion, and exact evidence states.
+styling at desktop and mobile sizes. Check loaded fonts, 40 px actions, 12 px
+controls, 20 px cards, overflow, focus, reduced motion, and exact evidence states.
 Use the repository's Python checks and browser review; there is no npm build
 pipeline in this project.
 
-Reference measurements are the target for shared design primitives. Sel's own
-component needs and responsive layouts remain authoritative for product UX.
+The current tokens and interactive reference define the shared primitives.
+Sel's existing component semantics and responsive layouts remain authoritative.
 
 ## Product polish
 
 Review status badges sit inside their cards, followed by the title and
 metadata. Review heading icons are compact, unboxed outlines. Sidebar device
 status is a flat footer divided by a single hairline, with attribution below.
-The transcript workspace uses a quiet neutral surface beside the white review
-panel. Body/reading text remains 14 px. Cards use the original 10 px radius,
-controls and insets use 8 px corners, and active selections are neutral.
+Transcript and review workspaces use the same grey canvas, with white review
+cards. Body/reading text remains 14 px. Cards use 20 px corners; controls and
+insets use 12 px corners. Navigation selection remains neutral; card selection
+is blue-grey and source evidence stays amber.
 The simulator workflow rail uses three columns when its own panel is narrow,
 and two on phones, keeping step labels readable beside the live review panel.
 
 The Perplexity parchment/teal reference and its later card and typography
 changes were reverted at the user's request. Switzer, Solar icons and the
 preceding product polish remain in use.
+
+## Extension contract
+
+- Keep color, typography, radii, spacing, elevation and motion values in tokens.
+- Add variants to shared primitives before creating a new one-off treatment.
+- Document default, hover, press, focus, disabled, loading, empty and error states
+  where applicable. A passive card does not need button interaction states.
+- Prefer native buttons, labels, selects, radios, details and dialogs. Use ARIA
+  for state and relationships; it does not replace keyboard behavior.
+- For overlays, contain focus and restore it to the trigger on close. Escape exits.
+- Test wide desktop, narrow phone, 200% zoom, keyboard and reduced motion.
+- The reference uses illustrative content. It does not send, approve, record,
+  upload, or mutate any actual call. Live model accuracy is outside visual validation.

@@ -46,7 +46,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 96 tests; the 3 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 109 tests; the 3 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
@@ -71,7 +71,7 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/dates.py` | Due-phrase resolution; `due_phrase_in` finds the spoken due words in a line |
 | `sel/drafts.py` | Email/calendar drafts, edits, approval, `.ics` |
 | `sel/retrieval.py` | BM25 over pack facts/docs; passages are verbatim substrings |
-| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained), clients for OpenAI-compatible servers and Claude |
+| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained), clients for OpenAI-compatible servers (local, or Groq with `SEL_LLM_PROVIDER=groq`) and Claude |
 | `sel/asr.py` | faster-whisper: whole recordings (`transcribe`) and live windows (`transcribe_pcm`) |
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |

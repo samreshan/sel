@@ -1,13 +1,19 @@
 """Language-model clients that return JSON constrained by a schema.
 
-Two backends, chosen with ``SEL_LLM_PROVIDER``:
+Three backends, chosen with ``SEL_LLM_PROVIDER``:
 
 * ``openai`` (default): any OpenAI-compatible ``/chat/completions`` endpoint.
   This is how Sel talks to *local* models (Ollama, llama.cpp ``llama-server``,
   LM Studio, vLLM) and also to hosted OpenAI-compatible APIs. Uses only the
   standard library.
+* ``groq``: open-weight models hosted by Groq, through the same client
+  (``GROQ_API_KEY``). Transcripts and pack text go to Groq's servers.
 * ``anthropic``: the Claude API through the official ``anthropic`` SDK
   (``pip install anthropic``), using structured outputs.
+
+Servers that refuse a strict ``json_schema`` response format (some
+OpenAI-compatible servers, and Groq for most models) get JSON mode with the
+schema in the prompt instead; the reply is parsed the same way.
 
 Sel's default is a local model, so a call never leaves the machine unless
 the user points ``SEL_LLM_BASE_URL`` or the provider at a hosted service.
@@ -27,6 +33,9 @@ from typing import Any, Protocol
 DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"  # Ollama
 DEFAULT_LOCAL_MODEL = "qwen2.5:7b"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"  # open weights (Apache-2.0); supports strict json_schema on Groq
+MAX_RATE_LIMIT_WAIT_S = 30.0
 
 
 class LLMError(RuntimeError):
@@ -71,6 +80,22 @@ def _parse_json(text: str) -> dict[str, Any]:
     return value
 
 
+def _schema_rejected(error: urllib.error.HTTPError, detail: str) -> bool:
+    """True if a 400 says the server can't do the json_schema response format."""
+    if error.code != 400:
+        return False
+    detail = detail.lower()
+    return any(w in detail for w in ("response_format", "json_schema", "structured output", "schema"))
+
+
+def _retry_after(error: urllib.error.HTTPError, attempt: int) -> float:
+    try:
+        wait = float(error.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        wait = 2.0 * 2 ** attempt
+    return min(max(wait, 0.0), MAX_RATE_LIMIT_WAIT_S)
+
+
 @dataclass
 class OpenAICompatClient:
     base_url: str = DEFAULT_BASE_URL
@@ -78,11 +103,17 @@ class OpenAICompatClient:
     api_key: str | None = None
     timeout: float = 900.0
     temperature: float = 0.0
+    reasoning_effort: str | None = None  # sent only when set (Groq's gpt-oss models: low/medium/high)
+    label: str = "openai-compatible"
+    rate_limit_retries: int = 3
     stats: LLMStats = field(default_factory=LLMStats)
+    sleep: Any = field(default=time.sleep, repr=False)
+    # Flips to "json_object" once the server refuses json_schema, so later calls skip the failed attempt.
+    response_mode: str = "json_schema"
 
     @property
     def name(self) -> str:
-        return f"openai-compatible:{self.model}@{self.base_url}"
+        return f"{self.label}:{self.model}@{self.base_url}"
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         req = urllib.request.Request(
@@ -91,37 +122,72 @@ class OpenAICompatClient:
             headers={"Content-Type": "application/json",
                      **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            raise LLMError(f"{self.base_url} returned HTTP {e.code}: {e.read()[:500]!r}") from e
-        except urllib.error.URLError as e:
-            raise LLMError(f"cannot reach {self.base_url}: {e.reason}") from e
+        for attempt in range(self.rate_limit_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self.rate_limit_retries:
+                    self.stats.retries += 1
+                    self.sleep(_retry_after(e, attempt))
+                    continue
+                raise
+            except urllib.error.URLError as e:
+                raise LLMError(f"cannot reach {self.base_url}: {e.reason}") from e
+        raise AssertionError("unreachable")
+
+    def _request(self, payload: dict[str, Any], schema: dict[str, Any], name: str) -> dict[str, Any]:
+        """POST with the current response mode, falling back to JSON mode if json_schema is refused."""
+        while True:
+            body = dict(payload)
+            messages = list(payload["messages"])
+            if self.response_mode == "json_schema":
+                body["response_format"] = {"type": "json_schema",
+                                           "json_schema": {"name": name, "schema": schema, "strict": True}}
+            else:
+                messages[0] = {"role": "system", "content": messages[0]["content"]
+                               + "\n\nReply with one JSON object that matches this JSON schema:\n"
+                               + json.dumps(schema, separators=(",", ":"))}
+                body["response_format"] = {"type": "json_object"}
+            body["messages"] = messages
+            try:
+                return self._post(body)
+            except urllib.error.HTTPError as e:
+                detail = e.read()[:500].decode("utf-8", "replace")
+                if self.response_mode == "json_schema" and _schema_rejected(e, detail):
+                    self.response_mode = "json_object"
+                    continue
+                raise LLMError(f"{self.base_url} returned HTTP {e.code}: {detail}") from e
 
     def complete_json(self, system: str, user: str, schema: dict[str, Any], name: str,
                       max_tokens: int = 2048) -> dict[str, Any]:
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         last_error: Exception | None = None
         for attempt in range(2):
-            t = time.perf_counter()
-            body = self._post({
+            payload: dict[str, Any] = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": self.temperature,
                 "max_tokens": max_tokens,
-                "response_format": {"type": "json_schema",
-                                    "json_schema": {"name": name, "schema": schema, "strict": True}},
-            })
-            self.stats.seconds += time.perf_counter() - t
+            }
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
+            t = time.perf_counter()
+            try:
+                body = self._request(payload, schema, name)
+            finally:
+                self.stats.seconds += time.perf_counter() - t
             self.stats.calls += 1
             usage = body.get("usage") or {}
             self.stats.prompt_tokens += usage.get("prompt_tokens", 0)
             self.stats.completion_tokens += usage.get("completion_tokens", 0)
-            text = body["choices"][0]["message"].get("content") or ""
+            choice = body["choices"][0]
+            text = choice["message"].get("content") or ""
             try:
                 return _parse_json(text)
             except json.JSONDecodeError as e:
+                if choice.get("finish_reason") == "length":
+                    raise LLMError(f"model hit max_tokens on {name}") from e
                 last_error = e
                 self.stats.retries += 1
                 messages = messages + [
@@ -202,10 +268,27 @@ def client_from_env() -> LLMClient:
             model=os.environ.get("SEL_LLM_MODEL", DEFAULT_ANTHROPIC_MODEL),
             effort=os.environ.get("SEL_LLM_EFFORT") or None,
         )
+    if provider == "groq":
+        key = os.environ.get("SEL_LLM_API_KEY") or os.environ.get("GROQ_API_KEY")
+        if not key:
+            raise LLMError("SEL_LLM_PROVIDER=groq needs GROQ_API_KEY (or SEL_LLM_API_KEY)")
+        model = os.environ.get("SEL_LLM_MODEL", DEFAULT_GROQ_MODEL)
+        effort = os.environ.get("SEL_LLM_EFFORT") or None
+        if effort is None and model.startswith("openai/gpt-oss"):
+            effort = "low"  # its reasoning tokens share max_tokens; low leaves room for the JSON
+        return OpenAICompatClient(
+            base_url=os.environ.get("SEL_LLM_BASE_URL", GROQ_BASE_URL),
+            model=model,
+            api_key=key,
+            timeout=120.0,
+            reasoning_effort=effort,
+            label="groq",
+        )
     if provider != "openai":
-        raise LLMError(f"unknown SEL_LLM_PROVIDER {provider!r}; use 'openai' or 'anthropic'")
+        raise LLMError(f"unknown SEL_LLM_PROVIDER {provider!r}; use 'openai', 'groq' or 'anthropic'")
     return OpenAICompatClient(
         base_url=os.environ.get("SEL_LLM_BASE_URL", DEFAULT_BASE_URL),
         model=os.environ.get("SEL_LLM_MODEL", DEFAULT_LOCAL_MODEL),
         api_key=os.environ.get("SEL_LLM_API_KEY") or None,
+        reasoning_effort=os.environ.get("SEL_LLM_EFFORT") or None,
     )

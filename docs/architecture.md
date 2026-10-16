@@ -67,7 +67,7 @@ Code then:
 
 Measured on the example calls (4 CPU cores, no GPU): see [running.md](running.md#measured-so-far).
 
-**Providers.** `SEL_LLM_PROVIDER=openai` talks to any OpenAI-compatible endpoint with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM, hosted APIs). `SEL_LLM_PROVIDER=anthropic` uses the official `anthropic` SDK with structured outputs. Hosted providers receive transcripts and pack documents; the default sends nothing off the machine.
+**Providers.** `SEL_LLM_PROVIDER=openai` talks to any OpenAI-compatible endpoint with `response_format: json_schema` (Ollama, llama.cpp, LM Studio, vLLM, hosted APIs); a server that refuses the schema with HTTP 400 gets JSON mode with the schema in the system prompt instead, and HTTP 429 is retried after `Retry-After` (at most 30 s, three times). `SEL_LLM_PROVIDER=groq` uses the same client against Groq's hosted open-weight models (`GROQ_API_KEY`, default `openai/gpt-oss-20b` with `reasoning_effort: low`). `SEL_LLM_PROVIDER=anthropic` uses the official `anthropic` SDK with structured outputs. Hosted providers receive transcripts and pack documents; the default sends nothing off the machine.
 
 ## Without a language model
 

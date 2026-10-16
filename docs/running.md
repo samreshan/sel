@@ -66,11 +66,11 @@ Sel never sends anything: the drafts wait for approval as with any other call.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SEL_LLM_PROVIDER` | `openai` | `openai` = any OpenAI-compatible `/chat/completions` endpoint; `anthropic` = Claude API (`pip install -e ".[anthropic]"`, `ANTHROPIC_API_KEY`) |
-| `SEL_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | Ollama's OpenAI-compatible endpoint |
-| `SEL_LLM_MODEL` | `qwen2.5:7b` (`claude-opus-5-5` for `anthropic`) | model name on that server |
-| `SEL_LLM_API_KEY` | — | bearer token for hosted OpenAI-compatible APIs |
-| `SEL_LLM_EFFORT` | — | `anthropic` only: `low` … `max` |
+| `SEL_LLM_PROVIDER` | `openai` | `openai` = any OpenAI-compatible `/chat/completions` endpoint; `groq` = open-weight models hosted by Groq (`GROQ_API_KEY`; transcripts leave the machine); `anthropic` = Claude API (`pip install -e ".[anthropic]"`, `ANTHROPIC_API_KEY`) |
+| `SEL_LLM_BASE_URL` | `http://127.0.0.1:11434/v1` | Ollama's OpenAI-compatible endpoint (`https://api.groq.com/openai/v1` for `groq`) |
+| `SEL_LLM_MODEL` | `qwen2.5:7b` (`openai/gpt-oss-20b` for `groq`, `claude-opus-5-5` for `anthropic`) | model name on that server |
+| `SEL_LLM_API_KEY` | — | bearer token for hosted OpenAI-compatible APIs; for `groq` it overrides `GROQ_API_KEY` |
+| `SEL_LLM_EFFORT` | — (`low` for Groq's `openai/gpt-oss-*`) | reasoning effort: `anthropic` takes `low` … `max`; OpenAI-compatible servers get `reasoning_effort` only when set |
 | `SEL_WHISPER_MODEL` | `small` | any faster-whisper model name |
 | `SEL_WHISPER_DIR` | `models/whisper` | where Whisper models are cached |
 | `SEL_WHISPER_LANGUAGE` | auto-detect | `en`, `ne`, …; set it, auto-detection misfired on short Nepali clips |

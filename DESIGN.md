@@ -12,13 +12,14 @@ claim verdicts, approval status, recording, and local model availability.
 
 ## Typography
 
-- Inter for body text, transcript, forms, and content.
-- Geist for sidebar navigation, actions, and compact controls.
-- Both fonts are served locally as variable WOFF2 files, normal weights 100–900.
-- Source packages: `@fontsource-variable/geist@5.3.0` and
-  `@fontsource-variable/inter@5.3.0`. OFL licenses accompany the files.
+- Switzer for body text, transcript, forms, navigation and controls.
+- Served locally from the supplied `sel/font_switxwe/` files, with copies in
+  `sel/web/`: Regular 400, Medium 500, Semibold 600, Bold 700 and Italic 400.
+- The supplied license says Personal Use Only. Its notice is bundled as
+  `Switzer-LICENSE.txt`; commercial release requires an appropriate license.
 - Nepali text uses the existing system/Devanagari fallback.
 - Main heading: 24 px, 32 px line height, weight 600, -0.02em tracking.
+- Panel heading: 20 px; section heading: 16 px, both weight 600.
 - Body and controls: 14 px, 20–21 px line height.
 - Labels and active controls: weight 500; headings and emphasis: 600.
 - Supporting metadata: 12–13 px. Editor text: 14 px with 1.625 line height.
@@ -78,7 +79,7 @@ compact insets. Existing mobile sidebar behavior remains intact.
 - Default height: 40 px; compact height: 36 px.
 - Radius: 8 px. Icon/label gap: 8 px.
 - Default inset: 8 px vertical, 16 px horizontal.
-- Font: Geist, 14 px, weight 500, 20 px line height.
+- Font: Switzer, 14 px, weight 500, 20 px line height.
 - Primary: foreground fill, inverse text. Hover blends 90% primary with surface.
 - Secondary: white surface, 1 px neutral border; muted surface on hover.
 - Ghost: transparent background and border; neutral hover surface.
@@ -103,6 +104,8 @@ compact insets. Existing mobile sidebar behavior remains intact.
 - Card radius: 10 px; small controls/insets: 8 px.
 - Standard inset: 16 px; larger forms: 24 px.
 - White surface with a single neutral border.
+- Quiet inset areas use the soft surface token for score criteria, source
+  headers, coaching suggestions, participants and simulator action rows.
 - Ordinary review cards are flat; avoid colored glows and oversized shadows.
 - Existing sticky audio controls may use a small elevation shadow.
 - Compact shadow: `0 1px 2px rgb(0 0 0 / .05)`.
@@ -120,16 +123,23 @@ compact insets. Existing mobile sidebar behavior remains intact.
 - Existing count badges remain compact. Dense review tabs can use 6 px
   horizontal inset and a 4 px badge gap to fit the existing panel.
 - Preserve tab selection, keyboard behavior and responsive wrapping.
+- On narrow phones, use two equal columns so wrapping stays balanced.
 
 ## Icons
 
-Keep Sel's inline SVG system and actual glyphs. Standardize outline weight to
-1.5 px, preserve round caps/joins and existing viewBoxes, and inherit text color.
-Filled playback icons remain filled. Keep accessible names on icon controls.
+Use Solar Icons from `@solar-icons/static@2.3.2`, bundled locally in
+`sel/web/solar-icons.svg`. Linear icons use 1.5 px strokes; playback uses Bold.
+The existing `icon(name, size)` helper renders the shared sprite for review and
+simulator controls. Shell controls reference the same symbols. Icons inherit
+text color and remain decorative inside controls with accessible names.
+The muted microphone is adapted from Solar's microphone with a diagonal strike.
+Sel's waveform brand mark remains its own identity asset.
+Standalone section icon containers are 32 px. Review heading icons use a
+20 px unboxed area so they stay subordinate to the card title.
 
-The reference uses some identifiable Lucide utilities plus other unlabelled
-custom SVGs; its entire icon library was not established. Do not add an icon
-package or claim exact custom glyph matching on the basis of stroke weight.
+Solar artwork is by 480 Design under CC BY 4.0; the package wrapper is MIT.
+The full notices ship in `sel/web/solar-icons-LICENSE.txt`, and the sidebar
+contains visible author/license credit. No runtime CDN or framework is needed.
 
 ## Effects and animation
 
@@ -158,3 +168,18 @@ pipeline in this project.
 
 Reference measurements are the target for shared design primitives. Sel's own
 component needs and responsive layouts remain authoritative for product UX.
+
+## Product polish
+
+Review status badges sit inside their cards, followed by the title and
+metadata. Review heading icons are compact, unboxed outlines. Sidebar device
+status is a flat footer divided by a single hairline, with attribution below.
+The transcript workspace uses a quiet neutral surface beside the white review
+panel. Body/reading text remains 14 px. Cards use the original 10 px radius,
+controls and insets use 8 px corners, and active selections are neutral.
+The simulator workflow rail uses three columns when its own panel is narrow,
+and two on phones, keeping step labels readable beside the live review panel.
+
+The Perplexity parchment/teal reference and its later card and typography
+changes were reverted at the user's request. Switzer, Solar icons and the
+preceding product polish remain in use.

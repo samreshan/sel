@@ -49,6 +49,10 @@ whose follow-up drafts wait for approval.
   descriptions; code only knows five generic signals.
 - Real call recordings are never committed (`.gitignore`). Example data is
   fictional.
+- **No AI attribution trailers in commits.** Commit messages end with the
+  description of the change: no `Co-Authored-By: Claude …`, `Claude-Session:`
+  or "Generated with Claude Code" lines. This applies to every commit, made by
+  a person or an agent.
 
 ## Commands
 

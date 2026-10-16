@@ -103,6 +103,36 @@ class BrowserE2E(unittest.TestCase):
 
     # -- people, Today and Playbook ------------------------------------------------
 
+    def test_calls_page_lists_all_calls(self):
+        page = self.page()
+        page.goto(f"{self.base}/#calls")
+        page.wait_for_selector(".calls-table tbody tr")
+        self.assertEqual(page.locator(".sidebar #call-list").count(), 0)
+        self.assertTrue(page.locator('.primary-nav [data-nav="practice"] use').get_attribute("href").endswith("#target"))
+        expected = len(json.loads(self.get("/api/calls")))
+        self.assertEqual(page.locator(".calls-table tbody tr").count(), expected)
+        self.assertEqual(page.locator('.primary-nav [data-nav="calls"]').get_attribute("aria-current"), "page")
+        page.locator(".calls-table tbody tr").first.locator("td").last.click()
+        page.wait_for_selector(".transcript")
+        page.locator('.primary-nav [data-nav="calls"]').click()
+        page.wait_for_selector(".calls-table tbody tr")
+        page.locator(".calls-table-link").first.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".transcript")
+        page.locator('.primary-nav [data-nav="calls"]').click()
+        page.wait_for_selector(".calls-table tbody tr")
+        page.locator('label[for="calls-view-card"]').click()
+        self.assertEqual(page.locator(".calls-page-list .call-row").count(), expected)
+        page.reload()
+        page.wait_for_selector(".calls-page-list .call-row")
+        self.assertTrue(page.locator("#calls-view-card").is_checked())
+        page.locator(".calls-page-list .call-link").first.click()
+        page.wait_for_selector(".transcript")
+        page.locator('.primary-nav [data-nav="calls"]').click()
+        page.locator('label[for="calls-view-table"]').click()
+        self.assertEqual(page.locator(".calls-table tbody tr").count(), expected)
+        self.assertEqual(page.errors, [])
+
     def test_today_follows_the_viewer(self):
         page = self.page()
         page.goto(f"{self.base}/")
@@ -125,9 +155,6 @@ class BrowserE2E(unittest.TestCase):
         page.wait_for_selector("text=Today, Asha")
         page.wait_for_selector(".skill .chip-link")  # skills she fell short on, linked to the call
         page.wait_for_selector(".page-row:has-text('Needs input')")
-        self.assertEqual(page.locator("#call-list .call-row").count(), 1)  # "Mine"
-        page.click(".scope-btn:has-text('All')")
-        self.assertGreaterEqual(page.locator("#call-list .call-row").count(), 2)
 
         # A manager sees the team, and calls without a rep.
         sita = next(p for p in json.loads(self.get("/api/people")) if p["name"] == "Sita E2E")

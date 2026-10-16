@@ -58,8 +58,8 @@ python -m unittest discover -s tests -t .
 
 The examples use two unrelated, fictional businesses: a rooftop-solar installer and restaurant point-of-sale software. Only the business pack changes between them. They show the behaviour Sel is built around:
 
-- **A date was agreed, so Sel drafts.** *"bholi beluka samma … email garchu"* ("I'll email by tomorrow evening") becomes an email draft due 2026-10-08, ready for approval.
-- **No date was agreed, so Sel asks.** *"Sometime next week hamro engineer pathaula"* becomes a calendar draft marked `needs_input`, with the reason and the possible window (11–17 Oct).
+- **A date was agreed, so Sel drafts.** *"I'll email you the quotation and EMI details by tomorrow evening"* becomes an email draft due 2026-10-08, ready for approval.
+- **No date was agreed, so Sel asks.** *"Sometime next week we'll send our engineer for a site visit"* becomes a calendar draft marked `needs_input`, with the reason and the possible window (11–17 Oct).
 - **Invented evidence is refused.** Words nobody said, a source passage that isn't in the pack, or a "supported" verdict whose numbers aren't in its passage are refused or downgraded, and listed under **Refused**.
 
 ## How it works

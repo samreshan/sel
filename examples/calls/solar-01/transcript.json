@@ -7,20 +7,20 @@
     {"id": "S2", "role": "customer", "name": "Ramesh", "email": "ramesh@example.com"}
   ],
   "segments": [
-    {"id": "s01", "start": 0.0, "end": 7.4, "speaker": "S1", "lang": "ne-en", "text": "Namaste Ramesh ji, ma Ghamghar Solar bata Asha bolirahechu. Tapaile website ma inquiry garnu bhayeko thiyo, hoina?"},
-    {"id": "s02", "start": 7.6, "end": 14.0, "speaker": "S2", "lang": "ne-en", "text": "Ho, ghar ko lagi solar system ko barema sodhna khojeko. Mahina ko bill dherai aaucha."},
-    {"id": "s03", "start": 14.2, "end": 21.8, "speaker": "S1", "lang": "ne-en", "text": "Bujhe. Hamro 3 kW grid-tie system installation sahit 4 lakh 20 hajar parcha."},
-    {"id": "s04", "start": 22.0, "end": 27.5, "speaker": "S2", "lang": "ne", "text": "Ali mahango bhayo. Arko company le 3 lakh 60 ma dinchu bhaneko thiyo."},
-    {"id": "s05", "start": 27.8, "end": 36.0, "speaker": "S1", "lang": "ne-en", "text": "Hamro panel ma 25 years performance warranty cha, ani inverter ma pani 10 years warranty cha."},
-    {"id": "s06", "start": 36.2, "end": 40.1, "speaker": "S2", "lang": "ne-en", "text": "EMI ko option cha?"},
-    {"id": "s07", "start": 40.3, "end": 46.9, "speaker": "S1", "lang": "ne-en", "text": "Partner bank through EMI milcha, ma details pathaidinchu."},
-    {"id": "s08", "start": 47.1, "end": 51.0, "speaker": "S2", "lang": "ne-en", "text": "Net metering ko process kati time lagcha?"},
-    {"id": "s09", "start": 51.2, "end": 56.8, "speaker": "S1", "lang": "ne-en", "text": "NEA approval chai normally duita hapta ma aaucha."},
-    {"id": "s10", "start": 57.0, "end": 62.3, "speaker": "S2", "lang": "ne-en", "text": "Thik cha. Malai detail quotation email ma pathaidinu na."},
-    {"id": "s11", "start": 62.5, "end": 69.0, "speaker": "S1", "lang": "ne-en", "text": "Huncha, ma bholi beluka samma quotation ra EMI details email garchu."},
-    {"id": "s12", "start": 69.2, "end": 72.8, "speaker": "S2", "lang": "ne-en", "text": "Site visit ko lagi kahile aunu huncha?"},
-    {"id": "s13", "start": 73.0, "end": 80.5, "speaker": "S1", "lang": "ne-en", "text": "Sometime next week hamro engineer pathaula. Ma pachhi call garera confirm garchu."},
-    {"id": "s14", "start": 80.7, "end": 86.0, "speaker": "S2", "lang": "ne-en", "text": "Ok, ma pani ghar ma kura garera sukrabar call garchu."},
-    {"id": "s15", "start": 86.2, "end": 90.0, "speaker": "S1", "lang": "ne", "text": "Dhanyabad Ramesh ji. Bholi email pathauchu."}
+    {"id": "s01", "start": 0.0, "end": 7.4, "speaker": "S1", "lang": "en", "text": "Hello Ramesh, this is Asha from Ghamghar Solar. You sent an inquiry through our website, is that right?"},
+    {"id": "s02", "start": 7.6, "end": 14.0, "speaker": "S2", "lang": "en", "text": "Yes, I wanted to ask about a solar system for my home. My monthly electricity bill is high."},
+    {"id": "s03", "start": 14.2, "end": 21.8, "speaker": "S1", "lang": "en", "text": "I understand. Our 3 kW grid-tie system costs NPR 4,20,000 including installation."},
+    {"id": "s04", "start": 22.0, "end": 27.5, "speaker": "S2", "lang": "en", "text": "That is a little expensive. Another company quoted NPR 3,60,000."},
+    {"id": "s05", "start": 27.8, "end": 36.0, "speaker": "S1", "lang": "en", "text": "Our panels have a 25-year performance warranty, and the inverter also has a 10-year warranty."},
+    {"id": "s06", "start": 36.2, "end": 40.1, "speaker": "S2", "lang": "en", "text": "Is there an EMI option?"},
+    {"id": "s07", "start": 40.3, "end": 46.9, "speaker": "S1", "lang": "en", "text": "EMI is available through a partner bank. I'll email you the details."},
+    {"id": "s08", "start": 47.1, "end": 51.0, "speaker": "S2", "lang": "en", "text": "How long does the net metering process take?"},
+    {"id": "s09", "start": 51.2, "end": 56.8, "speaker": "S1", "lang": "en", "text": "NEA approval normally takes two weeks."},
+    {"id": "s10", "start": 57.0, "end": 62.3, "speaker": "S2", "lang": "en", "text": "All right. Please email me a detailed quotation."},
+    {"id": "s11", "start": 62.5, "end": 69.0, "speaker": "S1", "lang": "en", "text": "Sure, I'll email you the quotation and EMI details by tomorrow evening."},
+    {"id": "s12", "start": 69.2, "end": 72.8, "speaker": "S2", "lang": "en", "text": "When will you come for the site visit?"},
+    {"id": "s13", "start": 73.0, "end": 80.5, "speaker": "S1", "lang": "en", "text": "Sometime next week we'll send our engineer for a site visit. I'll call later to confirm the day."},
+    {"id": "s14", "start": 80.7, "end": 86.0, "speaker": "S2", "lang": "en", "text": "Okay, I'll discuss it at home and call back on Friday."},
+    {"id": "s15", "start": 86.2, "end": 90.0, "speaker": "S1", "lang": "en", "text": "Thank you, Ramesh. I'll email you tomorrow."}
   ]
 }

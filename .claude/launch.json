@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sel-dev",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "sel", "serve", "--port", "8799", "--calls-dir", "C:/Users/amuly/AppData/Local/Temp/claude/D--Projects-Sel/d07ec0cb-ba99-49a3-ace7-68bc8a776c3d/scratchpad/calls"],
+      "port": 8799,
+      "env": { "SEL_CHAT_LLM_MODEL": "qwen2.5:1.5b" }
+    }
+  ]
+}

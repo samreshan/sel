@@ -288,7 +288,8 @@ class SimulatorHub:
                 "created_at": datetime.fromtimestamp(room.created, timezone.utc).isoformat(timespec="seconds"),
                 "started_at": room.started_at, "elapsed": round(self._elapsed(room), 2),
                 "participants": [{"role": p.role, "name": p.name, "email": p.email, "online": p.streams > 0,
-                                  "mic": p.mic, "ai": p.ai} for p in sorted(room.participants.values(), key=lambda p: p.role != "rep")],
+                                  "mic": p.mic, "ai": p.ai, "person_id": p.person_id}
+                                 for p in sorted(room.participants.values(), key=lambda p: p.role != "rep")],
                 "you": you, "live": room.live, "call_id": room.call_id, "error": room.error,
                 "drill_id": room.drill_id, "ai_busy": room.ai_busy,
                 "pending_speech": room.pending_speech, "speech": dict(self.speech), "ice_servers": self.ice_servers,

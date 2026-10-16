@@ -1,20 +1,20 @@
 {
   "_note": "Hand-written stand-in for language-model output, used to exercise the pipeline with a second, unrelated business pack.",
   "findings": [
-    {"id": "f1", "kind": "question", "summary": "Customer asked whether billing works when the internet is down.", "evidence": {"segment_ids": ["s02"], "quote": "Internet gayo bhane billing chalcha ki chaldaina?"}},
-    {"id": "f2", "kind": "question", "summary": "Customer asked about accounting software integration.", "evidence": {"segment_ids": ["s04"], "quote": "Ani hamro accounting software sanga connect huncha?"}},
-    {"id": "f3", "kind": "question", "summary": "Customer asked for the price.", "evidence": {"segment_ids": ["s06"], "quote": "Price chai kati ho?"}},
-    {"id": "f4", "kind": "objection", "summary": "Price feels high for two outlets.", "evidence": {"segment_ids": ["s08"], "quote": "duita outlet ko lagi ali dherai bhayo"}},
+    {"id": "f1", "kind": "question", "summary": "Customer asked whether billing works when the internet is down.", "evidence": {"segment_ids": ["s02"], "quote": "Yes, we have two outlets. Does billing work when the internet goes down?"}},
+    {"id": "f2", "kind": "question", "summary": "Customer asked about accounting software integration.", "evidence": {"segment_ids": ["s04"], "quote": "Does it connect directly to our accounting software?"}},
+    {"id": "f3", "kind": "question", "summary": "Customer asked for the price.", "evidence": {"segment_ids": ["s06"], "quote": "What is the price?"}},
+    {"id": "f4", "kind": "objection", "summary": "Price feels high for two outlets.", "evidence": {"segment_ids": ["s08"], "quote": "Hmm, that is a little expensive for two outlets."}},
     {"id": "f5", "kind": "coaching", "criterion": "qualify", "summary": "The plan was quoted without asking about billing counters or kitchen order tickets.", "suggestion": "Ask how many counters each outlet runs and whether the kitchen needs order tickets before naming a plan.", "evidence": {"segment_ids": ["s07"]}},
-    {"id": "f6", "kind": "coaching", "criterion": "accurate-claims", "summary": "Promised a direct accounting integration that the product does not have.", "suggestion": "Say that sales export as CSV, and offer to check the accounting workflow together.", "evidence": {"segment_ids": ["s05"], "quote": "Yes, direct integration cha accounting software sanga."}}
+    {"id": "f6", "kind": "coaching", "criterion": "accurate-claims", "summary": "Promised a direct accounting integration that the product does not have.", "suggestion": "Say that sales export as CSV, and offer to check the accounting workflow together.", "evidence": {"segment_ids": ["s05"], "quote": "Yes, it integrates directly with accounting software."}}
   ],
   "claims": [
-    {"id": "c1", "claim": "Billing works offline and syncs when the connection returns.", "verdict": "supported", "evidence": {"segment_ids": ["s03"], "quote": "offline ma pani billing huncha, ani net aaye pachhi sync huncha"}, "sources": [{"source": "fact:offline", "quote": "Billing keeps working offline and syncs when the connection returns."}]},
+    {"id": "c1", "claim": "Billing works offline and syncs when the connection returns.", "verdict": "supported", "evidence": {"segment_ids": ["s03"], "quote": "Yes, billing works offline and syncs when the connection returns."}, "sources": [{"source": "fact:offline", "quote": "Billing keeps working offline and syncs when the connection returns."}]},
     {"id": "c2", "claim": "Thali POS integrates directly with accounting software.", "verdict": "contradicted", "evidence": {"segment_ids": ["s05"]}, "sources": [{"source": "docs/product-sheet.md", "quote": "Thali POS does not currently integrate with accounting software."}]},
     {"id": "c3", "claim": "The Standard plan is NPR 2,500 per month per outlet, billed yearly.", "verdict": "supported", "evidence": {"segment_ids": ["s07"]}, "sources": [{"source": "fact:price-standard", "quote": "NPR 2,500 per month per outlet, billed yearly"}]}
   ],
   "commitments": [
-    {"id": "k1", "owner": "S1", "action": "email the pricing PDF", "channel": "email", "due_text": "aaja nai", "evidence": {"segment_ids": ["s09"], "quote": "Ma tapailai pricing PDF aaja nai email gardinchu."}},
-    {"id": "k2", "owner": "S1", "action": "run a product demo", "channel": "meeting", "due_text": "Yo Sunday ma milcha, diuso 3 baje", "evidence": {"segment_ids": ["s10", "s11"], "quote": "Perfect, ma Sunday 3 baje ko demo invite pathaidinchu."}}
+    {"id": "k1", "owner": "S1", "action": "email the pricing PDF", "channel": "email", "due_text": "today", "evidence": {"segment_ids": ["s09"], "quote": "I'll email you the pricing PDF today. How about a demo next Sunday at 3 p.m.?"}},
+    {"id": "k2", "owner": "S1", "action": "run a product demo", "channel": "meeting", "due_text": "This Sunday works for me, at 3 p.m.", "evidence": {"segment_ids": ["s10", "s11"], "quote": "Perfect, I'll send you the demo invite for Sunday at 3 p.m."}}
   ]
 }

@@ -42,7 +42,7 @@ All component and showcase styles consume those semantic variables.
 | Foreground | `--text` | `#23262b` |
 | Supporting text | `--text-2` | `#484e58` |
 | Metadata | `--muted` | `#646b76` |
-| Hairline / strong border | `--border`, `--border-2` | `#e1e4e9`, `#b7bec8` |
+| Hairline / strong border | `--border`, `--border-2` | `#e2e2e2`, `#b7bec8` |
 | Keyboard focus / selected card | `--focus` | `#526da8` |
 | Primary gradient | `--action-top`, `--action-bottom` | `#484c54` to `#25282e` |
 | Success | `--ok-bg`, `--ok-ink` | Sage |
@@ -75,21 +75,34 @@ design-system reference is linked from the sidebar.
 
 The desktop sidebar is 256 px. Preserve its real call list and device-health
 section. Navigation uses a neutral active surface, restrained borders, and
-compact insets. Existing mobile sidebar behavior remains intact.
+compact insets. A call stays two columns down to about 1100 px, then the
+review stacks under the transcript. Spoken lines stay within a comfortable
+measure on wide monitors. Below 900 px the same sidebar becomes a compact
+header: brand and the viewer control share one row, section links sit in a
+row, and the call list scrolls sideways so the page itself starts on screen.
+The call date stays on its own line and shortens with an ellipsis.
 
 ## Navigation, Today and the Playbook
 
-- Sidebar order: brand, **Viewing as** (native select; no login), New call,
-  section navigation (Today · Practice · Playbook), the call list, device health.
-- `.primary-nav` links: 40 px, 12 px corners, Solar icons. Active is neutral
-  (`--surface-2` with a hairline border), never an accent colour.
+- Sidebar order: brand, **Viewing as** (dropdown; no login), New call,
+  section navigation (Today · Calls · Practice · Playbook), device health.
+- `.primary-nav` links: 40 px, 12 px corners, Solar icons. Desktop active uses
+  the charcoal action gradient and inverse text; compact mobile navigation uses
+  the neutral surface with a hairline border.
 - `.scope-toggle` (Mine / All, or No rep / All for managers) is a compact
   segmented rail beside the Calls heading; buttons carry `aria-pressed`.
-- Today: a passive `.stat-strip` (a `<dl>`, no hover), then a `.bento` whose
-  anchor card (`.bento-anchor`, `--radius-large`) is "Skills to work on" and
-  whose supporting card is Follow-ups. One column below 1180 px, in reading
-  order. Lists inside cards use `.page-rows` / `.skills`; links to calls are
-  `.chip-link`. Example in the reference under `#patterns`.
+- Today, Practice, Playbook and People share `.page`. On a screen wider than
+  about 1440 px the top bar and the page stay a centered 1320 px column, a
+  little wider than that 1440 layout, so lines do not stretch across the
+  monitor. Today: an illustrated `.today-hero`, a passive `.stat-strip` (a `<dl>`,
+  four equal columns, two on a phone, no hover), then `.today-work` with coaching
+  and recent calls beside people and follow-ups. Coaching skills use individual
+  white cards. One column below 1000 px, in reading order. Playbook uses
+  `.bento`: Skills is the anchor, and Approved facts and Documents stack in
+  the supporting column. The pack name in the title is a dropdown when more
+  than one pack is installed. People keeps Add a person beside the team list from
+  1280 px up. Lists inside cards use `.page-rows` / `.skills`; links to calls
+  are `.chip-link`. Example in the reference under `#patterns`.
 
 ## Coaching moments, better lines and the focus
 
@@ -161,14 +174,31 @@ compact insets. Existing mobile sidebar behavior remains intact.
 - Textarea line height: 1.625; preserve resizing and existing field validation.
 - Placeholders use muted foreground; focus is visible.
 - Missing required details retain Sel's warning/evidence feedback.
-- Keep native selects, dates, file inputs, checkboxes and existing semantics.
+- Keep native dates, file inputs, checkboxes and existing semantics.
+- Every single-choice menu is the shared dropdown. The closed field matches
+  other inputs: 40 px (36 px when compact), 12 px corners, a white surface,
+  and a quiet chevron. The open menu is a white list with a hairline, 12 px
+  corners and a soft shadow. The current choice has a check; the keyboard
+  row uses the neutral surface. Groups are quiet labels. Arrow keys move,
+  Enter chooses, Escape closes. The select element stays in the page, so
+  labels, forms and saved values keep working.
+- New call (`.page.upload-page`) is a bento. The recording is the anchor.
+  Pack, start time, and whose call sit in the supporting card, with one
+  primary action. Names, email, time zone, and recording layout stay in a
+  disclosure. The customer-email hint says Sel does not send it.
+- The recording drop zone is a solid quiet inset. A chosen file uses the
+  sage border and label. Dashed outlines stay on dismissed and empty content.
+- While `#new` is open, the sidebar New call button is the current page and
+  uses the neutral selected surface, so the form owns the primary action.
 
 ## Cards and surfaces
 
 - Card radius: `--radius` / 16 px; featured bento cards: `--radius-large` / 20 px.
 - Controls and nested surfaces: `--radius-sm` / 12 px; small tags: 8 px.
 - Standard inset: 16 px; larger cards and forms: 24 px.
-- White surface, fine neutral border, `--shadow-sm` ambient separation.
+- White surface, neutral `--border` outline (`#e2e2e2`), no drop shadow.
+- `--shadow-card` and `--shadow-card-hover` are both `none`; hover adds no elevation.
+  Controls, menus and state rings keep their own tokens.
 - Content cards stay still. `.card.is-interactive` alone gains hover elevation.
 - A clickable card is a native button or link; never nest buttons inside it.
 - Selected: blue-grey border and ring. Evidence: warm amber border and ring.
@@ -184,9 +214,22 @@ Use an asymmetric anchor surface with smaller supporting surfaces, aligned gaps,
 and fewer competing actions. Stack in reading order on phones. The reference
 includes a keyboard-operable expandable detail and reversible selection.
 
+## Review progress dock
+
+Call review keeps its existing four-step status in a compact bottom dock instead
+of a top header. The passive `.steps` surface uses `--glass-surface`,
+`--glass-border`, `--glass-blur` and existing elevation tokens; browsers without
+backdrop blur get an opaque white fallback. It stays centered in the workspace,
+clears the sidebar, wraps into two columns on mobile and respects the bottom
+safe area. The main pane reserves space so the final content scrolls above it.
+Only call views show the dock; processing and approval status remain data-driven.
+An in-flow illustrative specimen lives under `#review-progress` in the reference.
+
 ## Tabs and segmented controls
 
-- Muted rail, 12 px corners, 4 px inset.
+- Muted rail, 12 px corners, 4 px inset. A short choice, such as which
+  side of a practice call, stays only as wide as its labels. The Playbook
+  pack choice is the page title: a dropdown in the heading, not a tab rail.
 - Active item is white with 12 px corners and a compact ambient shadow.
 - Label: 14 px, medium weight, -0.02em tracking.
 - Typical item: 28 px minimum height inside a 36 px rail.
@@ -245,7 +288,10 @@ Sel's existing component semantics and responsive layouts remain authoritative.
 
 Review status badges sit inside their cards, followed by the title and
 metadata. Review heading icons are compact, unboxed outlines. Sidebar device
-status is a flat footer divided by a single hairline, with attribution below.
+status is a flat footer divided by a single hairline. It says whether this
+computer can transcribe and review, with the short model name beside each line.
+The full address stays on the hover tip.
+Attribution sits below.
 Transcript and review workspaces use the same grey canvas, with white review
 cards. Body/reading text remains 14 px. Cards use 16 px corners; controls and
 insets use 12 px corners. Navigation selection remains neutral; card selection
@@ -269,3 +315,38 @@ preceding product polish remain in use.
 - Test wide desktop, narrow phone, 200% zoom, keyboard and reduced motion.
 - The reference uses illustrative content. It does not send, approve, record,
   upload, or mutate any actual call. Live model accuracy is outside visual validation.
+
+
+## Illustrated Today dashboard
+
+Today uses a quiet mountain banner, a four-part summary, and an asymmetric work
+area: coaching and recent calls on the left, people and follow-ups on the right.
+Every skill remains visible with its call evidence and existing practice actions.
+An active focus and manager escalations keep their existing behavior. The team
+scorecard table remains available below the overview. Narrow screens stack the
+columns in reading order; wide tables scroll within their own card.
+
+Use `.today-hero` for a decorative landscape and real HTML headings/actions.
+Use `.person-avatar` with `.portrait-0` through `.portrait-5` for character art;
+`Sel.personAvatar(person)` chooses by immutable ID. Always show a real name beside
+it. Portraits are decorative fictional characters, not inferred likenesses or
+unique identifiers. The same six portraits may repeat in larger teams.
+The live call uses the same portraits at `.avatar-call` (128px), with no fill
+or border, so the drawing is not clipped by a frame. A seat with no team
+member keeps that space empty, with an initial only when someone joined without
+a person id.
+The welcome banner uses the 20px featured-card radius, cards 16px and controls
+12px. All colors, typography, spacing, shadows and interactions reuse shared tokens.
+
+Assets are local and work offline. Generated with the built-in image generation
+tool from the user's landscape dashboard and monochrome portrait references:
+
+- `sel/web/dashboard-landscape.png`: Wide editorial gouache landscape, soft sage
+  hills and pale blue Himalayan-style mountains, a winding path, warm ivory sky;
+  left third fades to white for HTML copy, landscape weighted right; no text,
+  logos, UI or frame.
+- `sel/web/team-portraits.png`: Six original friendly monochrome head-and-shoulder
+  portraits in a seamless equal-cell 3-by-2 sprite sheet; bold hand-drawn outlines,
+  white fill, varied hair and glasses, consistent scale, no labels or gutters.
+
+The complete generation prompts are in `docs/dashboard-image-prompts.md`.

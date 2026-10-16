@@ -119,6 +119,10 @@ class HubTests(unittest.TestCase):
             self.hub.create("demo-solar", "manager", "X", None, None)
         with self.assertRaises(KeyError):
             self.hub.create("no-such-pack", "rep", "X", None, None)
+        person = self.service.people.add("Nima Gurung", "rep")
+        room2, token = self.hub.create("demo-solar", "rep", person["name"], None, "+05:45", person_id=person["id"])
+        shown = self.hub.view(room2, you=token, lines=False)["participants"]
+        self.assertEqual(shown[0]["person_id"], person["id"])
 
     def test_signals_reach_only_the_other_side(self):
         room, rep, cust = self.room()

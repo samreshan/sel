@@ -1,6 +1,6 @@
 {
   "call_id": "solar-01",
-  "audio": "audio.wav",
+  "audio": "audio.ogg",
   "started_at": "2026-10-07T14:00:00+05:45",
   "speakers": [
     {
@@ -19,122 +19,122 @@
     {
       "id": "s01",
       "start": 0.0,
-      "end": 7.26,
+      "end": 6.13,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Namaste Ramesh ji, ma Ghamghar Solar bata Asha bolirahechu. Tapaile website ma inquiry garnu bhayeko thiyo, hoina?"
+      "lang": "en",
+      "text": "Hello Ramesh, this is Asha from Ghamghar Solar. You sent an inquiry through our website, is that right?"
     },
     {
       "id": "s02",
-      "start": 7.66,
-      "end": 14.08,
+      "start": 6.53,
+      "end": 11.36,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "Ho, ghar ko lagi solar system ko barema sodhna khojeko. Mahina ko bill dherai aaucha."
+      "lang": "en",
+      "text": "Yes, I wanted to ask about a solar system for my home. My monthly electricity bill is high."
     },
     {
       "id": "s03",
-      "start": 14.48,
-      "end": 19.88,
+      "start": 11.76,
+      "end": 18.15,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Bujhe. Hamro 3 kW grid-tie system installation sahit 4 lakh 20 hajar parcha."
+      "lang": "en",
+      "text": "I understand. Our 3 kW grid-tie system costs NPR 4,20,000 including installation."
     },
     {
       "id": "s04",
-      "start": 20.28,
-      "end": 24.83,
+      "start": 18.55,
+      "end": 22.59,
       "speaker": "S2",
-      "lang": "ne",
-      "text": "Ali mahango bhayo. Arko company le 3 lakh 60 ma dinchu bhaneko thiyo."
+      "lang": "en",
+      "text": "That is a little expensive. Another company quoted NPR 3,60,000."
     },
     {
       "id": "s05",
-      "start": 25.23,
-      "end": 31.0,
+      "start": 22.99,
+      "end": 28.29,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Hamro panel ma 25 years performance warranty cha, ani inverter ma pani 10 years warranty cha."
+      "lang": "en",
+      "text": "Our panels have a 25-year performance warranty, and the inverter also has a 10-year warranty."
     },
     {
       "id": "s06",
-      "start": 31.4,
-      "end": 33.05,
+      "start": 28.69,
+      "end": 29.88,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "EMI ko option cha?"
+      "lang": "en",
+      "text": "Is there an EMI option?"
     },
     {
       "id": "s07",
-      "start": 33.45,
-      "end": 36.92,
+      "start": 30.28,
+      "end": 34.44,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Partner bank through EMI milcha, ma details pathaidinchu."
+      "lang": "en",
+      "text": "EMI is available through a partner bank. I'll email you the details."
     },
     {
       "id": "s08",
-      "start": 37.32,
-      "end": 39.88,
+      "start": 34.84,
+      "end": 36.88,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "Net metering ko process kati time lagcha?"
+      "lang": "en",
+      "text": "How long does the net metering process take?"
     },
     {
       "id": "s09",
-      "start": 40.28,
-      "end": 43.24,
+      "start": 37.28,
+      "end": 40.07,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "NEA approval chai normally duita hapta ma aaucha."
+      "lang": "en",
+      "text": "NEA approval normally takes two weeks."
     },
     {
       "id": "s10",
-      "start": 43.64,
-      "end": 47.43,
+      "start": 40.47,
+      "end": 42.99,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "Thik cha. Malai detail quotation email ma pathaidinu na."
+      "lang": "en",
+      "text": "All right. Please email me a detailed quotation."
     },
     {
       "id": "s11",
-      "start": 47.83,
-      "end": 52.47,
+      "start": 43.39,
+      "end": 47.9,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Huncha, ma bholi beluka samma quotation ra EMI details email garchu."
+      "lang": "en",
+      "text": "Sure, I'll email you the quotation and EMI details by tomorrow evening."
     },
     {
       "id": "s12",
-      "start": 52.87,
-      "end": 55.54,
+      "start": 48.3,
+      "end": 49.9,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "Site visit ko lagi kahile aunu huncha?"
+      "lang": "en",
+      "text": "When will you come for the site visit?"
     },
     {
       "id": "s13",
-      "start": 55.94,
-      "end": 60.64,
+      "start": 50.3,
+      "end": 55.77,
       "speaker": "S1",
-      "lang": "ne-en",
-      "text": "Sometime next week hamro engineer pathaula. Ma pachhi call garera confirm garchu."
+      "lang": "en",
+      "text": "Sometime next week we'll send our engineer for a site visit. I'll call later to confirm the day."
     },
     {
       "id": "s14",
-      "start": 61.04,
-      "end": 65.03,
+      "start": 56.17,
+      "end": 59.12,
       "speaker": "S2",
-      "lang": "ne-en",
-      "text": "Ok, ma pani ghar ma kura garera sukrabar call garchu."
+      "lang": "en",
+      "text": "Okay, I'll discuss it at home and call back on Friday."
     },
     {
       "id": "s15",
-      "start": 65.43,
-      "end": 68.31,
+      "start": 59.52,
+      "end": 62.29,
       "speaker": "S1",
-      "lang": "ne",
-      "text": "Dhanyabad Ramesh ji. Bholi email pathauchu."
+      "lang": "en",
+      "text": "Thank you, Ramesh. I'll email you tomorrow."
     }
   ]
 }

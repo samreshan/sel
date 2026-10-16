@@ -629,18 +629,31 @@
     );
   }
 
+  // The same decorative portrait as Today, chosen by the team member's id.
+  // Someone who is not on the team keeps a quiet initial in the same frame.
+  function callPortrait(p, role) {
+    if (p && p.person_id) return S.personAvatar({ id: p.person_id }, "call");
+    const label = (p && p.name) || S.ROLE_LABEL[role] || "";
+    return el(
+      "span",
+      { class: "person-avatar avatar-call is-waiting", "aria-hidden": "true" },
+      p ? label.charAt(0).toUpperCase() : icon("user", 28)
+    );
+  }
+
   function renderPeople() {
     if (!sim.room) return;
     const tiles = ["rep", "customer"].map((role) => {
       const p = sim.room.participants.find((x) => x.role === role);
       const me = role === myRole();
-      const meter = el("span", { class: "meter", "aria-hidden": "true" }, el("i", {}));
+      const meter = el("span", { class: "meter", "aria-hidden": "true" },
+        ...Array.from({ length: 25 }, () => el("i", {})));
       if (me) sim.meters.localEl = meter;
       else sim.meters.remoteEl = meter;
       return el(
         "div",
         { class: `person role-${role}${p && p.online ? " is-online" : ""}${me ? " is-me" : ""}` },
-        el("span", { class: `avatar role-${role}`, "aria-hidden": "true" }, (p && p.name ? p.name : S.ROLE_LABEL[role]).charAt(0).toUpperCase()),
+        callPortrait(p, role),
         el(
           "div",
           { class: "person-text" },
@@ -1174,11 +1187,24 @@
       for (const [key, elKey] of [["local", "localEl"], ["remote", "remoteEl"]]) {
         const m = sim.meters[key];
         const node = sim.meters[elKey];
-        if (!m || !node || !node.isConnected) continue;
-        m.node.getByteTimeDomainData(m.buf);
+        if (!node || !node.isConnected) continue;
+        const participant = key === "local" ? null : other();
+        const enabled = !!m && sim.room && ["waiting", "ready", "live"].includes(sim.room.state) &&
+          (key === "local" ? sim.mic === "on" : participant && participant.online && participant.mic);
+        if (enabled) m.node.getByteTimeDomainData(m.buf);
         let peak = 0;
-        for (let i = 0; i < m.buf.length; i += 4) peak = Math.max(peak, Math.abs(m.buf[i] - 128));
-        node.firstChild.style.transform = `scaleX(${Math.min(1, peak / 64).toFixed(2)})`;
+        for (let i = 0; i < node.children.length; i++) {
+          let sum = 0;
+          const start = m ? Math.floor(i * m.buf.length / node.children.length) : 0;
+          const end = m ? Math.floor((i + 1) * m.buf.length / node.children.length) : 0;
+          if (enabled) {
+            for (let j = start; j < end; j++) sum += ((m.buf[j] - 128) / 128) ** 2;
+          }
+          const level = enabled ? Math.min(1, Math.sqrt(sum / (end - start)) * 5) : 0;
+          peak = Math.max(peak, level);
+          node.children[i].style.setProperty("--level", Math.max(0.08, level).toFixed(2));
+        }
+        node.classList.toggle("is-speaking", peak > 0.08);
       }
     };
     sim.meterRaf = requestAnimationFrame(step);

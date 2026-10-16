@@ -34,9 +34,9 @@ EXTRACT = {
     # Small models sometimes append the timestamp to the id; Sel keeps the id part.
     "objections": [{"segment": "s04 00:22", "summary": "Competitor is cheaper."}],
     "commitments": [
-        # "when" is close to the spoken words (the model wrote "bholi beluka"); Sel keeps the transcript's words.
+        # "when" is close to the spoken words (the model wrote "tomorrow evening"); Sel keeps the transcript's words.
         {"segment": "s11", "speaker": "REP", "action": "email the quotation", "channel": "email",
-         "when": "bholi beluka samma"},
+         "when": "by tomorrow evening"},
         {"segment": "s13", "speaker": "REP", "action": "send an engineer", "channel": "visit",
          "when": "sometime next week"},
         # A time that was never said: dropped, so the draft will ask for a date.
@@ -87,7 +87,7 @@ class AnalyzerTests(unittest.TestCase):
         k1 = self.analysis.commitments[0]
         self.assertEqual(k1.evidence.quote, self.transcript.segment("s11").text)
         self.assertEqual(k1.owner, "S1")
-        self.assertEqual(k1.due_text, "bholi beluka samma")
+        self.assertEqual(k1.due_text, "by tomorrow evening")
         objection = next(f for f in self.report.findings if f.kind == "objection")
         self.assertEqual(objection.evidence.segment_ids, ["s04"])
 
@@ -127,8 +127,8 @@ class AnalyzerTests(unittest.TestCase):
     def test_prompts_carry_segment_ids_and_roles(self):
         name, user = self.llm.prompts[0]
         self.assertEqual([p[0] for p in self.llm.prompts[:3]], ["customer", "commitments", "claims"])
-        self.assertIn("[s01] REP: Namaste", user)
-        self.assertIn("[s02] CUSTOMER: Ho,", user)
+        self.assertIn("[s01] REP: Hello", user)
+        self.assertIn("[s02] CUSTOMER: Yes,", user)
 
 
 class Helpers(unittest.TestCase):
@@ -136,7 +136,7 @@ class Helpers(unittest.TestCase):
         self.transcript = Transcript.from_dict(json.loads((SOLAR / "transcript.json").read_text()))
 
     def test_snap_moves_quote_to_neighbouring_segment(self):
-        seg, quote, adjusted = snap_quote("EMI ko option cha?", "s05", self.transcript)
+        seg, quote, adjusted = snap_quote("Is there an EMI option?", "s05", self.transcript)
         self.assertEqual((seg, adjusted), ("s06", True))
 
     def test_snap_leaves_unrelated_quote_for_the_gate(self):

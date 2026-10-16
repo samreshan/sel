@@ -160,37 +160,62 @@
     const t = page.today;
     const manager = t.scope === "team";
     const nodes = [
-      header(
-        todayDate(),
-        manager ? "Your team today" : `Today, ${me.name.split(" ")[0]}`,
-        manager ? "Follow-ups waiting across the team, where reps fall short, and calls that need a rep." : "What needs you: follow-ups to finish, and the skills your recent calls fell short on.",
-        el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } })
-      ),
+      el("div", { class: "today-toolbar" },
+        el("span", { class: "today-location" }, icon("calendar", 16), "Workspace", el("span", { "aria-hidden": "true", text: "/" }), el("strong", { text: "Today" })),
+        el("span", { class: "muted small", text: todayDate() })),
+      todayHero(me, manager),
       page.todayErr ? el("p", { class: "form-error", role: "alert", text: page.todayErr }) : null,
       counts(t),
-      manager ? escalations(t) : null,
-      t.focus
-        ? el("div", { class: "bento" }, focusCard(t.focus), followUps(t, manager))
-        : el("div", { class: "bento" }, skills(t, manager), followUps(t, manager)),
-      t.focus && t.skills.length ? skills(t, manager, false) : null,
-      manager ? team(t) : null,
-      manager && t.unassigned.length ? unassigned(t) : null,
+      el("div", { class: "today-work" },
+        el("div", { class: "today-primary" },
+          manager ? escalations(t) : null,
+          t.focus ? focusCard(t.focus) : skills(t, manager),
+          t.focus && t.skills.length ? skills(t, manager, false) : null,
+          recent(t),
+          manager ? team(t) : null),
+        el("div", { class: "today-side" },
+          peopleCard(me),
+          followUps(t, manager),
+          manager && t.unassigned.length ? unassigned(t) : null)),
       working(t),
-      recent(t),
     ];
-    main.replaceChildren(el("div", { class: "page" }, ...compact(nodes)));
+    main.replaceChildren(el("div", { class: "page today-page" }, ...compact(nodes)));
+  }
+
+  function todayHero(me, manager) {
+    return el("header", { class: "today-hero" },
+      el("img", { class: "today-landscape", src: "/static/dashboard-landscape.png", alt: "", width: "2172", height: "724", fetchpriority: "high" }),
+      el("div", { class: "today-hero-copy" },
+        el("p", { class: "eyebrow", text: `A little better, every call · ${me.name.split(" ")[0]}` }),
+        el("h1", { text: manager ? "Your team today" : `Today, ${me.name.split(" ")[0]}` }),
+        el("p", { class: "lede", text: manager ? "Good conversations. Clear next steps. Make room for your team's next small win." : "A little practice. A clearer next step. Build on what your last conversation taught you." }),
+        el("div", { class: "row today-hero-actions" },
+          el("a", { class: "button primary", href: "#new" }, icon("add", 16), "New call"),
+          el("a", { class: "button", href: "#practice" }, icon("target", 16), "Start practising"))));
+  }
+
+  function peopleCard(me) {
+    const people = S.people();
+    const rows = people.map((p) => el("li", { class: "today-person" },
+      S.personAvatar(p, "large"),
+      el("div", { class: "today-person-copy" }, el("strong", { text: p.name }), el("span", { class: "muted small", text: ROLE[p.role] })),
+      p.id === me.id ? pill("neutral", "You") : el("button", { type: "button", class: "small ghost", text: "View", "aria-label": `View as ${p.name}`, on: { click: () => S.setViewer(p.id) } })));
+    return el("section", { class: "list-card today-people", "aria-labelledby": "today-people-title" },
+      el("div", { class: "today-section-heading" }, el("h2", { id: "today-people-title", class: "section-title", text: "Your people" }), el("span", { class: "muted small", text: plural(people.length, "member", "members") })),
+      el("ul", { class: "today-people-list" }, ...rows),
+      el("a", { class: "today-people-manage", href: "#people" }, icon("user", 16), "Manage people"));
   }
 
   // A passive summary: numbers, not buttons.
   function counts(t) {
-    const stat = (label, n, warn) => el("div", { class: `stat${warn ? " is-warn" : ""}` }, el("dt", { text: label }), el("dd", { text: String(n) }));
+    const stat = (label, n, name, tone) => el("div", { class: `stat${tone === "warn" && n > 0 ? " is-warn" : ""}` }, el("dt", {}, iconTile(tone, name), el("span", { text: label })), el("dd", { text: String(n) }));
     return el(
       "dl",
       { class: "stat-strip", "aria-label": "Summary" },
-      stat("Follow-ups needing input", t.counts.needs_input, t.counts.needs_input > 0),
-      stat("Ready for approval", t.counts.ready_for_approval),
-      stat("Being analysed", t.in_progress.length),
-      stat(t.scope === "team" ? "Team calls" : "Your calls", t.counts.calls)
+      stat("Follow-ups needing input", t.counts.needs_input, "calendar", "warn"),
+      stat("Ready for approval", t.counts.ready_for_approval, "mail", "info"),
+      stat("Being analysed", t.in_progress.length, "bolt", "accent"),
+      stat(t.scope === "team" ? "Team calls" : "Your calls", t.counts.calls, "phone", "ok")
     );
   }
 
@@ -314,7 +339,7 @@
   function skills(t, manager, anchor = true) {
     if (!t.skills.length) {
       return sectionOf(
-        `list-card page-section${anchor ? " bento-anchor" : ""} is-empty`,
+        `list-card page-section today-skills${anchor ? " bento-anchor" : ""} is-empty`,
         "Skills to work on",
         null,
         "target",
@@ -355,7 +380,7 @@
       );
     });
     return sectionOf(
-      `list-card page-section${anchor ? " bento-anchor" : ""}`,
+      `list-card page-section today-skills${anchor ? " bento-anchor" : ""}`,
       "Skills to work on",
       manager ? "Scorecard skills the team fell short on in recent calls, from the pack's scorecard." : "Scorecard skills your recent calls fell short on. Practise one, then watch it on your next calls.",
       "target",
@@ -370,7 +395,7 @@
       el(
         "tr",
         {},
-        el("th", { scope: "row", text: r.name }),
+        el("th", { scope: "row" }, el("span", { class: "person-label" }, S.personAvatar(r), el("span", { text: r.name }))),
         el("td", { text: String(r.calls) }),
         el("td", { text: r.average === null ? "–" : `${r.average}` }),
         el("td", { text: r.focus ? r.focus.title : "None yet" }),
@@ -479,7 +504,7 @@
   }
 
   function chooseViewer(people) {
-    const btn = (p) => el("button", { type: "button", class: "person-pick", on: { click: () => S.setViewer(p.id) } }, el("span", { class: "strong", text: p.name }), el("span", { class: "muted small", text: ROLE[p.role] }));
+    const btn = (p) => el("button", { type: "button", class: "person-pick", on: { click: () => S.setViewer(p.id) } }, S.personAvatar(p, "large"), el("span", { class: "strong", text: p.name }), el("span", { class: "muted small", text: ROLE[p.role] }));
     return el(
       "section",
       { class: "welcome" },
@@ -518,7 +543,7 @@
       return el(
         "li",
         { class: "page-row person-row" },
-        icon("user", 18),
+        S.personAvatar(p),
         name,
         role,
         me && me.id === p.id ? pill("ok", "You") : el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(p.id) } }),
@@ -559,18 +584,13 @@
     }
     const id = packId && packs.some((p) => p.id === packId) ? packId : packs[0].id;
     const detail = page.packs.get(id);
-    const tabs = el(
-      "nav",
-      { class: "segmented", "aria-label": "Business packs" },
-      ...packs.map((p) => el("a", { href: `#playbook/${enc(p.id)}`, class: p.id === id ? "is-on" : "", "aria-current": p.id === id ? "page" : null, text: p.name }))
-    );
     if (!detail) {
-      main.replaceChildren(el("div", { class: "page" }, header("Playbook", packs.find((p) => p.id === id).name, null), packs.length > 1 ? tabs : null, S.skeleton()));
+      main.replaceChildren(el("div", { class: "page" }, playbookHead(packs, id, null), S.skeleton()));
       loadPack(id);
       return;
     }
     if (detail.error) {
-      main.replaceChildren(el("div", { class: "page" }, header("Playbook", id, null), el("p", { class: "form-error", text: detail.error })));
+      main.replaceChildren(el("div", { class: "page" }, playbookHead(packs, id, null), el("p", { class: "form-error", text: detail.error })));
       return;
     }
     const skillsList = el(
@@ -595,8 +615,7 @@
       el(
         "div",
         { class: "page" },
-        header("Playbook", detail.name, detail.description, el("a", { class: "button", href: "#sim", text: "Practise a call" })),
-        packs.length > 1 ? tabs : null,
+        playbookHead(packs, id, detail.description, el("a", { class: "button", href: "#sim", text: "Practise a call" })),
         el(
           "div",
           { class: "bento" },
@@ -610,6 +629,34 @@
         ),
         el("p", { class: "muted small", text: `Languages: ${detail.languages.join(", ") || "not set"} · week starts on ${detail.week_starts_on}` })
       )
+    );
+  }
+
+  function playbookHead(packs, id, description, ...extra) {
+    const current = packs.find((p) => p.id === id) || packs[0];
+    const select = el(
+      "select",
+      {
+        id: "pack-switch",
+        class: "title-select",
+        "aria-label": "Business pack",
+        on: { change: () => navigate(`#playbook/${enc(select.value)}`) },
+      },
+      ...packs.map((p) => el("option", { value: p.id, text: p.name }))
+    );
+    select.value = id;
+    return el(
+      "header",
+      { class: "page-head" },
+      el(
+        "div",
+        {},
+        el("p", { class: "eyebrow", text: "Playbook" }),
+        el("h1", packs.length > 1 ? { class: "sr-only", text: current.name } : { text: current.name }),
+        packs.length > 1 ? select : null,
+        description ? el("p", { class: "lede", text: description }) : null
+      ),
+      ...compact(extra)
     );
   }
 

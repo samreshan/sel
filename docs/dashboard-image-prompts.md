@@ -1,0 +1,12 @@
+# Dashboard image prompts
+
+Generated with the built-in image generation tool. Reference images were supplied by the user; these are original decorative assets. The application loads both locally.
+
+## Landscape — `sel/web/dashboard-landscape.png`
+
+Create a production illustration asset for Sel, a calm sales-team coaching dashboard. Use case: stylized-concept. The attached dashboard is a composition/style reference only: borrow its softly painted alpine landscape, not its UI, text or logo. Generate ONLY a wide panoramic landscape illustration, approx 3:1 aspect ratio. Soft sage foothills, pale blue distant Himalayan-style peaks, warm ivory sky, a gentle winding path rising through the hills. Refined editorial gouache with simplified shapes and subtle paper texture, quiet optimistic morning light, restrained low-saturation colors. Composition: landscape concentrated in right two-thirds; left third fades naturally to clean white so HTML heading can sit separately over it. No people necessary, no buildings, no text, no logos, no UI, no frame. This is a tranquil background, not a busy fantasy scene.
+
+## Portrait sheet — `sel/web/team-portraits.png`
+
+Use case: stylized-concept. Create a production avatar SPRITE SHEET for Sel's team dashboard, based on the attached reference's simple friendly Notion-style monochrome illustrated people. This is ONE image with exactly SIX portraits arranged in a precise seamless 3-column by 2-row grid. Overall aspect ratio 3:2. Each of the six cells is an equal square. Each portrait is centered in its own square, head and shoulders visible, consistent scale, white background throughout. NO cell borders, NO gutters, NO rounded card backgrounds, NO text. Each head has plenty of white margin, hair never crosses cell boundaries. Strong charcoal hand-drawn outlines and solid dark hair, white faces and clothing, sparse facial features, welcoming mild smiles, clean flat editorial doodle style. Distinct fictional characters: top-left short wavy hair wearing crewneck; top-middle chin-length hair with round glasses and collared shirt; top-right curly hair and short beard wearing plain shirt; bottom-left hair in bun wearing turtleneck; bottom-middle side-part hair with square glasses and sweater; bottom-right long wavy hair wearing simple shirt. Original characters, not exact copies. No color, no shadows, no gradients, no accessories beyond glasses, no business logos. Deliver a neatly aligned six-person sprite sheet suitable for CSS background-position cropping at thirds horizontally and halves vertically.
+

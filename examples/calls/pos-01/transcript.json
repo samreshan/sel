@@ -7,16 +7,16 @@
     {"id": "S2", "role": "customer", "name": "Sunita", "email": "sunita@example.com"}
   ],
   "segments": [
-    {"id": "s01", "start": 0.0, "end": 6.1, "speaker": "S1", "lang": "en-ne", "text": "Hello, Prakash from Thali POS. Tapaiko café ko lagi billing software khojnu bhako thiyo, right?"},
-    {"id": "s02", "start": 6.3, "end": 12.4, "speaker": "S2", "lang": "en-ne", "text": "Yes, hamro duita outlet cha. Internet gayo bhane billing chalcha ki chaldaina?"},
-    {"id": "s03", "start": 12.6, "end": 18.2, "speaker": "S1", "lang": "ne-en", "text": "Chalcha, offline ma pani billing huncha, ani net aaye pachhi sync huncha."},
-    {"id": "s04", "start": 18.4, "end": 23.9, "speaker": "S2", "lang": "ne-en", "text": "Ani hamro accounting software sanga connect huncha?"},
-    {"id": "s05", "start": 24.1, "end": 29.8, "speaker": "S1", "lang": "en-ne", "text": "Yes, direct integration cha accounting software sanga."},
-    {"id": "s06", "start": 30.0, "end": 33.2, "speaker": "S2", "lang": "ne-en", "text": "Price chai kati ho?"},
+    {"id": "s01", "start": 0.0, "end": 6.1, "speaker": "S1", "lang": "en", "text": "Hello, this is Prakash from Thali POS. You were looking for billing software for your cafe, is that right?"},
+    {"id": "s02", "start": 6.3, "end": 12.4, "speaker": "S2", "lang": "en", "text": "Yes, we have two outlets. Does billing work when the internet goes down?"},
+    {"id": "s03", "start": 12.6, "end": 18.2, "speaker": "S1", "lang": "en", "text": "Yes, billing works offline and syncs when the connection returns."},
+    {"id": "s04", "start": 18.4, "end": 23.9, "speaker": "S2", "lang": "en", "text": "Does it connect directly to our accounting software?"},
+    {"id": "s05", "start": 24.1, "end": 29.8, "speaker": "S1", "lang": "en", "text": "Yes, it integrates directly with accounting software."},
+    {"id": "s06", "start": 30.0, "end": 33.2, "speaker": "S2", "lang": "en", "text": "What is the price?"},
     {"id": "s07", "start": 33.4, "end": 40.7, "speaker": "S1", "lang": "en", "text": "Standard plan is 2,500 per month per outlet, with yearly billing."},
-    {"id": "s08", "start": 40.9, "end": 46.0, "speaker": "S2", "lang": "ne-en", "text": "Hmm, duita outlet ko lagi ali dherai bhayo."},
-    {"id": "s09", "start": 46.2, "end": 55.5, "speaker": "S1", "lang": "ne-en", "text": "Ma tapailai pricing PDF aaja nai email gardinchu. Ani demo ko lagi next Sunday 3 baje kasto huncha?"},
-    {"id": "s10", "start": 55.7, "end": 60.1, "speaker": "S2", "lang": "ne-en", "text": "Yo Sunday ma milcha, diuso 3 baje."},
-    {"id": "s11", "start": 60.3, "end": 66.0, "speaker": "S1", "lang": "ne-en", "text": "Perfect, ma Sunday 3 baje ko demo invite pathaidinchu."}
+    {"id": "s08", "start": 40.9, "end": 46.0, "speaker": "S2", "lang": "en", "text": "Hmm, that is a little expensive for two outlets."},
+    {"id": "s09", "start": 46.2, "end": 55.5, "speaker": "S1", "lang": "en", "text": "I'll email you the pricing PDF today. How about a demo next Sunday at 3 p.m.?"},
+    {"id": "s10", "start": 55.7, "end": 60.1, "speaker": "S2", "lang": "en", "text": "This Sunday works for me, at 3 p.m."},
+    {"id": "s11", "start": 60.3, "end": 66.0, "speaker": "S1", "lang": "en", "text": "Perfect, I'll send you the demo invite for Sunday at 3 p.m."}
   ]
 }

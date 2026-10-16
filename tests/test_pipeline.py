@@ -52,7 +52,7 @@ class EvidenceGate(unittest.TestCase):
 
     def test_quote_matching_ignores_case_and_spacing(self):
         a = self.analysis(findings=[{"id": "q", "kind": "question", "summary": "s",
-                                     "evidence": {"segment_ids": ["s06"], "quote": "emi  KO option"}}])
+                                     "evidence": {"segment_ids": ["s06"], "quote": "an  EMI option"}}])
         kept, _ = ground(a, self.transcript, self.pack)
         self.assertEqual(len(kept.findings), 1)
 

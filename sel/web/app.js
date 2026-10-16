@@ -6,7 +6,7 @@
  * Performance (numbers in CLAUDE.md):
  * - One Server-Sent Events stream per tab pushes call and simulator updates;
  *   polling is only a fallback while the stream is down.
- * - Call views are cached in memory and revalidated with ETags, and sidebar
+ * - Call views are cached in memory and revalidated with ETags, and call
  *   links prefetch on hover, so opening a call renders immediately.
  * - Segment lookups go through an index; the playhead uses binary search and
  *   touches only the rows that change; editing a line replaces one row.
@@ -77,13 +77,14 @@
     packs: new Map(),
     packError: null,
     calls: [],
-    listRows: new Map(), // call id -> {li, key}: sidebar rows are reused when unchanged
-    view: "empty", // "empty" | "new" | "call" | "sim" | "coach" (Today, Playbook, People: coach.js)
+    callsLoaded: false,
+    callLayout: "table",
+    listError: null,
+    view: "empty", // "empty" | "new" | "calls" | "call" | "sim" | "coach" (Today, Playbook, People: coach.js)
     coachPage: null, // "today" | "playbook" | "people"
     coachArg: null, // e.g. the pack id on #playbook/<id>
     people: [], // the team, from the event stream (people.json on the server)
     viewerId: null, // who this browser is viewing as (localStorage "sel.viewer")
-    callScope: null, // "mine" | "all" in the sidebar's call list
     modules: {}, // lazily loaded scripts: name -> promise
     callId: null,
     simCode: null,
@@ -487,9 +488,9 @@
       renderMain();
       return;
     }
-    if (hash === "new" || sim) {
+    if (hash === "new" || hash === "calls" || sim) {
       if (state.view === "call") resetCallUi();
-      state.view = sim ? "sim" : "new";
+      state.view = sim ? "sim" : hash;
       state.simCode = sim ? sim[1] || null : null;
       state.callId = null;
       state.call = null;
@@ -566,6 +567,8 @@
 
   function applyList(list) {
     state.calls = list;
+    state.callsLoaded = true;
+    state.listError = null;
     renderList();
   }
 
@@ -591,13 +594,13 @@
 
   async function refreshList() {
     const list = await api("/api/calls");
-    if (JSON.stringify(list) !== JSON.stringify(state.calls)) applyList(list);
+    if (!state.callsLoaded || JSON.stringify(list) !== JSON.stringify(state.calls)) applyList(list);
+    setListError(null);
   }
 
   function setListError(message) {
-    const node = $("#list-error");
-    node.textContent = message || "";
-    node.hidden = !message;
+    state.listError = message || null;
+    if (state.view === "calls") renderCalls($("#main"));
   }
 
   // Fallback while the event stream is down (or unsupported): poll like before.
@@ -712,13 +715,26 @@
     renderHealth();
   }
 
-  function chip(ok, label, detail) {
-    const tail = ok ? "ready" : `not ready${detail ? ` (${detail})` : ""}`;
+  // "openai-compatible:qwen2.5:7b@http://…" → "qwen2.5:7b". The address stays on the hover tip.
+  function shortModel(raw) {
+    if (!raw) return "";
+    const head = String(raw).split("@")[0];
+    const cut = head.indexOf(":");
+    return (cut >= 0 ? head.slice(cut + 1) : head).trim();
+  }
+
+  function speechModel(model) {
+    if (!model) return "";
+    return /whisper/i.test(model) ? model : `Whisper ${model}`;
+  }
+
+  function statusLine(ok, text, model, detail) {
     return el(
-      "span",
-      { class: `chip ${ok ? "chip-ok" : "chip-bad"}` },
+      "p",
+      { class: `chip ${ok ? "chip-ok" : "chip-bad"}`, title: detail || null },
       el("span", { class: "dot", "aria-hidden": "true" }),
-      el("span", { text: `${label}: ${tail}` })
+      el("span", { class: "health-label", text }),
+      model ? el("span", { class: "health-model", text: model }) : null
     );
   }
 
@@ -726,22 +742,31 @@
     const node = $("#health");
     const h = state.health;
     if (!h) {
-      node.textContent = "Checking models…";
+      node.textContent = "Checking…";
       return;
     }
     if (h.error) {
-      node.replaceChildren(chip(false, "Server", h.error));
+      node.replaceChildren(statusLine(false, "Couldn't check this computer", "", h.error));
       return;
     }
-    const llm = h.llm || {};
     const asr = h.asr || {};
+    const llm = h.llm || {};
+    const speechName = speechModel(asr.model);
+    const reviewName = shortModel(llm.name);
+    const speech = asr.ok
+      ? ["Transcripts ready", speechName, asr.model ? `Speech model: ${asr.model}` : "Transcription is available."]
+      : ["Transcripts not set up", speechName, asr.error || "Transcription is not available on this computer."];
+    // A missing language model does not stop review: Sel falls back to its rules.
+    const review = llm.ok
+      ? ["Call review ready", reviewName, llm.name || "The language model answered."]
+      : ["Review uses simple rules", reviewName, llm.error || llm.name || "The language model did not answer. Calls are still reviewed with Sel's rules."];
     node.replaceChildren(
-      chip(!!asr.ok, `Speech ${asr.model || "(not set)"}`, asr.error),
-      chip(!!llm.ok, `Analysis ${llm.name || "(not set)"}`, llm.error)
+      statusLine(!!asr.ok, speech[0], speech[1], speech[2]),
+      statusLine(!!llm.ok, review[0], review[1], review[2])
     );
   }
 
-  // ---------- top bar: review progress ----------
+  // ---------- bottom dock: review progress ----------
 
   // Which of Transcribe / Analyse / Review / Approve drafts are done, worked
   // out from the call's status and its drafts.
@@ -760,7 +785,7 @@
 
   function renderSteps() {
     const list = $("#steps");
-    const bar = list.closest(".topbar");
+    const bar = list.closest(".review-dock");
     const call = state.view === "call" && state.call && state.call.id === state.callId ? state.call : null;
     const s = stepState(call);
     list.hidden = !s;
@@ -801,20 +826,33 @@
   function setViewer(id) {
     state.viewerId = id || null;
     store("sel.viewer", state.viewerId);
-    state.callScope = null;
     renderViewer();
     renderList();
     if (state.view === "coach") renderMain();
+    const rep = state.view === "new" ? $("#f-rep-person") : null;
+    const person = viewer();
+    if (rep && person && person.role === "rep" && !rep.value) rep.value = person.id;
     emit("viewer", viewer());
   }
 
   function applyPeople(list) {
+    const hadPeople = state.people.length > 0;
     state.people = list || [];
     if (state.viewerId && !viewer()) state.viewerId = null;
     renderViewer();
     renderList();
     if (state.view === "call" && state.refs) renderHead(state.refs.head);
+    // The new-call form can paint before the team arrives. Refresh it once
+    // people land, before anyone has a reason to have filled it in.
+    if (state.view === "new" && !hadPeople && state.people.length) renderMain();
     emit("people-changed", state.people);
+  }
+
+  // Decorative characters are keyed to immutable person IDs, never inferred from a name.
+  function personAvatar(person, size = "") {
+    let hash = 0;
+    for (const char of String(person.id)) hash = (Math.imul(31, hash) + char.charCodeAt(0)) >>> 0;
+    return el("span", { class: `person-avatar portrait-${hash % 6}${size ? ` avatar-${size}` : ""}`, "aria-hidden": "true" });
   }
 
   function renderViewer() {
@@ -831,93 +869,30 @@
     }
     sel.replaceChildren(...opts);
     sel.value = viewer() ? state.viewerId : "";
-  }
-
-  function callScope() {
-    const me = viewer();
-    if (!me) return "all";
-    return state.callScope || (me.role === "rep" ? "mine" : "all");
-  }
-
-  function renderScope() {
-    const box = $("#call-scope");
-    if (!box) return;
-    const me = viewer();
-    box.hidden = !me;
-    if (!me) return box.replaceChildren();
-    const scope = callScope();
-    const btn = (value, label) =>
-      el("button", {
-        type: "button",
-        class: `scope-btn${scope === value ? " is-on" : ""}`,
-        "aria-pressed": String(scope === value),
-        text: label,
-        on: {
-          click: () => {
-            state.callScope = value;
-            renderList();
-          },
-        },
-      });
-    box.replaceChildren(btn("mine", me.role === "manager" ? "No rep" : "Mine"), btn("all", "All"));
-  }
-
-  function visibleCalls() {
-    const me = viewer();
-    const scope = callScope();
-    if (!me || scope === "all") return state.calls;
-    if (me.role === "manager") return state.calls.filter((c) => !c.rep_id);
-    return state.calls.filter((c) => c.rep_id === me.id);
+    const portrait = $("#viewer-portrait");
+    if (portrait) portrait.replaceChildren(viewer() ? personAvatar(viewer()) : icon("user", 20));
   }
 
   function renderNav() {
-    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "practice" : null;
+    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "practice" : state.view === "calls" || state.view === "call" ? "calls" : null;
     for (const a of document.querySelectorAll(".primary-nav a[data-nav]")) {
       const on_ = a.dataset.nav === active;
       a.classList.toggle("is-active", on_);
       if (on_) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     }
+    const neu = $("#new-call");
+    if (neu) {
+      const onNew = state.view === "new";
+      neu.classList.toggle("is-current", onNew);
+      if (onNew) neu.setAttribute("aria-current", "page");
+      else neu.removeAttribute("aria-current");
+    }
   }
 
   function renderList() {
     renderNav();
-    renderScope();
-    const ul = $("#call-list");
-    const selectedId = state.view === "call" ? state.callId : null;
-    const keep = new Set();
-    const shown = visibleCalls();
-    const nodes = shown.map((c) => {
-      const selected = c.id === selectedId;
-      const key = `${JSON.stringify(c)}|${selected}|${packName(c.pack_id)}|${personName(c.rep_id) || ""}`;
-      let row = state.listRows.get(c.id);
-      if (!row || row.key !== key) {
-        row = { li: callItem(c, selected), key };
-        state.listRows.set(c.id, row);
-      }
-      keep.add(c.id);
-      return row.li;
-    });
-    for (const id of [...state.listRows.keys()]) if (!keep.has(id)) state.listRows.delete(id);
-    let prev = null;
-    for (const node of nodes) {
-      const want = prev ? prev.nextSibling : ul.firstChild;
-      if (want !== node) ul.insertBefore(node, want);
-      prev = node;
-    }
-    let extra = prev ? prev.nextSibling : ul.firstChild;
-    while (extra) {
-      const next = extra.nextSibling;
-      extra.remove();
-      extra = next;
-    }
-    const empty = $("#list-empty");
-    empty.hidden = shown.length > 0;
-    empty.textContent = state.calls.length
-      ? callScope() === "mine" && viewer() && viewer().role === "manager"
-        ? "Every call has a rep."
-        : "No calls of yours yet. Choose New call, or All to see the team's."
-      : "No calls yet. Choose New call to add a recording.";
+    if (state.view === "calls") renderCalls($("#main"));
   }
 
   function callItem(c, selected) {
@@ -931,13 +906,18 @@
         "a",
         {
           href: `#call/${enc(c.id)}`,
-          class: `call-link${selected ? " is-selected" : ""}`,
+          class: `call-link card is-interactive${selected ? " is-selected" : ""}`,
           "aria-current": selected ? "page" : null,
           dataset: { id: c.id },
         },
         icon("phone", 20),
         el("span", { class: "call-title", text: title }),
-        el("span", { class: "call-sub", text: [personName(c.rep_id) || c.rep_name, packName(c.pack_id), formatStarted(c.started_at)].filter(Boolean).join(" · ") }),
+        el(
+          "span",
+          { class: "call-sub" },
+          el("span", { class: "call-who", text: [personName(c.rep_id) || c.rep_name, packName(c.pack_id)].filter(Boolean).join(" · ") }),
+          c.started_at ? el("span", { class: "call-when", text: formatStarted(c.started_at) }) : null
+        ),
         el(
           "span",
           { class: "call-meta" },
@@ -957,6 +937,70 @@
     );
   }
 
+  function callsTable() {
+    const rows = state.calls.map((c) => {
+      const status = CALL_STATUS[c.status] || { cls: "neutral", label: c.status || "Unknown" };
+      const title = c.customer_name || c.original_filename || c.id;
+      return el("tr", { on: { click: (e) => {
+        if (e.target.closest("a, button, input, select, textarea") || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || window.getSelection()?.toString()) return;
+        navigate(`#call/${enc(c.id)}`);
+      } } },
+        el("th", { scope: "row" },
+          el("a", { class: "calls-table-link", href: `#call/${enc(c.id)}`, dataset: { id: c.id } }, icon("phone", 16), title),
+          c.source === "fixture" ? pill("neutral", "Example") : c.source === "simulator" ? pill("violet", "Simulated") : null),
+        el("td", { text: c.started_at ? formatStarted(c.started_at) : "Not recorded" }),
+        el("td", { text: personName(c.rep_id) || c.rep_name || "Unassigned" }),
+        el("td", { text: packName(c.pack_id) }),
+        el("td", {}, pill(status.cls, status.label), isActive(c.status)
+          ? el("div", { class: "call-progress" },
+              el("progress", { max: "1", value: String(c.progress || 0), "aria-label": `${title}: analysis progress` }),
+              el("span", { class: "call-stage", text: `${stageText(c.stage)} · ${Math.round((c.progress || 0) * 100)}%` })) : null));
+    });
+    return el("div", { class: "calls-table-scroll", tabindex: "0", role: "region", "aria-label": "All calls table" },
+      el("table", { class: "team-table calls-table", "aria-label": "All calls" },
+        el("thead", {}, el("tr", {}, ...["Call", "Date", "Rep", "Business pack", "Status"].map((label) => el("th", { scope: "col", text: label })))),
+        el("tbody", {}, ...rows)));
+  }
+
+  function renderCalls(main) {
+    const head = el("header", { class: "page-head calls-head" },
+      el("div", {}, el("h1", { text: "Calls" }),
+        el("p", { class: "lede", text: "All recorded calls, including examples and simulated calls. Open a call to review it." })),
+      el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } }));
+    const nodes = [head];
+    if (state.listError) {
+      nodes.push(el("section", { class: "card is-error", role: "alert" },
+        el("p", { class: "strong", text: "Calls could not be refreshed." }),
+        muted(state.listError),
+        el("button", { type: "button", text: "Try again", on: { click: () => refreshList().catch((e) => setListError(e.message)) } })));
+    }
+    if (!state.callsLoaded && !state.listError) {
+      nodes.push(el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Loading calls…")));
+    } else if (state.callsLoaded && !state.calls.length) {
+      nodes.push(el("section", { class: "card is-empty" },
+        el("h2", { text: "No calls yet" }), muted("Choose New call to add a recording.")));
+    } else if (state.calls.length) {
+      const toggle = el("div", { class: "segmented", role: "group", "aria-label": "Calls view" });
+      for (const [value, label] of [["table", "Table"], ["card", "Card"]]) {
+        toggle.append(
+          el("input", { type: "radio", id: `calls-view-${value}`, name: "calls-view", value, checked: state.callLayout === value,
+            on: { change: () => {
+              state.callLayout = value;
+              store("sel.calls.view", value);
+              renderCalls(main);
+              $(`#calls-view-${value}`).focus();
+            } } }),
+          el("label", { for: `calls-view-${value}`, text: label }));
+      }
+      nodes.push(el("div", { class: "page-head" },
+        el("h2", { class: "section-title", text: plural(state.calls.length, "call", "calls") }), toggle));
+      nodes.push(state.callLayout === "table"
+        ? el("section", { class: "list-card page-section" }, callsTable())
+        : el("ul", { class: "calls-page-list", "aria-label": "All calls" }, ...state.calls.map((c) => callItem(c, false))));
+    }
+    main.replaceChildren(el("div", { class: "page" }, ...nodes));
+  }
+
   // ---------- main pane dispatch ----------
 
   function renderMain() {
@@ -968,6 +1012,10 @@
     );
     main.classList.toggle("is-sim", state.view === "sim");
     main.classList.toggle("is-coach", state.view === "coach");
+    if (state.view === "calls") {
+      renderCalls(main);
+      return;
+    }
     if (state.view === "coach") {
       renderCoach(main);
       return;
@@ -1030,7 +1078,7 @@
         "section",
         { class: "welcome" },
         el("h1", { text: "Sel" }),
-        el("p", { class: "lede", text: "Review recorded sales calls on this computer. Pick a call on the left, add a new recording, or practise a call in the simulator." }),
+        el("p", { class: "lede", text: "Review recorded sales calls on this computer. Open Calls to pick a recording, add a new recording, or practise a call in the simulator." }),
         el(
           "div",
           { class: "row" },
@@ -2780,7 +2828,13 @@
   }
 
   function formField(forId, labelText, control, hint) {
-    return el("div", { class: "field" }, el("label", { for: forId, text: labelText }), control, hint ? el("p", { class: "hint small", text: hint }) : null);
+    const hintNode = hint instanceof Node ? hint : hint ? el("p", { class: "hint small", text: hint }) : null;
+    const label = typeof labelText === "string" ? el("label", { for: forId, text: labelText }) : el("label", { for: forId }, ...labelText);
+    return el("div", { class: "field" }, label, control, hintNode);
+  }
+
+  function optionalLabel(text) {
+    return [text, " ", el("span", { class: "muted", text: "(optional)" })];
   }
 
   function renderUpload(main) {
@@ -2811,44 +2865,107 @@
       repChannelField.hidden = channels.value !== "split";
     });
 
-    const offset = saved.offset || "+05:45";
+    const offset = saved.offset || localOffset();
     const me = viewer();
-    const repSel = el("select", { id: "f-rep-person", name: "rep_id" }, el("option", { value: "", text: "Not set" }));
-    for (const p of state.people.filter((x) => x.role === "rep")) repSel.append(el("option", { value: p.id, text: p.name }));
+    const reps = state.people.filter((x) => x.role === "rep");
+    const repSel = el("select", { id: "f-rep-person", name: "rep_id" }, el("option", { value: "", text: reps.length ? "Choose a rep" : "No reps yet" }));
+    for (const p of reps) repSel.append(el("option", { value: p.id, text: p.name }));
     repSel.value = me && me.role === "rep" ? me.id : saved.rep_id && personName(saved.rep_id) ? saved.rep_id : "";
     const fileInput = el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*", class: "sr-file" });
-    const fileName = el("span", { class: "drop-name", text: "No file chosen" });
+    const fileName = el("span", { class: "drop-name", "aria-live": "polite", hidden: true });
+    const mark = iconTile("neutral", "doc");
+    mark.classList.add("drop-mark");
     const drop = el(
       "label",
       { class: "dropzone", for: "f-audio" },
-      icon("mic", 22),
+      mark,
       el("span", { class: "drop-main", text: "Drop a recording here, or choose a file" }),
+      el("span", { class: "drop-note", text: "Up to 500 MB. The file stays on this computer." }),
       fileName
     );
     fileInput.addEventListener("change", () => {
       const f = fileInput.files[0];
-      fileName.textContent = f ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)} MB` : "No file chosen";
+      fileName.hidden = !f;
+      fileName.textContent = f ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)} MB` : "";
       drop.classList.toggle("has-file", !!f);
+      mark.classList.toggle("tone-neutral", !f);
+      mark.classList.toggle("tone-ok", !!f);
     });
+
+    const timeHint = el("p", { class: "hint small" });
+    const showZone = (value) => {
+      timeHint.textContent = `Times are read in ${value.trim() || offset}.`;
+    };
+    showZone(offset);
+    const offsetInput = el("input", { type: "text", id: "f-offset", name: "offset", value: offset, autocomplete: "off", spellcheck: "false" });
+    offsetInput.addEventListener("input", () => showZone(offsetInput.value));
 
     const submit = el("button", { type: "submit", class: "primary", id: "upload-submit", text: "Upload and analyse", disabled: !state.packList.length });
     const bar = el("progress", { class: "upload-progress", max: "1", value: "0", hidden: true, "aria-label": "Upload progress" });
+    const errBox = el("p", { id: "upload-error", class: "form-error", role: "alert", hidden: true });
+    const sectionHead = (title, sub, iconName) =>
+      el(
+        "div",
+        { class: "section-head" },
+        el(
+          "div",
+          { class: "section-head-main" },
+          iconTile("neutral", iconName),
+          el("div", {}, el("h2", { class: "section-title", text: title }), el("p", { class: "card-sub", text: sub }))
+        )
+      );
     const form = el(
       "form",
       { class: "upload", id: "upload-form", novalidate: true },
-      el("div", { class: "field" }, el("span", { class: "label-like", text: "Recording" }), fileInput, drop, el("p", { class: "hint small", text: "Up to 500 MB. The file stays on this computer." })),
-      formField("f-pack", "Business pack", packSel),
-      formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue(offset) })),
-      formField("f-offset", "UTC offset", el("input", { type: "text", id: "f-offset", name: "offset", value: offset, autocomplete: "off" }), "For example +05:45 or -03:00."),
-      formField("f-rep-person", "Whose call is this?", repSel, state.people.length ? "Coaching and Today follow the rep." : "Add your team under Manage people to track whose call it is."),
-      formField("f-rep", "Rep's name in the call", el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" }), "Optional. Used to label the transcript; defaults to the rep chosen above."),
-      formField("f-cust", "Customer name", el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off" })),
-      formField("f-cust-email", "Customer email", el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off" })),
-      formField("f-channels", "Recording type", channels),
-      repChannelField,
-      el("p", { id: "upload-error", class: "form-error", role: "alert", hidden: true }),
-      bar,
-      el("div", { class: "row" }, submit)
+      el(
+        "div",
+        { class: "bento" },
+        el(
+          "section",
+          { class: "list-card page-section bento-anchor upload-recording" },
+          sectionHead("Recording", "The file Sel will transcribe.", "doc"),
+          el("div", { class: "page-section-body" }, fileInput, drop)
+        ),
+        el(
+          "section",
+          { class: "list-card page-section upload-decide" },
+          sectionHead("To file this call", "The pack and the time. Today and coaching follow the rep.", "lines"),
+          el(
+            "div",
+            { class: "page-section-body" },
+            formField("f-pack", "Business pack", packSel),
+            formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue(offset) }), timeHint),
+            formField("f-rep-person", optionalLabel("Whose call is this?"), repSel, reps.length ? "Today and coaching follow this rep." : "Add a rep under Manage people to track whose call it is."),
+            errBox,
+            bar
+          ),
+          el("div", { class: "card-actions" }, submit)
+        )
+      ),
+      el(
+        "section",
+        { class: "card upload-more" },
+        el(
+          "details",
+          { class: "disclosure", open: Boolean(saved.rep) || (saved.channels && saved.channels !== "auto") },
+          el(
+            "summary",
+            {},
+            el("span", { class: "upload-more-title", text: "More about this call" }),
+            el("span", { class: "upload-more-sub", text: "Names, email, time zone, and recording layout" })
+          ),
+          el(
+            "div",
+            { class: "upload-more-grid" },
+            formField("f-rep", optionalLabel("Rep's name in the call"), el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" }), "Labels the transcript. Defaults to the rep chosen above."),
+            formField("f-cust", optionalLabel("Customer name"), el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off" })),
+            formField("f-cust-email", optionalLabel("Customer email"), el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off" }), "For the follow-up draft. Sel does not send email."),
+            formField("f-offset", "Time zone", offsetInput, "For example +05:45 or -03:00."),
+            formField("f-channels", "Recording layout", channels),
+            repChannelField
+          )
+        )
+      )
     );
     for (const type of ["dragenter", "dragover"]) {
       form.addEventListener(type, (e) => {
@@ -2875,10 +2992,18 @@
     });
     main.replaceChildren(
       el(
-        "section",
-        { class: "upload-page" },
-        el("h1", { text: "New call" }),
-        el("p", { class: "lede", text: "Add a recording. Sel transcribes it and analyses it with the configured language model." }),
+        "div",
+        { class: "page upload-page" },
+        el(
+          "header",
+          { class: "page-head" },
+          el(
+            "div",
+            {},
+            el("h1", { text: "New call" }),
+            el("p", { class: "lede", text: "Add a recording. It stays on this computer. Sel transcribes it and prepares the review." })
+          )
+        ),
         state.packError ? el("p", { class: "form-error", text: `Could not load packs: ${state.packError}` }) : null,
         form
       )
@@ -2904,7 +3029,7 @@
     if (file.size > MAX_UPLOAD) return fail("This recording is larger than 500 MB.");
     if (!pack) return fail("Choose a business pack.");
     if (!when) return fail("Enter when the call started.");
-    if (!offset) return fail("The UTC offset should look like +05:45.");
+    if (!offset) return fail("The time zone should look like +05:45.");
 
     store("sel.upload", { pack, offset, rep: val("#f-rep"), rep_id: val("#f-rep-person"), channels: val("#f-channels"), rep_channel: val("#f-rep-channel") });
     const startedAt = `${when.length === 16 ? `${when}:00` : when}${offset}`;
@@ -3046,6 +3171,7 @@
     viewer,
     setViewer,
     personName,
+    personAvatar,
     skeleton,
     formField,
     coachRoute: () => ({ page: state.coachPage, arg: state.coachArg }),
@@ -3066,13 +3192,14 @@
   async function boot() {
     $("#new-call").addEventListener("click", () => navigate("#new"));
     state.viewerId = store("sel.viewer") || null;
+    state.callLayout = store("sel.calls.view") === "card" ? "card" : "table";
     $("#viewer").addEventListener("change", (e) => setViewer(e.target.value));
     renderViewer();
     window.addEventListener("hashchange", () => route());
     document.addEventListener("keydown", onKey);
-    const list = $("#call-list");
+    const list = $("#main");
     const prefetch = (e) => {
-      const a = e.target.closest && e.target.closest("a.call-link");
+      const a = e.target.closest && e.target.closest("a.call-link, a.calls-table-link");
       if (a && a.dataset.id !== state.callId) prefetchCall(a.dataset.id);
     };
     list.addEventListener("pointerover", prefetch);
@@ -3102,6 +3229,7 @@
     if (state.view === "new") renderMain();
     else if (state.view === "call" && state.refs) renderCallParts();
     await Promise.all([calls, routed]);
+    if (state.view === "coach" && state.coachPage === "playbook") renderMain();
   }
 
   boot();

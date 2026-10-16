@@ -19,12 +19,12 @@
         <span class="brand-mark" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h3l2-5 3 10 2-5h6"/></svg>
         </span>
-        <span class="brand-name">Sel</span>
+        <div class="brand-copy"><span class="brand-name">Sel</span><span class="brand-caption">A little better, every call.</span></div>
       </div>
 
       <div class="viewer">
         <label for="viewer" class="nav-title">Viewing as</label>
-        <select id="viewer"></select>
+        <div class="viewer-identity"><span id="viewer-portrait" aria-hidden="true"></span><select id="viewer"></select></div>
         <a class="viewer-manage small" href="#people">Manage people</a>
       </div>
 
@@ -37,8 +37,12 @@
           <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg>
           Today
         </a>
-        <a href="#practice" data-nav="practice" id="open-sim">
+        <a href="#calls" data-nav="calls">
           <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#phone"/></svg>
+          Calls
+        </a>
+        <a href="#practice" data-nav="practice" id="open-sim">
+          <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#target"/></svg>
           Practice
           <span class="live-dot" aria-hidden="true"></span>
         </a>
@@ -48,35 +52,26 @@
         </a>
       </nav>
 
-      <nav class="nav-section" aria-labelledby="calls-title">
-        <div class="nav-head">
-          <h2 id="calls-title" class="nav-title">Calls</h2>
-          <div class="scope-toggle" id="call-scope" role="group" aria-label="Which calls"></div>
-        </div>
-        <p id="list-error" class="form-error" role="alert" hidden></p>
-        <ul id="call-list" class="call-list"></ul>
-        <p id="list-empty" class="muted small" hidden>No calls yet. Choose New call to add a recording.</p>
-      </nav>
-
       <section class="device-card" aria-labelledby="device-title">
         <p id="device-title" class="device-title">
           <svg class="solar-icon" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lock"/></svg>
-          Runs on this device
+          On this computer
         </p>
-        <div id="health" class="health" role="status" aria-live="polite">Checking models…</div>
+        <div id="health" class="health" role="status" aria-live="polite">Checking…</div>
       </section>
       <a class="design-system-link" href="/static/design-system.html">Design system</a>
       <p class="icon-credit">Icons by <a href="https://www.figma.com/community/file/1166831539721848736" target="_blank" rel="noopener noreferrer">480 Design</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></p>
     </aside>
 
     <div class="workspace">
-      <header class="topbar">
-        <ol id="steps" class="steps" aria-label="Review progress" hidden></ol>
-      </header>
       <main id="main" class="main"></main>
+      <div class="review-dock" hidden>
+        <ol id="steps" class="steps" aria-label="Review progress" hidden></ol>
+      </div>
     </div>
   </div>
 
+  <script src="/static/dropdown.js"></script>
   <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-practice="/static/practice.js" data-worklet="/static/pcm-worklet.js"></script>
 </body>
 </html>

@@ -197,10 +197,17 @@
     return S.store(PROFILE) || {};
   }
 
+  // The person this browser is viewing as: a practice call by a rep is filed under that rep.
+  function personId() {
+    const me = S.viewer();
+    return me ? me.id : null;
+  }
+
   function mountLobby(main) {
     sim.refs = null;
     const p = profile();
-    const name = el("input", { id: "sim-name", type: "text", autocomplete: "name", value: p.name || "", placeholder: "How the other side sees you" });
+    const me = S.viewer();
+    const name = el("input", { id: "sim-name", type: "text", autocomplete: "name", value: (me && me.name) || p.name || "", placeholder: "How the other side sees you" });
     const email = el("input", { id: "sim-email", type: "email", autocomplete: "email", value: p.email || "", placeholder: "Used as the To: of follow-up drafts" });
     const packSel = el("select", { id: "sim-pack" });
     for (const pk of S.packs()) packSel.append(el("option", { value: pk.id, text: pk.name }));
@@ -247,7 +254,7 @@
       try {
         const r = await api("/api/sim/rooms", {
           method: "POST",
-          json: { pack_id: d.pack_id, role: d.role, name: d.name, email: d.role === "customer" ? d.email : null, offset: S.localOffset() },
+          json: { pack_id: d.pack_id, role: d.role, name: d.name, email: d.role === "customer" ? d.email : null, offset: S.localOffset(), person_id: personId() },
         });
         enterRoom(r);
       } catch (err) {
@@ -375,7 +382,7 @@
     try {
       const r = await api(`/api/sim/rooms/${enc(code)}/join`, {
         method: "POST",
-        json: { role, name: d.name, email: d.email || null },
+        json: { role, name: d.name, email: d.email || null, person_id: personId() },
       });
       enterRoom(r);
     } catch (err) {
@@ -418,7 +425,7 @@
       }
       S.store(PROFILE, { ...profile(), name: name.value.trim(), email: email.value.trim() });
       try {
-        const r = await api(`/api/sim/rooms/${enc(code)}/join`, { method: "POST", json: { name: name.value.trim(), email: email.value.trim() || null } });
+        const r = await api(`/api/sim/rooms/${enc(code)}/join`, { method: "POST", json: { name: name.value.trim(), email: email.value.trim() || null, person_id: personId() } });
         enterRoom(r);
       } catch (err) {
         error.textContent = err.message;

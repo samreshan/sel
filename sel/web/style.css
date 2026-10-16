@@ -2529,3 +2529,329 @@ button.danger:hover:not(:disabled) {
     animation: none !important;
   }
 }
+
+/* ---------- sidebar: who is viewing, sections, call scope ---------- */
+
+.viewer {
+  display: grid;
+  gap: 4px;
+}
+
+.viewer select {
+  min-height: 40px;
+}
+
+.viewer-manage {
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+.primary-nav {
+  display: grid;
+  gap: 2px;
+}
+
+.primary-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.primary-nav a:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.primary-nav a.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.primary-nav .live-dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--bad-ink);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.primary-nav a.is-live .live-dot {
+  display: inline-block;
+}
+
+.nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scope-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.scope-btn {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.scope-btn.is-on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.small-select {
+  width: auto;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.rep-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rep-picker label {
+  display: inline;
+  margin: 0;
+}
+
+/* ---------- Today, Playbook, People ---------- */
+
+.page {
+  max-width: 960px;
+  display: grid;
+  gap: 18px;
+}
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.page-head h1 {
+  margin: 2px 0 4px;
+}
+
+.page-head .lede {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.page-section-body {
+  padding: 8px 18px 16px;
+}
+
+.page-rows,
+.skills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.page-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-row:last-child,
+.skill:last-child {
+  border-bottom: 0;
+}
+
+.page-row > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.page-row-main,
+.page-row-link {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.page-row-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.page-row-link:hover .strong {
+  text-decoration: underline;
+}
+
+.doc-row .doc-text {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.skill {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill p {
+  margin: 0;
+}
+
+.skill-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill-calls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.chip-link:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+.score-chip {
+  min-width: 36px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-weight: 700;
+  text-align: center;
+}
+
+.tone-text-warn {
+  color: var(--warn-ink);
+}
+
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.team-table th,
+.team-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-table thead th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.team-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.person-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 0 12px;
+  max-width: 560px;
+}
+
+.person-form .form-error,
+.person-form .row {
+  grid-column: 1 / -1;
+}
+
+.person-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.person-pick {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 160px;
+  min-height: 60px;
+  padding: 10px 14px;
+}
+
+.person-row input {
+  flex: 1 1 200px;
+  width: auto;
+  min-height: 38px;
+}
+
+.person-row select {
+  width: auto;
+  min-height: 38px;
+}
+
+.segmented a {
+  padding: 8px 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.segmented a.is-on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(17, 17, 19, 0.08);
+}
+
+@media (max-width: 760px) {
+  .person-form {
+    grid-template-columns: 1fr;
+  }
+
+  .team-table th:nth-child(4),
+  .team-table td:nth-child(4) {
+    display: none;
+  }
+}

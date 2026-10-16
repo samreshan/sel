@@ -66,6 +66,7 @@ class Participant:
     name: str | None
     email: str | None
     joined_at: str
+    person_id: str | None = None  # who this is on the team (people.json), when the browser said
     streams: int = 0  # open event streams (tabs); online while > 0
     mic: bool = False
 
@@ -309,10 +310,19 @@ class SimulatorHub:
 
     # -- joining -----------------------------------------------------------------
 
-    def create(self, pack_id: str, role: str, name: str | None, email: str | None, offset: str | None) -> tuple[Room, str]:
+    def _person(self, person_id: Any) -> str | None:
+        if not person_id:
+            return None
+        if self.service.people.get(str(person_id)) is None:
+            raise KeyError(f"no person {person_id!r}")
+        return str(person_id)
+
+    def create(self, pack_id: str, role: str, name: str | None, email: str | None, offset: str | None,
+               person_id: str | None = None) -> tuple[Room, str]:
         if role not in ROLES:
             raise ValueError("role must be 'rep' or 'customer'")
         pack = self.service.pack(pack_id)
+        person_id = self._person(person_id)
         self._reap()
         with self._lock:
             if len(self.rooms) >= MAX_ROOMS:
@@ -322,13 +332,16 @@ class SimulatorHub:
                 code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
             room = Room(code=code, pack_id=pack.id, pack_name=pack.name, offset=_offset(offset), scorer=LiveScorer(pack))
             client = secrets.token_hex(16)
-            room.participants[role] = Participant(role, client, _clean(name, 80), _clean(email, 200), _iso_now())
+            room.participants[role] = Participant(role, client, _clean(name, 80), _clean(email, 200), _iso_now(),
+                                                  person_id=person_id)
             self.rooms[code] = room
         self._lobby_changed()
         return room, client
 
-    def join(self, code: str, role: str | None, name: str | None, email: str | None) -> tuple[Room, str]:
+    def join(self, code: str, role: str | None, name: str | None, email: str | None,
+             person_id: str | None = None) -> tuple[Room, str]:
         room = self._room(code)
+        person_id = self._person(person_id)
         with room.lock:
             free = [r for r in ROLES if r not in room.participants]
             if not free:
@@ -337,7 +350,8 @@ class SimulatorHub:
                 raise RoomStateError(f"the {role} has already joined this call")
             role = role or free[0]
             client = secrets.token_hex(16)
-            room.participants[role] = Participant(role, client, _clean(name, 80), _clean(email, 200), _iso_now())
+            room.participants[role] = Participant(role, client, _clean(name, 80), _clean(email, 200), _iso_now(),
+                                                  person_id=person_id)
             if room.state == "waiting" and len(room.participants) == 2:
                 room.state = "ready"
             self._broadcast(room)
@@ -510,8 +524,10 @@ class SimulatorHub:
                 transcript = self._transcript(room, final=True)
                 live = room.scorer.snapshot(transcript, now=room.duration or 0.0, final=True)
                 room.live = {**(room.live or {}), "final_score": live["score"]}
+                rep = room.participants.get("rep")
             call_id = self.service.create_simulated(transcript, audio, filename, {
-                "pack_id": room.pack_id, "room": room.code, "live_score": live["score"], "analyzer": "auto"})
+                "pack_id": room.pack_id, "room": room.code, "live_score": live["score"], "analyzer": "auto",
+                "rep_id": rep.person_id if rep else None})
         except Exception as e:  # noqa: BLE001 - shown in both tabs
             with room.lock:
                 room.state, room.error = "failed", f"{type(e).__name__}: {e}"

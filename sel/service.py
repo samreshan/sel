@@ -10,6 +10,10 @@ Each call is a folder under ``SEL_CALLS_DIR`` (default ``calls/``)::
     review.json          dismissed items, draft edits and approvals, transcript edit log
     report.json          the rendered report (rebuilt from the files above), with its scorecard
 
+and ``people.json`` next to the call folders holds the team (``sel/people.py``).
+A call's ``rep_id`` says whose call it is; Today (``today()``) gathers what
+needs each person's attention across their calls.
+
 Everything stays on this machine. Jobs run one at a time, because speech and
 language models compete for the same CPU.
 
@@ -37,12 +41,15 @@ from .drafts import apply_edits, approve
 from .events import EventBus
 from .models import Analysis, Speaker, Transcript
 from .pack import Pack, load_pack
+from .people import PeopleStore
 from .pipeline import analyze_call, build_report
 from .scoring import score_report
 
 AUDIO_TYPES = {".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".mp4"}
 SUMMARY_FIELDS = ("id", "pack_id", "source", "status", "stage", "progress", "started_at", "customer_name",
-                  "original_filename", "created_at", "updated_at")
+                  "original_filename", "created_at", "updated_at", "rep_id", "rep_name")
+TODAY_RECENT = 8  # calls listed under "Recent calls"
+SKILL_WINDOW = 10  # a person's latest finished calls that "Skills to work on" counts over
 EMPTY_REVIEW = {"dismissed": [], "drafts": {}, "transcript_edits": []}
 
 
@@ -65,6 +72,8 @@ class CallService:
         self._jobs: queue.Queue[str] = queue.Queue()
         self._pack_cache: tuple[tuple, list[Pack]] | None = None
         self._summaries: dict[str, tuple[int, dict[str, Any]]] = {}
+        self._reports: dict[str, tuple[int, dict[str, Any]]] = {}
+        self.people = PeopleStore(self.root / "people.json")
         # Builds (transcriber, analyzer, speaker_labeler) for a call; injectable for tests.
         self._factory = analysis_factory or default_factory
         self._worker = threading.Thread(target=self._work, daemon=True)
@@ -181,6 +190,7 @@ class CallService:
         if suffix not in AUDIO_TYPES:
             raise ValueError(f"unsupported audio type {suffix or '(none)'}; use one of {', '.join(sorted(AUDIO_TYPES))}")
         datetime.fromisoformat(meta["started_at"])  # validates, raises ValueError
+        rep_id, rep_name = self._rep(meta.get("rep_id"), meta.get("rep_name"))
         call_id = _new_id()
         d = self.root / call_id
         d.mkdir(parents=True)
@@ -188,7 +198,7 @@ class CallService:
         call = {
             "id": call_id, "pack_id": pack.id, "source": "audio", "original_filename": filename,
             "audio_file": f"audio{suffix}", "started_at": meta["started_at"],
-            "rep_name": meta.get("rep_name") or None, "customer_name": meta.get("customer_name") or None,
+            "rep_id": rep_id, "rep_name": rep_name, "customer_name": meta.get("customer_name") or None,
             "customer_email": meta.get("customer_email") or None,
             "channels": meta.get("channels", "auto"), "rep_channel": int(meta.get("rep_channel", 0)),
             "status": "queued", "stage": "waiting", "progress": 0.0, "error": None,
@@ -223,10 +233,11 @@ class CallService:
         self._write(call_id, "live_transcript.json", asdict(transcript))
         rep = next((s for s in transcript.speakers if s.role == "rep"), None)
         cust = next((s for s in transcript.speakers if s.role == "customer"), None)
+        rep_id, rep_name = self._rep(meta.get("rep_id"), rep.name if rep else None)
         call = {
             "id": call_id, "pack_id": pack.id, "source": "simulator", "original_filename": None,
             "audio_file": audio_file, "started_at": transcript.started_at,
-            "rep_name": rep.name if rep else None, "customer_name": cust.name if cust else None,
+            "rep_id": rep_id, "rep_name": rep_name, "customer_name": cust.name if cust else None,
             "customer_email": cust.email if cust else None,
             # The simulator records the rep on the left channel and the customer on the right.
             "channels": "split", "rep_channel": 0,
@@ -260,9 +271,12 @@ class CallService:
                 audio_file = src.name
                 break
         transcript["call_id"] = call_id
+        rep = next((sp for sp in transcript.get("speakers", []) if sp.get("role") == "rep"), {})
+        cust = next((sp for sp in transcript.get("speakers", []) if sp.get("role") == "customer"), {})
         call = {
             "id": call_id, "pack_id": pack_id, "source": "fixture", "original_filename": None,
             "audio_file": audio_file, "started_at": transcript["started_at"],
+            "rep_id": None, "rep_name": rep.get("name"), "customer_name": cust.get("name"),
             "status": "done", "stage": "done", "progress": 1.0, "error": None,
             "created_at": _now(), "updated_at": _now(),
             "report_meta": {"transcriber": "fixture-transcript", "analyzer": "fixture-analysis (hand-written, not model output)"},
@@ -294,6 +308,7 @@ class CallService:
     def delete(self, call_id: str) -> None:
         shutil.rmtree(self._dir(call_id))
         self._summaries.pop(call_id, None)
+        self._reports.pop(call_id, None)
         self.bus.publish("calls", "call-deleted", {"id": call_id})
 
     # -- the job --------------------------------------------------------------
@@ -446,6 +461,129 @@ class CallService:
             review["dismissed"] = sorted(items)
             self._write(call_id, "review.json", review)
             return review
+
+    # -- people and Today -------------------------------------------------------
+
+    def _rep(self, rep_id: Any, rep_name: Any) -> tuple[str | None, str | None]:
+        """Validate a rep id; the person's name stands in when no rep name was typed."""
+        name = " ".join(str(rep_name or "").split())[:80] or None
+        if not rep_id:
+            return None, name
+        person = self.people.get(str(rep_id))
+        if person is None:
+            raise KeyError(f"no person {rep_id!r}")
+        return person["id"], name or person["name"]
+
+    def add_person(self, name: Any, role: Any = "rep", origin: str | None = None) -> dict[str, Any]:
+        person = self.people.add(name, role)
+        self.bus.publish("calls", "people", self.people.list(), origin=origin)
+        return person
+
+    def update_person(self, person_id: str, name: Any = None, role: Any = None,
+                      origin: str | None = None) -> dict[str, Any]:
+        person = self.people.update(person_id, name, role)
+        self.bus.publish("calls", "people", self.people.list(), origin=origin)
+        return person
+
+    def set_rep(self, call_id: str, rep_id: str | None, origin: str | None = None) -> dict[str, Any]:
+        """Say whose call this is (or nobody's). The transcript's speaker names are left as they are."""
+        with self._lock:
+            self._dir(call_id)
+            person = self.people.get(rep_id) if rep_id else None
+            if rep_id and person is None:
+                raise KeyError(f"no person {rep_id!r}")
+            call = self._read(call_id, "call.json")
+            call.update(rep_id=person["id"] if person else None, updated_at=_now())
+            if person and not call.get("rep_name"):
+                call["rep_name"] = person["name"]
+            self._write(call_id, "call.json", call)
+        self._publish(call, origin)
+        return {k: call.get(k) for k in SUMMARY_FIELDS}
+
+    def _report(self, call_id: str) -> dict[str, Any] | None:
+        path = self.root / call_id / "report.json"
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            return None
+        cached = self._reports.get(call_id)
+        if cached is None or cached[0] != mtime:
+            cached = (mtime, json.loads(path.read_text(encoding="utf-8")))
+            self._reports[call_id] = cached
+        return cached[1]
+
+    def today(self, person_id: str | None) -> dict[str, Any]:
+        """What needs this person's attention: their calls for a rep, the whole team's for a manager.
+
+        Everything is read from the calls' own files (status, drafts, scorecard); nothing is guessed.
+        """
+        person = self.people.get(person_id)
+        if person_id and person is None:
+            raise KeyError(f"no person {person_id!r}")
+        manager = bool(person and person["role"] == "manager")
+        names = {p["id"]: p["name"] for p in self.people.list()}
+        calls = self.list()
+        mine = calls if manager else (
+            [c for c in calls if c.get("rep_id") == person_id] if person else calls)
+
+        def ref(c: dict[str, Any]) -> dict[str, Any]:
+            return {"id": c["id"], "pack_id": c.get("pack_id"), "customer_name": c.get("customer_name"),
+                    "rep_id": c.get("rep_id"), "rep_name": names.get(c.get("rep_id")) or c.get("rep_name"),
+                    "started_at": c.get("started_at"), "source": c.get("source")}
+
+        in_progress = [{**ref(c), "status": c["status"], "stage": c.get("stage"), "progress": c.get("progress")}
+                       for c in mine if c.get("status") in ("queued", "running")]
+        failed = [{**ref(c), "status": "error"} for c in mine if c.get("status") == "error"]
+        follow_ups, recent, skills = [], [], {}
+        done = [c for c in mine if c.get("status") == "done"]
+        done.sort(key=lambda c: c.get("started_at") or "", reverse=True)
+        for i, c in enumerate(done):
+            report = self._report(c["id"])
+            if not report:
+                continue
+            for d in report.get("drafts", []):
+                if d["status"] in ("needs_input", "ready_for_approval"):
+                    follow_ups.append({"call": ref(c), "draft_id": d["id"], "kind": d["kind"], "status": d["status"],
+                                       "subject": d["fields"].get("subject") or d["fields"].get("title") or "",
+                                       "missing": d.get("missing", [])})
+            score = report.get("score") or {}
+            if i < TODAY_RECENT:
+                recent.append({**ref(c), "overall": score.get("overall")})
+            if i < SKILL_WINDOW:
+                for cr in score.get("criteria", []):
+                    if cr.get("status") not in ("met", "partial", "missed"):
+                        continue
+                    k = (c["pack_id"], cr["id"])
+                    s = skills.setdefault(k, {"pack_id": c["pack_id"], "criterion_id": cr["id"], "title": cr["title"],
+                                              "suggestion": cr.get("suggestion"), "scored": 0, "short": 0, "calls": []})
+                    s["scored"] += 1
+                    if cr["status"] != "met":
+                        s["short"] += 1
+                        s["calls"].append({**ref(c), "status": cr["status"], "segment": cr.get("segment"),
+                                           "detail": cr.get("detail")})
+        follow_ups.sort(key=lambda f: (f["status"] != "needs_input", f["call"]["started_at"] or ""))
+        to_work_on = sorted((s for s in skills.values() if s["short"]), key=lambda s: (-s["short"] / s["scored"], -s["short"]))
+        out: dict[str, Any] = {
+            "person": person, "scope": "team" if manager else "mine" if person else "all",
+            "follow_ups": follow_ups, "in_progress": in_progress, "failed": failed,
+            "recent": recent, "skills": to_work_on, "counts": {
+                "calls": len(mine), "needs_input": sum(f["status"] == "needs_input" for f in follow_ups),
+                "ready_for_approval": sum(f["status"] == "ready_for_approval" for f in follow_ups)},
+        }
+        if manager:
+            team = []
+            for p in self.people.list():
+                if p["role"] != "rep":
+                    continue
+                theirs = [c for c in done if c.get("rep_id") == p["id"]]
+                scores = [(self._report(c["id"]) or {}).get("score", {}).get("overall") for c in theirs[:SKILL_WINDOW]]
+                scores = [x for x in scores if x is not None]
+                team.append({"id": p["id"], "name": p["name"], "calls": len(theirs),
+                             "average": round(sum(scores) / len(scores)) if scores else None,
+                             "open_follow_ups": sum(f["call"]["rep_id"] == p["id"] for f in follow_ups)})
+            out["team"] = team
+            out["unassigned"] = [ref(c) for c in mine if not c.get("rep_id")][:TODAY_RECENT]
+        return out
 
     def changed(self, call_id: str, origin: str | None) -> None:
         """Tell other tabs that a review action changed this call."""

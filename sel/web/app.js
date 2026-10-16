@@ -22,7 +22,8 @@
   const CACHE_MAX = 24;
   const TAB = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const SCRIPT = document.currentScript;
-  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "rooms", "room", "line", "live", "signal"];
+  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "people", "rooms", "room", "line", "live", "signal"];
+  const COACH_PAGES = new Set(["today", "playbook", "people"]);
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -104,7 +105,13 @@
     packError: null,
     calls: [],
     listRows: new Map(), // call id -> {li, key}: sidebar rows are reused when unchanged
-    view: "empty", // "empty" | "new" | "call" | "sim"
+    view: "empty", // "empty" | "new" | "call" | "sim" | "coach" (Today, Playbook, People: coach.js)
+    coachPage: null, // "today" | "playbook" | "people"
+    coachArg: null, // e.g. the pack id on #playbook/<id>
+    people: [], // the team, from the event stream (people.json on the server)
+    viewerId: null, // who this browser is viewing as (localStorage "sel.viewer")
+    callScope: null, // "mine" | "all" in the sidebar's call list
+    modules: {}, // lazily loaded scripts: name -> promise
     callId: null,
     simCode: null,
     call: null, // full view from GET /api/calls/{id}
@@ -138,7 +145,6 @@
     stream: { es: null, qs: null, connected: false },
     sim: null, // simulator capabilities, from the event stream
     rooms: [], // open simulator rooms
-    simLoad: null,
     showKeys: false,
   };
   const listeners = new Map();
@@ -494,9 +500,21 @@
   }
 
   async function route() {
-    const hash = decodeURIComponent(location.hash.replace(/^#/, ""));
+    const hash = decodeURIComponent(location.hash.replace(/^#/, "")) || "today";
     const m = /^call\/([a-z0-9-]{1,64})$/.exec(hash);
     const sim = /^sim(?:\/([a-z0-9]{6}))?$/.exec(hash);
+    const coach = /^([a-z]+)(?:\/([A-Za-z0-9_-]{1,64}))?$/.exec(hash);
+    if (coach && COACH_PAGES.has(coach[1])) {
+      if (state.view === "call") resetCallUi();
+      state.view = "coach";
+      state.coachPage = coach[1];
+      state.coachArg = coach[2] || null;
+      state.callId = null;
+      state.call = null;
+      renderList();
+      renderMain();
+      return;
+    }
     if (hash === "new" || sim) {
       if (state.view === "call") resetCallUi();
       state.view = sim ? "sim" : "new";
@@ -684,6 +702,7 @@
 
   on("hello", (data) => {
     state.sim = data.sim || null;
+    if (JSON.stringify(data.people || []) !== JSON.stringify(state.people)) applyPeople(data.people);
     state.rooms = data.rooms || [];
     if (JSON.stringify(data.calls) !== JSON.stringify(state.calls)) applyList(data.calls || []);
     // After a reconnect anything may have changed; on the first connect the page just loaded it.
@@ -700,6 +719,7 @@
     if (state.view === "call" && state.callId === data.id) loadCall(data.id, true).catch(() => {});
     else state.cache.delete(data.id);
   });
+  on("people", applyPeople);
   on("rooms", (rooms) => {
     state.rooms = rooms || [];
   });
@@ -790,13 +810,109 @@
   // ---------- sidebar ----------
 
   // Rows are rebuilt only when their call changed, and moved rather than recreated.
+  // ---------- people: who is viewing ----------
+
+  function viewer() {
+    return state.people.find((p) => p.id === state.viewerId) || null;
+  }
+
+  function personName(id) {
+    const p = state.people.find((x) => x.id === id);
+    return p ? p.name : null;
+  }
+
+  function setViewer(id) {
+    state.viewerId = id || null;
+    store("sel.viewer", state.viewerId);
+    state.callScope = null;
+    renderViewer();
+    renderList();
+    if (state.view === "coach") renderMain();
+    emit("viewer", viewer());
+  }
+
+  function applyPeople(list) {
+    state.people = list || [];
+    if (state.viewerId && !viewer()) state.viewerId = null;
+    renderViewer();
+    renderList();
+    if (state.view === "call" && state.refs) renderHead(state.refs.head);
+    emit("people-changed", state.people);
+  }
+
+  function renderViewer() {
+    const sel = $("#viewer");
+    if (!sel) return;
+    const groups = [
+      ["rep", "Reps"],
+      ["manager", "Managers"],
+    ];
+    const opts = [el("option", { value: "", text: state.people.length ? "Everyone (no one chosen)" : "No people yet" })];
+    for (const [role, label] of groups) {
+      const people = state.people.filter((p) => p.role === role);
+      if (people.length) opts.push(el("optgroup", { label }, ...people.map((p) => el("option", { value: p.id, text: p.name }))));
+    }
+    sel.replaceChildren(...opts);
+    sel.value = viewer() ? state.viewerId : "";
+  }
+
+  function callScope() {
+    const me = viewer();
+    if (!me) return "all";
+    return state.callScope || (me.role === "rep" ? "mine" : "all");
+  }
+
+  function renderScope() {
+    const box = $("#call-scope");
+    if (!box) return;
+    const me = viewer();
+    box.hidden = !me;
+    if (!me) return box.replaceChildren();
+    const scope = callScope();
+    const btn = (value, label) =>
+      el("button", {
+        type: "button",
+        class: `scope-btn${scope === value ? " is-on" : ""}`,
+        "aria-pressed": String(scope === value),
+        text: label,
+        on: {
+          click: () => {
+            state.callScope = value;
+            renderList();
+          },
+        },
+      });
+    box.replaceChildren(btn("mine", me.role === "manager" ? "No rep" : "Mine"), btn("all", "All"));
+  }
+
+  function visibleCalls() {
+    const me = viewer();
+    const scope = callScope();
+    if (!me || scope === "all") return state.calls;
+    if (me.role === "manager") return state.calls.filter((c) => !c.rep_id);
+    return state.calls.filter((c) => c.rep_id === me.id);
+  }
+
+  function renderNav() {
+    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "sim" : null;
+    for (const a of document.querySelectorAll(".primary-nav a[data-nav]")) {
+      const on_ = a.dataset.nav === active;
+      a.classList.toggle("is-active", on_);
+      if (on_) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    }
+  }
+
   function renderList() {
+    renderNav();
+    renderScope();
     const ul = $("#call-list");
     const selectedId = state.view === "call" ? state.callId : null;
     const keep = new Set();
-    const nodes = state.calls.map((c) => {
+    const shown = visibleCalls();
+    const nodes = shown.map((c) => {
       const selected = c.id === selectedId;
-      const key = `${JSON.stringify(c)}|${selected}|${packName(c.pack_id)}`;
+      const key = `${JSON.stringify(c)}|${selected}|${packName(c.pack_id)}|${personName(c.rep_id) || ""}`;
       let row = state.listRows.get(c.id);
       if (!row || row.key !== key) {
         row = { li: callItem(c, selected), key };
@@ -818,9 +934,13 @@
       extra.remove();
       extra = next;
     }
-    $("#list-empty").hidden = state.calls.length > 0;
-    const simBtn = $("#open-sim");
-    if (simBtn) simBtn.setAttribute("aria-current", state.view === "sim" ? "page" : "false");
+    const empty = $("#list-empty");
+    empty.hidden = shown.length > 0;
+    empty.textContent = state.calls.length
+      ? callScope() === "mine" && viewer() && viewer().role === "manager"
+        ? "Every call has a rep."
+        : "No calls of yours yet. Choose New call, or All to see the team's."
+      : "No calls yet. Choose New call to add a recording.";
   }
 
   function callItem(c, selected) {
@@ -840,7 +960,7 @@
         },
         icon("phone", 20),
         el("span", { class: "call-title", text: title }),
-        el("span", { class: "call-sub", text: `${packName(c.pack_id)} · ${formatStarted(c.started_at)}` }),
+        el("span", { class: "call-sub", text: [personName(c.rep_id) || c.rep_name, packName(c.pack_id), formatStarted(c.started_at)].filter(Boolean).join(" · ") }),
         el(
           "span",
           { class: "call-meta" },
@@ -870,6 +990,11 @@
       state.view === "call" && !!state.call && state.call.id === state.callId && state.call.status === "done" && !!state.call.report
     );
     main.classList.toggle("is-sim", state.view === "sim");
+    main.classList.toggle("is-coach", state.view === "coach");
+    if (state.view === "coach") {
+      renderCoach(main);
+      return;
+    }
     if (state.view === "new") {
       renderUpload(main);
       return;
@@ -1294,6 +1419,7 @@
       .map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? `${v.toFixed(1)} s` : v}`)
       .join(" · ");
     const when = [formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
+    const owner = state.people.length ? repPicker(call) : null;
     const rules = String(meta.analyzer || "").startsWith("rules");
     const sim = call.source === "simulator";
     head.replaceChildren(
@@ -1304,6 +1430,7 @@
           el("p", { class: "eyebrow", text: packName(call.pack_id) }),
           el("h1", { text: title }),
           el("p", { class: "meta", text: when }),
+          owner,
           el("p", { class: "meta small", text: `Transcribed by ${meta.transcriber || "unknown"} · analysed by ${meta.analyzer || "unknown"}` }),
           timings ? el("p", { class: "meta small", text: `Timings: ${timings}` }) : null
         ),
@@ -1336,6 +1463,28 @@
           : null,
       ])
     );
+  }
+
+  // Whose call this is, for Today and coaching. Changing it doesn't touch the transcript's speaker names.
+  function repPicker(call) {
+    const sel = el("select", { id: "call-rep", class: "small-select" }, el("option", { value: "", text: "No rep" }));
+    for (const p of state.people.filter((x) => x.role === "rep" || x.id === call.rep_id)) sel.append(el("option", { value: p.id, text: p.name }));
+    sel.value = call.rep_id || "";
+    const msg = el("span", { class: "muted small", role: "status" });
+    sel.addEventListener("change", async () => {
+      sel.disabled = true;
+      try {
+        const summary = await api(`/api/calls/${enc(call.id)}/rep`, { method: "PUT", json: { rep_id: sel.value || null } });
+        call.rep_id = summary.rep_id;
+        upsertCall(summary);
+        msg.textContent = "Saved.";
+      } catch (e) {
+        sel.value = call.rep_id || "";
+        msg.textContent = e.message;
+      }
+      sel.disabled = false;
+    });
+    return el("p", { class: "meta rep-picker" }, el("label", { for: "call-rep", text: "Whose call: " }), sel, " ", msg);
   }
 
   function renderNotice(node) {
@@ -2395,6 +2544,10 @@
     });
 
     const offset = saved.offset || "+05:45";
+    const me = viewer();
+    const repSel = el("select", { id: "f-rep-person", name: "rep_id" }, el("option", { value: "", text: "Not set" }));
+    for (const p of state.people.filter((x) => x.role === "rep")) repSel.append(el("option", { value: p.id, text: p.name }));
+    repSel.value = me && me.role === "rep" ? me.id : saved.rep_id && personName(saved.rep_id) ? saved.rep_id : "";
     const fileInput = el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*", class: "sr-file" });
     const fileName = el("span", { class: "drop-name", text: "No file chosen" });
     const drop = el(
@@ -2419,7 +2572,8 @@
       formField("f-pack", "Business pack", packSel),
       formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue(offset) })),
       formField("f-offset", "UTC offset", el("input", { type: "text", id: "f-offset", name: "offset", value: offset, autocomplete: "off" }), "For example +05:45 or -03:00."),
-      formField("f-rep", "Rep name", el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" })),
+      formField("f-rep-person", "Whose call is this?", repSel, state.people.length ? "Coaching and Today follow the rep." : "Add your team under Manage people to track whose call it is."),
+      formField("f-rep", "Rep's name in the call", el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" }), "Optional. Used to label the transcript; defaults to the rep chosen above."),
       formField("f-cust", "Customer name", el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off" })),
       formField("f-cust-email", "Customer email", el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off" })),
       formField("f-channels", "Recording type", channels),
@@ -2484,13 +2638,14 @@
     if (!when) return fail("Enter when the call started.");
     if (!offset) return fail("The UTC offset should look like +05:45.");
 
-    store("sel.upload", { pack, offset, rep: val("#f-rep"), channels: val("#f-channels"), rep_channel: val("#f-rep-channel") });
+    store("sel.upload", { pack, offset, rep: val("#f-rep"), rep_id: val("#f-rep-person"), channels: val("#f-channels"), rep_channel: val("#f-rep-channel") });
     const startedAt = `${when.length === 16 ? `${when}:00` : when}${offset}`;
     const params = new URLSearchParams({
       pack,
       started_at: startedAt,
       filename: file.name,
       rep_name: val("#f-rep"),
+      rep_id: val("#f-rep-person"),
       customer_name: val("#f-cust"),
       customer_email: val("#f-cust-email"),
       channels: val("#f-channels") || "auto",
@@ -2517,21 +2672,41 @@
 
   // ---------- call simulator (sim.js, loaded on first use) ----------
 
-  function loadSim() {
-    if (window.Sel.sim) return Promise.resolve();
-    if (!state.simLoad) {
-      state.simLoad = new Promise((resolve, reject) => {
+  // Scripts loaded on first use: sim.js (the simulator) and coach.js (Today, Playbook, People).
+  function loadModule(name, label) {
+    if (window.Sel[name]) return Promise.resolve();
+    if (!state.modules[name]) {
+      state.modules[name] = new Promise((resolve, reject) => {
         const s = document.createElement("script");
-        s.src = (SCRIPT && SCRIPT.dataset.sim) || "/static/sim.js";
+        s.src = (SCRIPT && SCRIPT.dataset[name]) || `/static/${name}.js`;
         s.onload = () => resolve();
         s.onerror = () => {
-          state.simLoad = null;
-          reject(new Error("Could not load the call simulator."));
+          delete state.modules[name];
+          reject(new Error(`Could not load ${label}.`));
         };
         document.head.append(s);
       });
     }
-    return state.simLoad;
+    return state.modules[name];
+  }
+
+  function loadSim() {
+    return loadModule("sim", "the call simulator");
+  }
+
+  function renderCoach(main) {
+    if (window.Sel.coach) {
+      window.Sel.coach.render(main, state.coachPage, state.coachArg);
+      return;
+    }
+    main.replaceChildren(skeleton());
+    loadModule("coach", "this page")
+      .then(() => {
+        if (state.view === "coach") renderMain();
+      })
+      .catch((e) => {
+        if (state.view === "coach") main.replaceChildren(el("div", { class: "error-box", role: "alert" }, el("p", { class: "strong", text: e.message })));
+      });
   }
 
   function renderSim(main) {
@@ -2584,6 +2759,15 @@
     packName,
     packs: () => state.packList,
     calls: () => state.calls,
+    people: () => state.people,
+    // The server doesn't echo a tab's own changes back on the stream, so after one, re-read the list.
+    refreshPeople: () => api("/api/people", { fresh: true }).then(applyPeople),
+    viewer,
+    setViewer,
+    personName,
+    skeleton,
+    formField,
+    coachRoute: () => ({ page: state.coachPage, arg: state.coachArg }),
     simInfo: () => state.sim,
     rooms: () => state.rooms,
     view: () => state.view,
@@ -2595,12 +2779,14 @@
     reduceMotion,
     worklet: (SCRIPT && SCRIPT.dataset.worklet) || "/static/pcm-worklet.js",
     sim: null,
+    coach: null,
   };
 
   async function boot() {
     $("#new-call").addEventListener("click", () => navigate("#new"));
-    const simBtn = $("#open-sim");
-    if (simBtn) simBtn.addEventListener("click", () => navigate("#sim"));
+    state.viewerId = store("sel.viewer") || null;
+    $("#viewer").addEventListener("change", (e) => setViewer(e.target.value));
+    renderViewer();
     window.addEventListener("hashchange", () => route());
     document.addEventListener("keydown", onKey);
     const list = $("#call-list");
@@ -2625,6 +2811,9 @@
     // Packs, the call list and the routed view load in parallel.
     const packs = loadPacks();
     const calls = refreshList().catch((e) => setListError(e.message));
+    api("/api/people")
+      .then(applyPeople)
+      .catch(() => {});
     const routed = route();
     if (/^#sim/.test(location.hash)) loadSim().catch(() => {});
     await packs;

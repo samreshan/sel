@@ -282,7 +282,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
                 if role:
                     hub.presence(code, client, +1)
                     present = True
-                hello = {"calls": service.list(), "rooms": hub.list_open(), "sim": hub.capabilities(),
+                hello = {"calls": service.list(), "people": service.people.list(),
+                         "rooms": hub.list_open(), "sim": hub.capabilities(),
                          "room": hub.view(hub._room(code), you=role) if role else None}
                 self.close_connection = True
                 self.send_response(200)
@@ -327,6 +328,17 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
             self._json([{"id": p.id, "name": p.name, "description": p.description, "languages": p.languages,
                          "scorecard": [c.__dict__ for c in p.scorecard]} for p in service.packs()], etag=etag)
 
+        def pack_detail(self, q, pack_id):
+            pack = service.pack(pack_id)
+            etag = f'{service.packs_etag()[:-1]}-{pack_id}"'
+            if self._not_modified(etag, "no-cache"):
+                return
+            self._json({"id": pack.id, "name": pack.name, "description": pack.description,
+                        "languages": pack.languages, "week_starts_on": pack.week_starts_on,
+                        "scorecard": [c.__dict__ for c in pack.scorecard],
+                        "facts": [f.__dict__ for f in pack.facts.values()],
+                        "docs": sorted(pack.docs), "templates": sorted(pack.templates)}, etag=etag)
+
         def pack_source(self, q, pack_id):
             ref = q.get("ref", "")
             text = service.pack(pack_id).source_text(ref)
@@ -353,12 +365,33 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
             try:
                 call_id = service.create(path, q.get("filename", "recording.wav"), {
                     "pack_id": q["pack"], "started_at": q["started_at"], "rep_name": q.get("rep_name"),
+                    "rep_id": q.get("rep_id"),
                     "customer_name": q.get("customer_name"), "customer_email": q.get("customer_email"),
                     "channels": q.get("channels", "auto"), "rep_channel": q.get("rep_channel", "0"),
                 })
             finally:
                 path.unlink(missing_ok=True)
             self._json({"id": call_id}, 201)
+
+        def set_rep(self, q, call_id):
+            b = self._json_body()
+            self._json(service.set_rep(call_id, b.get("rep_id") or None, self._tab()))
+
+        # -- people and Today ------------------------------------------------------
+
+        def people(self, q):
+            self._json(service.people.list())
+
+        def add_person(self, q):
+            b = self._json_body()
+            self._json(service.add_person(b.get("name"), b.get("role") or "rep", self._tab()), 201)
+
+        def update_person(self, q, person_id):
+            b = self._json_body()
+            self._json(service.update_person(person_id, b.get("name"), b.get("role"), self._tab()))
+
+        def today(self, q):
+            self._json(service.today(q.get("person") or None))
 
         def call(self, q, call_id):
             etag = service.etag(call_id)
@@ -470,7 +503,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         def sim_create(self, q):
             b = self._json_body()
             role = b.get("role") or "rep"
-            room, client = hub.create(str(b.get("pack_id") or ""), role, b.get("name"), b.get("email"), b.get("offset"))
+            room, client = hub.create(str(b.get("pack_id") or ""), role, b.get("name"), b.get("email"), b.get("offset"),
+                                      person_id=b.get("person_id") or None)
             self._joined(room, client, role, 201)
 
         def sim_room(self, q, code):
@@ -479,7 +513,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
 
         def sim_join(self, q, code):
             b = self._json_body()
-            room, client = hub.join(code, b.get("role") or None, b.get("name"), b.get("email"))
+            room, client = hub.join(code, b.get("role") or None, b.get("name"), b.get("email"),
+                                    person_id=b.get("person_id") or None)
             self._joined(room, client, hub.role_of(code, client))
 
         def sim_signal(self, q, code):
@@ -532,12 +567,18 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("GET", r"/api/events", Handler.events),
         ("GET", r"/api/health", Handler.health),
         ("GET", r"/api/packs", Handler.packs),
+        ("GET", rf"/api/packs/{D}", Handler.pack_detail),
         ("GET", rf"/api/packs/{D}/source", Handler.pack_source),
+        ("GET", r"/api/people", Handler.people),
+        ("POST", r"/api/people", Handler.add_person),
+        ("PUT", rf"/api/people/{D}", Handler.update_person),
+        ("GET", r"/api/today", Handler.today),
         ("GET", r"/api/calls", Handler.calls),
         ("POST", r"/api/calls", Handler.create_call),
         ("GET", rf"/api/calls/{C}", Handler.call),
         ("DELETE", rf"/api/calls/{C}", Handler.delete_call),
         ("POST", rf"/api/calls/{C}/retry", Handler.retry),
+        ("PUT", rf"/api/calls/{C}/rep", Handler.set_rep),
         ("GET", rf"/api/calls/{C}/audio", Handler.audio),
         ("PUT", rf"/api/calls/{C}/segments/{D}", Handler.edit_segment),
         ("PUT", rf"/api/calls/{C}/drafts/{D}", Handler.edit_draft),

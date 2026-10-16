@@ -99,6 +99,51 @@ class BrowserE2E(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base}/api/calls/{call_id}", timeout=10) as r:
             return json.loads(r.read())
 
+    # -- people, Today and Playbook ------------------------------------------------
+
+    def test_today_follows_the_viewer(self):
+        page = self.page()
+        page.goto(f"{self.base}/")
+        # No one chosen yet: Today asks who this is (or to add someone first).
+        page.wait_for_selector(".welcome h1")
+        page.goto(f"{self.base}/#people")
+        for name, role in (("Asha E2E", "rep"), ("Sita E2E", "manager")):
+            page.fill("#p-name", name)
+            page.select_option("#p-role", role)
+            page.click(".person-form button[type=submit]")
+            page.wait_for_function(f"() => [...document.querySelectorAll('.person-row input')].some(i => i.value === {json.dumps(name)})")
+        asha = next(p for p in json.loads(self.get("/api/people")) if p["name"] == "Asha E2E")
+        page.select_option("#viewer", asha["id"])
+
+        # Assign the solar example to Asha from the call page; it becomes her call.
+        page.goto(f"{self.base}/#call/example-solar-01")
+        page.select_option("#call-rep", asha["id"])
+        page.wait_for_selector(".rep-picker :text('Saved.')")
+        page.goto(f"{self.base}/#today")
+        page.wait_for_selector("text=Today, Asha")
+        page.wait_for_selector(".skill .chip-link")  # skills she fell short on, linked to the call
+        page.wait_for_selector(".page-row:has-text('Needs input')")
+        self.assertEqual(page.locator("#call-list .call-row").count(), 1)  # "Mine"
+        page.click(".scope-btn:has-text('All')")
+        self.assertGreaterEqual(page.locator("#call-list .call-row").count(), 2)
+
+        # A manager sees the team, and calls without a rep.
+        sita = next(p for p in json.loads(self.get("/api/people")) if p["name"] == "Sita E2E")
+        page.select_option("#viewer", sita["id"])
+        page.wait_for_selector("text=Your team today")
+        page.wait_for_selector(".team-table :text('Asha E2E')")
+
+        page.goto(f"{self.base}/#playbook/demo-solar")
+        page.wait_for_selector("text=Approved facts")
+        page.locator(".doc-row button").first.click()
+        page.wait_for_selector(".doc-row .doc-text")
+        self.assertEqual(page.errors, [])
+
+    def get(self, path):
+        import urllib.request
+        with urllib.request.urlopen(f"{self.base}{path}", timeout=10) as r:
+            return r.read()
+
     # -- review screen -------------------------------------------------------
 
     def test_review_flows(self):

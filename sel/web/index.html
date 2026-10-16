@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sel · Call review</title>
+  <title>Sel · Sales coaching</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="prefetch" href="/static/sim.js" as="script">
+  <link rel="prefetch" href="/static/coach.js" as="script">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -20,18 +21,38 @@
         <span class="brand-name">Sel</span>
       </div>
 
+      <div class="viewer">
+        <label for="viewer" class="nav-title">Viewing as</label>
+        <select id="viewer"></select>
+        <a class="viewer-manage small" href="#people">Manage people</a>
+      </div>
+
       <button type="button" class="primary new-call" id="new-call">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         New call
       </button>
-      <button type="button" class="new-sim" id="open-sim" aria-current="false">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>
-        Call simulator
-        <span class="live-dot" aria-hidden="true"></span>
-      </button>
+
+      <nav class="primary-nav" aria-label="Sections">
+        <a href="#today" data-nav="today">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg>
+          Today
+        </a>
+        <a href="#sim" data-nav="sim" id="open-sim">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>
+          Practice
+          <span class="live-dot" aria-hidden="true"></span>
+        </a>
+        <a href="#playbook" data-nav="playbook">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h10"/></svg>
+          Playbook
+        </a>
+      </nav>
 
       <nav class="nav-section" aria-labelledby="calls-title">
-        <h2 id="calls-title" class="nav-title">Calls</h2>
+        <div class="nav-head">
+          <h2 id="calls-title" class="nav-title">Calls</h2>
+          <div class="scope-toggle" id="call-scope" role="group" aria-label="Which calls"></div>
+        </div>
         <p id="list-error" class="form-error" role="alert" hidden></p>
         <ul id="call-list" class="call-list"></ul>
         <p id="list-empty" class="muted small" hidden>No calls yet. Choose New call to add a recording.</p>
@@ -54,6 +75,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js" data-sim="/static/sim.js" data-worklet="/static/pcm-worklet.js"></script>
+  <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-worklet="/static/pcm-worklet.js"></script>
 </body>
 </html>

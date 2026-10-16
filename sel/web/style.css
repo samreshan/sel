@@ -87,7 +87,7 @@
   --danger-hover: color-mix(in srgb, var(--bad-ink) 90%, var(--surface));
   --focus-ring: color-mix(in srgb, var(--focus) 80%, transparent);
   --shadow-ring: 0 0 0 3px var(--focus-ring);
-  --radius: 20px;
+  --radius: 16px;
   --radius-sm: 12px;
   --radius-xs: 8px;
   --radius-2xs: 4px;
@@ -125,7 +125,7 @@
   --shadow-float: 0 20px 60px -12px rgb(35 38 43 / .2);
   --overlay: rgb(35 38 43 / .25);
   --radius-pill: 999px;
-  --radius-large: 28px;
+  --radius-large: 20px;
   --space-10: 40px;
   --space-12: 48px;
   --space-16: 64px;

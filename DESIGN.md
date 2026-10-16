@@ -119,7 +119,7 @@ compact insets. Existing mobile sidebar behavior remains intact.
 
 ## Cards and surfaces
 
-- Card radius: `--radius` / 20 px; featured bento cards: `--radius-large` / 28 px.
+- Card radius: `--radius` / 16 px; featured bento cards: `--radius-large` / 20 px.
 - Controls and nested surfaces: `--radius-sm` / 12 px; small tags: 8 px.
 - Standard inset: 16 px; larger cards and forms: 24 px.
 - White surface, fine neutral border, `--shadow-sm` ambient separation.
@@ -188,7 +188,7 @@ includes the reference and local OpenType/license assets.
 
 Check upload, review tabs, claims, drafts, simulator lobby, and live simulator
 styling at desktop and mobile sizes. Check loaded fonts, 40 px actions, 12 px
-controls, 20 px cards, overflow, focus, reduced motion, and exact evidence states.
+controls, 16 px cards, overflow, focus, reduced motion, and exact evidence states.
 Use the repository's Python checks and browser review; there is no npm build
 pipeline in this project.
 
@@ -201,7 +201,7 @@ Review status badges sit inside their cards, followed by the title and
 metadata. Review heading icons are compact, unboxed outlines. Sidebar device
 status is a flat footer divided by a single hairline, with attribution below.
 Transcript and review workspaces use the same grey canvas, with white review
-cards. Body/reading text remains 14 px. Cards use 20 px corners; controls and
+cards. Body/reading text remains 14 px. Cards use 16 px corners; controls and
 insets use 12 px corners. Navigation selection remains neutral; card selection
 is blue-grey and source evidence stays amber.
 The simulator workflow rail uses three columns when its own panel is narrow,

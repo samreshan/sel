@@ -1,0 +1,20 @@
+{
+  "_note": "Hand-written stand-in for the Moment finder and Line writer, for the second, unrelated pack. The first line for the accounting moment repeats the rep's wrong claim (Thali POS does not integrate with accounting software); Sel should refuse it and keep the corrected line.",
+  "moments": [
+    {"kind": "weak", "criterion": "qualify", "segment": "s07",
+     "why": "Named a plan and its price before asking about counters or kitchen order tickets.",
+     "lines": [{"text": "Before I suggest a plan: how many billing counters does each outlet run, and does your kitchen need order tickets?", "sources": []}]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment": "s05",
+     "why": "Promised a direct accounting integration that the product does not have.",
+     "lines": [
+       {"text": "Yes, it connects directly to your accounting software.",
+        "sources": [{"source": "fact:no-accounting-sync", "quote": "Thali POS does not currently integrate with accounting software; sales can be exported as CSV."}]},
+       {"text": "Thali POS doesn't integrate with accounting software yet, but you can export your sales as CSV any time. Shall we look at how your accountant works today?",
+        "sources": [{"source": "fact:no-accounting-sync", "quote": "Thali POS does not currently integrate with accounting software; sales can be exported as CSV."}]}
+     ]},
+    {"kind": "strong", "criterion": "book-demo", "segment": "s11",
+     "why": "Booked the demo for a specific day and time: Sunday at 3 p.m."},
+    {"kind": "strong", "criterion": "accurate-claims", "segment": "s03",
+     "why": "Described offline billing exactly as the product sheet does."}
+  ]
+}

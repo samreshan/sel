@@ -59,6 +59,7 @@ class TodayApiTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.service.wait_idle()
         cls.httpd.shutdown()
         cls.hub.close()
         cls.tmp.cleanup()

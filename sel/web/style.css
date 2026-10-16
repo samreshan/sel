@@ -3209,8 +3209,150 @@ button.person-pick {
     padding: var(--space-2) var(--space-4) var(--space-4);
   }
 
-  .team-table th:nth-child(4),
-  .team-table td:nth-child(4) {
+  .team-table th:nth-child(5),
+  .team-table td:nth-child(5) {
     display: none;
   }
+}
+
+/* ---------- coaching: moments, better lines, refused lines, focus ---------- */
+
+/* A card's status tag and its state (Endorsed, Edited) side by side. */
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* What was said at a moment: the customer's line, then the rep's, each with its speaker. */
+.said {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+}
+
+.said-line {
+  color: var(--text-2);
+}
+
+.said-line.role-rep {
+  color: var(--text);
+}
+
+.said-who {
+  display: block;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* The better line Sel suggests, with where it came from, whether it passed the pack check, and its sources. */
+.better-line {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  min-width: 0;
+}
+
+.better-line.is-empty {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-2);
+}
+
+.better-line-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.better-line-text {
+  font-size: var(--text-section);
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* A native disclosure: the summary is the button. */
+.disclosure {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.disclosure > summary {
+  display: list-item;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
+}
+
+.disclosure > summary:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.disclosure > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-ring);
+}
+
+.refused-lines {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.refused-lines > li {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-sm);
+}
+
+.refused-text {
+  color: var(--text-2);
+}
+
+.moment-form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.moment-form label {
+  font-weight: 500;
+}
+
+/* Today: this week's focus anchors the page. */
+.focus-title {
+  font-size: var(--text-panel);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 28px;
+}
+
+.focus-body {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-2) 0 var(--space-2);
+}
+
+.focus-moment {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
 }

@@ -88,6 +88,7 @@ class HubTests(unittest.TestCase):
         self.hub = SimulatorHub(self.service, speech_factory=lambda: self.speech, speech_status=lambda: (True, None),
                                 ice_servers=[], clock=self.clock)
         self.addCleanup(self.hub.close)
+        self.addCleanup(self.service.wait_idle)
 
     def room(self):
         room, rep = self.hub.create("demo-solar", "rep", "Asha", None, "+05:45")

@@ -14,7 +14,7 @@ import urllib.parse
 from typing import Any
 
 from .asr import DEFAULT_MODEL as WHISPER_DEFAULT, live_model_name
-from .llm import LLMError, client_from_env
+from .llm import LLMError, chat_client_from_env, client_from_env
 
 # Licences of the models Sel is documented with (MODELS.md). Matched by prefix on the lower-cased
 # model name; anything else is reported as "unknown: check the model card".
@@ -58,20 +58,26 @@ def check(probe: bool = True) -> dict[str, Any]:
     """Everything the doctor reports; ``ok`` is False when a model would break the open-models rule."""
     problems: list[str] = []
     out: dict[str, Any] = {"provider": os.environ.get("SEL_LLM_PROVIDER", "local").lower()}
-    try:
-        llm = client_from_env()
-        out["llm"] = {
-            "model": llm.model,
-            "endpoint": llm.base_url,
-            "runs_on": _where(llm.base_url),
-            "licence": model_licence(llm.model),
-        }
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def entry(make, role: str) -> dict[str, Any]:
+        try:
+            llm = make()
+        except LLMError as e:
+            if "proprietary" in str(e) or "unknown" in str(e):
+                problems.append(str(e))
+            return {"error": str(e), "role": role}
+        info = {"model": llm.model, "endpoint": llm.base_url, "runs_on": _where(llm.base_url),
+                "licence": model_licence(llm.model), "role": role}
+        key = (llm.base_url, llm.model)
         if probe:
-            out["llm"]["health"] = llm.health()
-    except LLMError as e:
-        out["llm"] = {"error": str(e)}
-        if "proprietary" in str(e) or "unknown SEL_LLM_PROVIDER" in str(e):
-            problems.append(str(e))
+            info["health"] = seen[key]["health"] if key in seen else llm.health()
+        seen.setdefault(key, info)
+        return info
+
+    out["llm"] = entry(client_from_env, "call analysis and coaching (moments, better lines)")
+    out["chat"] = entry(chat_client_from_env, "conversation speed: the Coach and the AI customer")
+    out["chat"]["provider"] = (os.environ.get("SEL_CHAT_LLM_PROVIDER") or out["provider"]).lower()
     out["speech"] = {
         "uploads": f"Whisper {os.environ.get('SEL_WHISPER_MODEL', WHISPER_DEFAULT)} (MIT) via faster-whisper",
         "live": f"Whisper {live_model_name()} (MIT) via faster-whisper",
@@ -95,6 +101,16 @@ def render(report: dict[str, Any]) -> str:
         lines += [
             f"  Language model   {llm['model']}  [{llm['licence']}]{state}",
             f"                   {report['provider']} provider at {llm['endpoint']} ({llm['runs_on']})",
+        ]
+    chat = report.get("chat") or {}
+    if "error" in chat:
+        lines.append(f"  Chat model       {chat['error']}")
+    elif chat:
+        health = chat.get("health")
+        state = "" if health is None else ("  reachable" if health.get("ok") else f"  NOT reachable: {health.get('error')}")
+        lines += [
+            f"  Chat model       {chat['model']}  [{chat['licence']}]{state}",
+            f"                   {chat['provider']} provider at {chat['endpoint']} ({chat['runs_on']}); Coach and AI customer",
         ]
     sp = report["speech"]
     lines += [

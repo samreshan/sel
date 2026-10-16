@@ -76,6 +76,32 @@ recording → local transcription → speakers + timestamps → call analysis
 
 See [docs/architecture.md](docs/architecture.md).
 
+## How the AI works
+
+Sel's product is a **coaching loop**, and every step of it is an open-weight
+model whose output is consumed by code, not just shown:
+
+```
+real call → DIAGNOSE (moments, better line, gate) → FOCUS (one skill) → PRACTISE (AI customer)
+          → PREPARE (brief) → PERFORM (next real call) → MEASURE (did the skill transfer?)
+```
+
+| Agent | Reads | Returns (JSON) | Consumed by | Status |
+|---|---|---|---|---|
+| Analyst | transcript + pack | questions, objections, claims, promises as segment ids | evidence gate → drafts, scorecard | built |
+| Moment finder | report + scorecard grade | weak and strong moments per criterion, segment ids | `gate_moments` → coaching.json, Coaching tab, the Coach | built |
+| Line writer (RAG) | a weak moment + BM25 pack passages | a better line + passage ids | `check_line` (code) → shown with its passage, or refused with the reason | built |
+| Coach | the rep's moments across calls | actions from a whitelist (`set_focus` so far) | `apply_actions` validates against state → Today's focus | built (focus only) |
+| Persona builder, AI customer, Judge | a weak moment; the drill | persona; `{say, end_call, mood}`; pass/fail per criterion | the practice room, debrief, transfer check | next |
+| Librarian, Prep writer | strong moments; a lead's past reports | playbook answers; a brief | manager approval → retrieval; Prep page | later |
+
+The model points; code supplies the words and checks the facts. Quotes are the
+transcript's own words, sources are the pack's own text, and a suggested line
+that states a product fact must cite the pack and match it: "the inverter has a
+10-year warranty" is refused because the pack gives 10 years only with the paid
+Care Plan. Remove the models and Sel falls back to rules that find the moments
+but write no lines, pick no persona and judge no claim: there is no coach left.
+
 ## Business packs
 
 Everything specific to one business lives in a directory:

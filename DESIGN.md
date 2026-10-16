@@ -91,6 +91,31 @@ compact insets. Existing mobile sidebar behavior remains intact.
   order. Lists inside cards use `.page-rows` / `.skills`; links to calls are
   `.chip-link`. Example in the reference under `#patterns`.
 
+## Coaching moments, better lines and the focus
+
+- Coaching tab: scorecard, then **Where to improve** (weak moments), **What worked**
+  (strong moments), then objections and questions. Each moment is a passive
+  `.card.moment` (no hover lift) with `.card-tags` (status tag plus Endorsed /
+  Edited), the criterion as title, and `.said`: the customer's line, then the
+  rep's, each labelled with its speaker in caption type.
+- `.better-line`: a `--surface-3` inset with a head row (label, provenance pill,
+  check pill) and the line in 16 px medium. Provenance is always shown:
+  "AI-suggested" (violet), "Example line", "Written by a person", "Team answer".
+  The check pill says "Checked against your pack" (sage), "No claims to check"
+  (neutral) or "Refused" (rose); sources reuse `.source` blocks. With no line,
+  `.better-line.is-empty` (dashed) shows the scorecard's own words.
+- Refused lines sit in a native `details.disclosure` (summary is the button,
+  focus ring on the summary) as dashed `.refused-lines` items with their reasons.
+  Never strike through text; the reasons explain.
+- Actions in `.card-actions`: play evidence, Endorse line (`aria-pressed`, only
+  for a line that passed), Edit line / Write a line (inline `.moment-form`),
+  Add note, Dismiss / Restore (`.push`, dismissed cards use `.is-dismissed`).
+  After an action the panel redraws and focus returns to the control used.
+- Today: when a rep has a focus, the bento anchor is **This week's focus**
+  (`.focus-card`): `.focus-title` (20 px), the reason, then `.focus-moment` with
+  the real moment (`.said`) and the better line. Skills to work on moves below.
+  The manager's team table gains a Focus column. Example under `#patterns`.
+
 ## Buttons
 
 - Default height: 40 px; compact height: 36 px.

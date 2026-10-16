@@ -87,6 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--report", type=Path, help="score this saved report.json instead of the fixture analysis")
     p.add_argument("--analyzer", choices=["fixture", "rules"], default="fixture",
                    help="fixture: the example's hand-written analysis; rules: Sel's code-only analyzer")
+    p.add_argument("--coaching", choices=["fixture", "rules", "llm"],
+                   help="score coaching moments and better lines against coaching_gold.json instead: the example's "
+                        "hand-written coaching.json, Sel's rules, or the configured language model (SEL_LLM_*)")
 
     p = sub.add_parser("analyze", help="run the real pipeline on a recording (local speech + language models)")
     p.add_argument("audio", type=Path)
@@ -152,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     report = _report_for_example(args.example, args.pack, args.analyzer)
+    if args.cmd == "eval" and args.coaching:
+        print(json.dumps(_eval_coaching(args, report), indent=2, ensure_ascii=False))
+        return 0
     if args.cmd == "demo":
         if args.json:
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
@@ -162,6 +168,41 @@ def main(argv: list[str] | None = None) -> int:
     gold = json.loads((args.example / "gold.json").read_text(encoding="utf-8"))
     print(json.dumps(score(report, gold), indent=2))
     return 0
+
+
+def _eval_coaching(args, report) -> dict:
+    """Coach the example's report (fixture, rules or the configured model) and score it against coaching_gold.json."""
+    from .coach import LineWriter, MomentFinder, diagnose
+    from .evaluate import score_coaching
+    from .live import pack_index
+    from .scoring import score_report
+
+    pack = load_pack(args.pack)
+    data = report.to_dict()
+    data["score"] = score_report(report, pack)
+    index = pack_index(pack)
+    gold = json.loads((args.example / "coaching_gold.json").read_text(encoding="utf-8"))
+    if args.coaching == "fixture":
+        fixture = json.loads((args.example / "coaching.json").read_text(encoding="utf-8"))
+        coaching = diagnose(data, pack, index, fixture=fixture)
+    elif args.coaching == "rules":
+        coaching = diagnose(data, pack, index)
+    else:
+        from .llm import client_from_env
+
+        llm = client_from_env()
+        coaching = diagnose(data, pack, index, finder=MomentFinder(llm), writer=LineWriter(llm, index), judge=llm,
+                            progress=lambda s, f: print(f"  [{f:4.0%}] {s}", file=sys.stderr))
+        coaching["meta"]["llm_usage"] = llm.stats.to_dict()
+    out = score_coaching(coaching, gold)
+    out["analysis"] = str(report.meta.get("analyzer"))
+    if args.coaching == "llm":
+        out["llm_usage"] = coaching["meta"]["llm_usage"]
+        out["lines_shown"] = [{"moment": f"{m['kind']} {m['criterion']} {m['evidence']['segment_ids']}",
+                               "line": (m.get("better_line") or {}).get("text"),
+                               "refused": [{"text": x["text"], "reasons": x["reasons"]} for x in m["rejected_lines"]]}
+                              for m in coaching["moments"]]
+    return out
 
 
 def _health():
@@ -182,9 +223,9 @@ def _health():
 
 def _serve(args) -> int:
     from .server import serve
-    from .service import CallService
+    from .service import CallService, default_coach_factory
 
-    service = CallService(args.calls_dir, args.packs_dir)
+    service = CallService(args.calls_dir, args.packs_dir, coach_factory=default_coach_factory)
     if not args.no_examples:
         root = Path(__file__).resolve().parent.parent / "examples" / "calls"
         for example, pack_id in (("solar-01", "demo-solar"), ("pos-01", "demo-pos")):

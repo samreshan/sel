@@ -13,6 +13,7 @@
 | 6. Drafts | commitments + templates → `Draft`s; edits and approval | code (`sel/drafts.py`) | built |
 | 7. Review | report → person edits, approves, dismisses, corrects the transcript | local web app (`sel/server.py`, `sel/service.py`, `sel/web/`) | built |
 | Scorecard | report → each scorecard criterion met, partly, missed or left to coaching | code (`sel/scoring.py`, signals from `sel/live.py`) | built |
+| Coaching | report + grade → weak/strong moments, better lines with pack passages, refused lines; then a weekly focus per rep | open-weight LLM (moment finder, line writer, judge) + code gates (`sel/coach.py`); the Coach on the chat model | built (Phase 2) |
 | Live (simulator) | lines as they are spoken → live score, next best actions; on hang-up a call through stages 3–7 | code and Whisper (`sel/simulator.py`, `sel/live.py`) | built |
 
 `sel/pipeline.py` runs stages 1–6 and records how long each one takes. `build_report` (stages 4–6) is pure and fast; the app re-runs it whenever someone corrects the transcript or edits a draft, against the analysis the model proposed the first time, so a correction never silently re-asks the model.

@@ -1,0 +1,35 @@
+{
+  "_note": "Hand-written stand-in for the Moment finder and Line writer, used to exercise the coaching stage without a model. Like analysis.json it contains deliberate mistakes a model might make: the first line for the inverter-warranty moment claims a 10-year warranty without the paid Care Plan, the objection-handling moment cites the customer's line instead of the rep's reply, a strong moment praises the line whose inverter claim the pack contradicts, and one moment names a criterion the pack does not have. Sel should refuse, correct or move each of them. The lines are in English, like the example recording; the line gate's handling of romanized Nepali is covered in tests/test_coach.py.",
+  "moments": [
+    {"kind": "weak", "criterion": "discovery", "segment": "s03",
+     "why": "Quoted the price before asking about the monthly bill, roof space or load.",
+     "lines": [{"text": "Before I quote a price: roughly how much is your monthly electricity bill, and how much roof space do you have? Then I can size the system for you.", "sources": []}]},
+    {"kind": "weak", "criterion": "objection-handling", "segment": "s04",
+     "why": "Answered the cheaper quote with warranty claims instead of asking what that quote includes.",
+     "lines": [{"text": "What does the other quote include: which panel and inverter brands, and how many years of warranty? Then we can compare like for like.", "sources": []}]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment": "s05",
+     "why": "Said the inverter has a 10-year warranty; the standard inverter warranty is 5 years.",
+     "lines": [
+       {"text": "Our inverter also comes with a 10-year warranty.",
+        "sources": [{"source": "fact:inverter-warranty", "quote": "Inverters carry a 5-year manufacturer warranty, extendable to 10 years with the paid Care Plan."}]},
+       {"text": "Our panels carry a 25-year performance warranty. The inverter has a 5-year manufacturer warranty, and our paid Care Plan extends it.",
+        "sources": [{"source": "fact:panel-warranty", "quote": "Panels carry a 25-year linear performance warranty."},
+                    {"source": "fact:inverter-warranty", "quote": "Inverters carry a 5-year manufacturer warranty, extendable to 10 years with the paid Care Plan."}]}
+     ]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment": "s09",
+     "why": "Promised NEA approval in about two weeks; the pack says the utility decides the timing.",
+     "lines": [{"text": "We help with the net-metering application, but the utility issues the approval and the timing is outside our control. I'll find out the usual wait and let you know.",
+                "sources": [{"source": "docs/price-list.md", "quote": "Net-metering application\nsupport is included; the approval itself is issued by the utility and its timing\nis outside our control."}]}]},
+    {"kind": "weak", "criterion": "clear-next-step", "segment": "s13",
+     "why": "Left the site visit as 'sometime next week' without agreeing a day.",
+     "lines": [{"text": "For the engineer's site visit, would Sunday morning or Monday afternoon suit you better?", "sources": []}]},
+    {"kind": "strong", "criterion": "clear-next-step", "segment": "s11",
+     "why": "Agreed a clear deadline for the quotation email: tomorrow evening."},
+    {"kind": "strong", "criterion": "accurate-claims", "segment": "s03",
+     "why": "Quoted the 3 kW price exactly as the price list states it."},
+    {"kind": "strong", "criterion": "accurate-claims", "segment": "s05",
+     "why": "Stated the 25-year panel warranty correctly."},
+    {"kind": "weak", "criterion": "closing", "segment": "s15",
+     "why": "Did not ask for the order."}
+  ]
+}

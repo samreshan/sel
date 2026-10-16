@@ -482,6 +482,25 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
             self._send(200, draft["ics"].encode(), "text/calendar; charset=utf-8",
                        {"Content-Disposition": f'attachment; filename="{draft_id}.ics"'})
 
+        # -- coaching -----------------------------------------------------------
+
+        def coaching(self, q, call_id):
+            data = service.coaching(call_id)
+            if data is None:
+                raise ApiError(404, "this call has not been coached yet")
+            self._json(data)
+
+        def moment(self, q, call_id, moment_id, action):
+            self._json(service.moment_action(call_id, moment_id, action, self._json_body(), self._tab()))
+
+        def coach_view(self, q, person_id):
+            self._json(service.coach_view(person_id))
+
+        def set_focus(self, q, person_id):
+            b = self._json_body()
+            self._json(service.set_focus(person_id, b.get("pack_id"), b.get("criterion"), b.get("by") or None,
+                                         self._tab()))
+
         def dismiss(self, q, call_id, item_id):
             review = service.set_dismissed(call_id, item_id, True)
             service.changed(call_id, self._tab())
@@ -586,6 +605,10 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("GET", rf"/api/calls/{C}/drafts/{D}/ics", Handler.ics),
         ("POST", rf"/api/calls/{C}/items/{I}/dismiss", Handler.dismiss),
         ("POST", rf"/api/calls/{C}/items/{I}/restore", Handler.restore),
+        ("GET", rf"/api/calls/{C}/coaching", Handler.coaching),
+        ("POST", rf"/api/calls/{C}/moments/{D}/(endorse|dismiss|edit|note)", Handler.moment),
+        ("GET", rf"/api/coach/{D}", Handler.coach_view),
+        ("PUT", rf"/api/coach/{D}/focus", Handler.set_focus),
         ("GET", r"/api/sim", Handler.sim_info),
         ("POST", r"/api/sim/rooms", Handler.sim_create),
         ("GET", rf"/api/sim/rooms/{R}", Handler.sim_room),

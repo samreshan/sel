@@ -62,6 +62,11 @@
   S.on("call-changed", () => {
     page.todayFor = undefined;
   });
+  // The Coach picked a focus (or someone changed one) in another tab or on the server.
+  S.on("coach", () => {
+    if (S.view() === "coach" && S.coachRoute().page === "today") loadToday(true);
+    else page.todayFor = undefined;
+  });
   S.on("people-changed", rerender);
   // Leaving a page means the next visit counts as arriving (see render).
   window.addEventListener("hashchange", () => {
@@ -163,7 +168,10 @@
       ),
       page.todayErr ? el("p", { class: "form-error", role: "alert", text: page.todayErr }) : null,
       counts(t),
-      el("div", { class: "bento" }, skills(t, manager), followUps(t, manager)),
+      t.focus
+        ? el("div", { class: "bento" }, focusCard(t.focus), followUps(t, manager))
+        : el("div", { class: "bento" }, skills(t, manager), followUps(t, manager)),
+      t.focus && t.skills.length ? skills(t, manager, false) : null,
       manager ? team(t) : null,
       manager && t.unassigned.length ? unassigned(t) : null,
       working(t),
@@ -205,10 +213,65 @@
     return section("Follow-ups", "Drafts wait for a person. Sel never sends them.", "mail", "info", el("ul", { class: "page-rows" }, ...rows));
   }
 
-  function skills(t, manager) {
+  // ---------- this week's focus ----------
+
+  function shortDate(iso) {
+    const d = new Date(iso || "");
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  }
+
+  function focusCard(f) {
+    const who = f.set_by_name || "Sel's coach";
+    const sub = compact([`Set by ${who}`, shortDate(f.since) ? `since ${shortDate(f.since)}` : null, S.packName(f.pack_id)]).join(" · ");
+    const m = f.latest;
+    const line = m && m.better_line;
+    const body = [
+      el("div", { class: "focus-body" }, el("p", { class: "focus-title", text: f.title }), f.reason ? el("p", { class: "muted", text: f.reason }) : null),
+    ];
+    if (m) {
+      body.push(
+        el(
+          "div",
+          { class: "focus-moment" },
+          el("p", { class: "muted small", text: compact([`On your call with ${m.customer_name || "a customer"}`, formatStarted(m.started_at)]).join(" · ") }),
+          el(
+            "div",
+            { class: "said" },
+            m.customer_said ? el("p", { class: "said-line role-customer" }, el("span", { class: "said-who", text: "Customer" }), S.quoted(m.customer_said.quote)) : null,
+            el("p", { class: "said-line role-rep" }, el("span", { class: "said-who", text: "You" }), S.quoted(m.quote))
+          ),
+          line && line.check === "ok"
+            ? el(
+                "div",
+                { class: "better-line" },
+                el("div", { class: "better-line-head" }, el("span", { class: "label", text: "Try instead" }), pill(String(line.by || "").startsWith("person") ? "neutral" : "violet", String(line.by || "").startsWith("person") ? "Written by a person" : String(line.by || "").startsWith("fixture") ? "Example line" : "AI-suggested"), line.facts && line.facts.length ? pill("ok", "Checked against your pack") : null),
+                el("p", { class: "better-line-text", text: S.quoted(line.text) })
+              )
+            : null,
+          el("div", { class: "row" }, el("a", { class: "button small", href: `#call/${enc(m.call_id)}`, text: "Open the call" }))
+        )
+      );
+    } else body.push(muted("The moments behind this focus will show here after your next reviewed call."));
+    return sectionOf("list-card page-section bento-anchor focus-card", "This week's focus", sub, "target", "violet", ...body);
+  }
+
+  async function setFocus(skill, btn) {
+    const me = S.viewer();
+    if (!me) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/coach/${enc(me.id)}/focus`, { method: "PUT", json: { pack_id: skill.pack_id, criterion: skill.criterion_id, by: me.id } });
+      loadToday(true);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = e.message;
+    }
+  }
+
+  function skills(t, manager, anchor = true) {
     if (!t.skills.length) {
       return sectionOf(
-        "list-card page-section bento-anchor is-empty",
+        `list-card page-section${anchor ? " bento-anchor" : ""} is-empty`,
         "Skills to work on",
         null,
         "target",
@@ -238,11 +301,18 @@
             return el("a", { class: "chip-link", href: `#call/${enc(c.id)}`, title: c.detail || "" }, `${callLabel(c)}${manager && c.rep_name ? ` (${c.rep_name})` : ""} · ${st.label}`);
           })
         ),
-        el("div", { class: "row" }, el("button", { type: "button", class: "small ghost", text: "Practise this", on: { click: () => navigate("#sim") } }))
+        el(
+          "div",
+          { class: "row" },
+          el("button", { type: "button", class: "small ghost", text: "Practise this", on: { click: () => navigate("#sim") } }),
+          !manager && !(t.focus && t.focus.pack_id === s.pack_id && t.focus.criterion === s.criterion_id)
+            ? el("button", { type: "button", class: "small ghost", text: t.focus ? "Make this my focus" : "Focus on this", on: { click: (e) => setFocus(s, e.currentTarget) } })
+            : null
+        )
       );
     });
     return sectionOf(
-      "list-card page-section bento-anchor",
+      `list-card page-section${anchor ? " bento-anchor" : ""}`,
       "Skills to work on",
       manager ? "Scorecard skills the team fell short on in recent calls, from the pack's scorecard." : "Scorecard skills your recent calls fell short on. Practise one, then watch it on your next calls.",
       "target",
@@ -260,19 +330,20 @@
         el("th", { scope: "row", text: r.name }),
         el("td", { text: String(r.calls) }),
         el("td", { text: r.average === null ? "–" : `${r.average}` }),
+        el("td", { text: r.focus ? r.focus.title : "None yet" }),
         el("td", { text: String(r.open_follow_ups) }),
         el("td", {}, el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(r.id) } }))
       )
     );
     return section(
       "Team",
-      "Average scorecard over each rep's last 10 reviewed calls.",
+      "Average scorecard over each rep's last 10 reviewed calls, and the skill each rep is focusing on.",
       "user",
       "accent",
       el(
         "table",
         { class: "team-table" },
-        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Rep" }), el("th", { scope: "col", text: "Calls" }), el("th", { scope: "col", text: "Average score" }), el("th", { scope: "col", text: "Open follow-ups" }), el("th", { scope: "col", text: "" }))),
+        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Rep" }), el("th", { scope: "col", text: "Calls" }), el("th", { scope: "col", text: "Average score" }), el("th", { scope: "col", text: "Focus" }), el("th", { scope: "col", text: "Open follow-ups" }), el("th", { scope: "col", text: "" }))),
         el("tbody", {}, ...rows)
       )
     );

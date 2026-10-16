@@ -9,10 +9,18 @@ Each call is a folder under ``SEL_CALLS_DIR`` (default ``calls/``)::
     analysis.json        what the model proposed, before the evidence gate
     review.json          dismissed items, draft edits and approvals, transcript edit log
     report.json          the rendered report (rebuilt from the files above), with its scorecard
+    coaching.json        weak and strong moments, better lines and what the line gate refused (sel/coach.py),
+                         with each person's endorsements, edits, dismissals and notes
 
-and ``people.json`` next to the call folders holds the team (``sel/people.py``).
+and next to the call folders: ``people.json`` holds the team (``sel/people.py``)
+and ``coach/<person>.json`` each rep's focus and the Coach's actions log.
 A call's ``rep_id`` says whose call it is; Today (``today()``) gathers what
 needs each person's attention across their calls.
+
+After a call's report is ready the call is marked done, so it can be reviewed
+at once, and the same job then coaches it (``coaching_status`` in call.json).
+The Coach runs on its own small queue, so picking a focus never waits behind
+a long analysis.
 
 Everything stays on this machine. Jobs run one at a time, because speech and
 language models compete for the same CPU.
@@ -37,8 +45,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import coach as coaching_mod
+from .coach import CoachStore, LineWriter, MomentFinder, RuleCoach
 from .drafts import apply_edits, approve
 from .events import EventBus
+from .live import pack_index
 from .models import Analysis, Speaker, Transcript
 from .pack import Pack, load_pack
 from .people import PeopleStore
@@ -47,7 +58,8 @@ from .scoring import score_report
 
 AUDIO_TYPES = {".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".mp4"}
 SUMMARY_FIELDS = ("id", "pack_id", "source", "status", "stage", "progress", "started_at", "customer_name",
-                  "original_filename", "created_at", "updated_at", "rep_id", "rep_name")
+                  "original_filename", "created_at", "updated_at", "rep_id", "rep_name", "coaching_status")
+MOMENT_ACTIONS = ("endorse", "dismiss", "edit", "note")
 TODAY_RECENT = 8  # calls listed under "Recent calls"
 SKILL_WINDOW = 10  # a person's latest finished calls that "Skills to work on" counts over
 EMPTY_REVIEW = {"dismissed": [], "drafts": {}, "transcript_edits": []}
@@ -63,21 +75,31 @@ def _new_id() -> str:
 
 class CallService:
     def __init__(self, calls_dir: str | Path, packs_dir: str | Path, analysis_factory=None,
-                 bus: EventBus | None = None):
+                 bus: EventBus | None = None, coaching_factory=None, coach_factory=None):
         self.root = Path(calls_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self.packs_dir = Path(packs_dir)
         self.bus = bus or EventBus()
         self._lock = threading.RLock()
         self._jobs: queue.Queue[str] = queue.Queue()
+        self._agents: queue.Queue[str] = queue.Queue()
         self._pack_cache: tuple[tuple, list[Pack]] | None = None
         self._summaries: dict[str, tuple[int, dict[str, Any]]] = {}
         self._reports: dict[str, tuple[int, dict[str, Any]]] = {}
+        self._coachings: dict[str, tuple[int, dict[str, Any]]] = {}
         self.people = PeopleStore(self.root / "people.json")
+        self.coach_store = CoachStore(self.root / "coach")
         # Builds (transcriber, analyzer, speaker_labeler) for a call; injectable for tests.
         self._factory = analysis_factory or default_factory
+        # The language model that coaches a call (moments, better lines), or None for rules.
+        # Default: the analysis model the call was analysed with, so rules-analysed calls get rules coaching.
+        self._coaching_factory = coaching_factory or (lambda call, analyzer: getattr(analyzer, "llm", None))
+        # The Coach agent that picks a focus. Rules unless one is given (``sel serve`` passes the chat model).
+        self._coach_factory = coach_factory or RuleCoach
         self._worker = threading.Thread(target=self._work, daemon=True)
         self._worker.start()
+        self._agent_worker = threading.Thread(target=self._agent_work, daemon=True)
+        self._agent_worker.start()
 
     # -- packs ------------------------------------------------------------
 
@@ -143,9 +165,22 @@ class CallService:
     def _set_status(self, call_id: str, **changes: Any) -> None:
         with self._lock:
             call = self._read(call_id, "call.json")
+            if call is None:
+                return  # deleted while its job was running
             call.update(changes, updated_at=_now())
             self._write(call_id, "call.json", call)
         self._publish(call)
+
+    def wait_idle(self, timeout: float = 30.0) -> bool:
+        """Wait until no analysis, coaching or Coach work is queued or running (tests, shutdown)."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        while self._jobs.unfinished_tasks or self._agents.unfinished_tasks:
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.02)
+        return True
 
     def _publish(self, call: dict[str, Any], origin: str | None = None) -> None:
         self.bus.publish("calls", "call", {k: call.get(k) for k in SUMMARY_FIELDS}, origin=origin)
@@ -160,7 +195,7 @@ class CallService:
         """Changes whenever anything ``view`` returns changes, without reading the files."""
         d = self._dir(call_id)
         parts = []
-        for name in ("call.json", "report.json", "review.json"):
+        for name in ("call.json", "report.json", "review.json", "coaching.json"):
             try:
                 st = (d / name).stat()
                 parts.append(f"{st.st_mtime_ns:x}.{st.st_size:x}")
@@ -286,7 +321,10 @@ class CallService:
         self._write(call_id, "analysis.json", json.loads((example / "analysis.json").read_text(encoding="utf-8")))
         self._write(call_id, "review.json", EMPTY_REVIEW)
         self._rebuild(call_id)
-        self._publish(call)
+        # coaching.json in an example is a hand-written stand-in for the coaching models, like analysis.json.
+        fixture = example / "coaching.json"
+        self._coach_call(call_id, fixture=json.loads(fixture.read_text(encoding="utf-8")) if fixture.is_file() else None)
+        self._publish(self._read(call_id, "call.json"))
         return call_id
 
     def retry(self, call_id: str, transcribe: str | None = None) -> None:
@@ -348,7 +386,203 @@ class CallService:
         self._write(call_id, "analysis.json", asdict(proposed))
         self._set_status(call_id, report_meta=report.meta)
         self._rebuild(call_id)
-        self._set_status(call_id, status="done", stage="done", progress=1.0)
+        # The review is ready now; coaching follows in the same job and shows on the Coaching tab when done.
+        self._set_status(call_id, status="done", stage="done", progress=1.0, coaching_status="queued")
+        try:
+            self._coach_call(call_id, analyzer=analyzer)
+        except Exception as e:  # noqa: BLE001 - the call itself is reviewed and done; only coaching failed
+            self._set_status(call_id, coaching_status="error", coaching_stage=None,
+                             coaching_error=f"{type(e).__name__}: {e}")
+
+    # -- coaching -----------------------------------------------------------------
+
+    def _coach_call(self, call_id: str, analyzer: Any = None, fixture: dict[str, Any] | None = None) -> None:
+        """Moments and better lines for one call (coaching.json), then the Coach for its rep.
+
+        A model error falls back to rules, so the Coaching tab always has moments; the error is kept.
+        """
+        call = self._read(call_id, "call.json")
+        pack = self.pack(call["pack_id"])
+        report = self._read(call_id, "report.json")
+        old = self._read(call_id, "coaching.json")
+        llm = None if fixture is not None else self._coaching_factory(call, analyzer)
+        index = pack_index(pack)
+        before = llm.stats.to_dict() if llm is not None else None
+        self._set_status(call_id, coaching_status="running", coaching_stage="finding moments", coaching_error=None)
+
+        def progress(stage: str, frac: float) -> None:
+            self._set_status(call_id, coaching_stage=stage.removeprefix("coaching: "))
+
+        error = None
+        try:
+            coaching = coaching_mod.diagnose(
+                report, pack, index, finder=MomentFinder(llm) if llm else None,
+                writer=LineWriter(llm, index) if llm else None, judge=llm, fixture=fixture, progress=progress)
+            if llm is not None:
+                after = llm.stats.to_dict()
+                coaching["meta"]["llm_usage"] = {k: round(after[k] - before[k], 2) for k in after}
+        except Exception as e:  # noqa: BLE001 - the model failed; rules still give the rep their moments
+            error = f"{type(e).__name__}: {e}"
+            coaching = coaching_mod.diagnose(report, pack, index)
+            coaching["error"] = f"The coaching model failed, so Sel's rules found these moments: {error}"
+        self._write(call_id, "coaching.json", coaching_mod.carry_over(coaching, old))
+        self._set_status(call_id, coaching_status="error" if error else "done", coaching_stage=None,
+                         coaching_error=error)
+        self.bus.publish("calls", "coaching", {"id": call_id})
+        if call.get("rep_id"):
+            self.request_coach(call["rep_id"])
+
+    def coaching(self, call_id: str) -> dict[str, Any] | None:
+        self._dir(call_id)
+        return self._read(call_id, "coaching.json")
+
+    def _coaching(self, call_id: str) -> dict[str, Any] | None:
+        """coaching.json, cached by mtime (Today and the Coach read many)."""
+        path = self.root / call_id / "coaching.json"
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            return None
+        cached = self._coachings.get(call_id)
+        if cached is None or cached[0] != mtime:
+            cached = (mtime, json.loads(path.read_text(encoding="utf-8")))
+            self._coachings[call_id] = cached
+        return cached[1]
+
+    def moment_action(self, call_id: str, moment_id: str, action: str, body: dict[str, Any],
+                      origin: str | None = None) -> dict[str, Any]:
+        """endorse / dismiss / edit / note one moment. ``body["by"]`` is the person acting (no login)."""
+        if action not in MOMENT_ACTIONS:
+            raise KeyError(action)
+        by = body.get("by") or None
+        if by and self.people.get(str(by)) is None:
+            raise KeyError(f"no person {by!r}")
+        with self._lock:
+            self._dir(call_id)
+            coaching = self._read(call_id, "coaching.json")
+            if coaching is None:
+                raise KeyError(f"{call_id} has no coaching yet")
+            pack = self.pack(coaching.get("pack_id") or self._read(call_id, "call.json")["pack_id"])
+            moment = coaching_mod.act_on_moment(coaching, moment_id, action, body, pack, pack_index(pack), by)
+            self._write(call_id, "coaching.json", coaching)
+        self.bus.publish("calls", "coaching", {"id": call_id}, origin=origin)
+        return moment
+
+    # -- the Coach ----------------------------------------------------------------
+
+    def request_coach(self, person_id: str) -> None:
+        """Ask the Coach to look at this rep (runs on the agent queue)."""
+        self._agents.put(person_id)
+
+    def _agent_work(self) -> None:
+        while True:
+            person_id = self._agents.get()
+            try:
+                self.run_coach(person_id)
+            except Exception:  # noqa: BLE001 - the Coach is best effort; the next call asks again
+                traceback.print_exc()
+            finally:
+                self._agents.task_done()
+
+    def coach_state(self, person_id: str) -> dict[str, Any]:
+        """What the Coach reads: the rep's focus and their moments across recent coached calls."""
+        person = self.people.get(person_id)
+        if person is None:
+            raise KeyError(f"no person {person_id!r}")
+        calls = [c for c in self.list() if c.get("rep_id") == person_id and c.get("status") == "done"]
+        calls.sort(key=lambda c: c.get("started_at") or "", reverse=True)
+        coached = [(c, x) for c in calls[:SKILL_WINDOW] if (x := self._coaching(c["id"]))]
+        packs = {p.id: p for p in self.packs()}
+        return {"person_id": person_id, "name": person["name"], "focus": self.coach_store.get(person_id).get("focus"),
+                "skills": coaching_mod.skill_candidates(coached, packs.get), "calls_seen": len(coached)}
+
+    def run_coach(self, person_id: str) -> list[dict[str, Any]]:
+        """One Coach turn for a rep: it proposes actions, code validates and applies them."""
+        person = self.people.get(person_id)
+        if person is None or person["role"] != "rep":
+            return []
+        state = self.coach_state(person_id)
+        agent = self._coach_factory()
+        try:
+            actions = agent.decide(state)
+        except Exception as e:  # noqa: BLE001 - a model that fails or answers nonsense: the rules decide
+            agent = RuleCoach()
+            actions = agent.decide(state)
+            state["model_error"] = f"{type(e).__name__}: {e}"
+        if not actions:
+            return []
+        with self.coach_store.lock:
+            data = self.coach_store.get(person_id)
+            log = coaching_mod.apply_actions(actions, state, data, agent.name)
+            self.coach_store.save(person_id, data)
+        if any(e["applied"] for e in log):
+            self.bus.publish("calls", "coach", {"person_id": person_id, "focus": data.get("focus")})
+        return log
+
+    def set_focus(self, person_id: str, pack_id: str | None, criterion: str | None, by: str | None,
+                  origin: str | None = None) -> dict[str, Any]:
+        """A person sets (or clears) a rep's focus. A manager's focus is theirs: the Coach won't replace it."""
+        person = self.people.get(person_id)
+        if person is None:
+            raise KeyError(f"no person {person_id!r}")
+        setter = self.people.get(by) if by else None
+        if by and setter is None:
+            raise KeyError(f"no person {by!r}")
+        focus = None
+        if criterion:
+            pack = self.pack(str(pack_id or ""))
+            crit = pack.criterion(criterion)
+            if crit is None:
+                raise ValueError(f"{criterion!r} is not a skill in {pack.name}")
+            state = self.coach_state(person_id)
+            skill = next((s for s in state["skills"] if s["key"] == f"{pack.id}/{crit.id}"), None)
+            focus = {"pack_id": pack.id, "criterion": crit.id, "title": crit.title, "since": _now(),
+                     "set_by": f"person:{setter['id']}" if setter else "person", "set_by_role": setter["role"] if setter else None,
+                     "status": "active", "reason": "Chosen by " + (setter["name"] if setter else "a person") + ".",
+                     "moments": skill["moments"][:3] if skill else []}
+        with self.coach_store.lock:
+            data = self.coach_store.get(person_id)
+            if data.get("focus"):
+                data.setdefault("history", []).append({**data["focus"], "status": "replaced" if focus else "cleared",
+                                                       "ended": _now()})
+            data["focus"] = focus
+            data.setdefault("actions", []).append({"at": _now(), "by": f"person:{by}" if by else "person",
+                                                   "action": "set_focus" if focus else "clear_focus",
+                                                   "args": {"pack_id": pack_id, "criterion": criterion}, "applied": True})
+            self.coach_store.save(person_id, data)
+        self.bus.publish("calls", "coach", {"person_id": person_id, "focus": focus}, origin=origin)
+        return self.coach_view(person_id)
+
+    def _focus_detail(self, person_id: str, focus: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The focus with its latest weak moment and better line, read from the rep's calls."""
+        if not focus:
+            return None
+        names = {c["id"]: c for c in self.list()}
+        out = dict(focus)
+        latest = None
+        for ref in focus.get("moments") or []:
+            coaching = self._coaching(ref["call_id"]) if ref.get("call_id") in names else None
+            m = next((x for x in (coaching or {}).get("moments", []) if x["id"] == ref["moment_id"]), None)
+            if m:
+                c = names[ref["call_id"]]
+                latest = {"call_id": c["id"], "customer_name": c.get("customer_name"), "started_at": c.get("started_at"),
+                          "moment_id": m["id"], "quote": m["evidence"]["quote"], "why": m.get("why"),
+                          "customer_said": m.get("customer_said"), "segment_ids": m["evidence"]["segment_ids"],
+                          "better_line": m.get("better_line")}
+                break
+        out["latest"] = latest
+        setter = (focus.get("set_by") or "").removeprefix("person:")
+        person = self.people.get(setter) if setter and not setter.startswith("coach") else None
+        out["set_by_name"] = person["name"] if person else ("Sel's coach" if str(focus.get("set_by", "")).startswith("coach")
+                                                           else None)
+        return out
+
+    def coach_view(self, person_id: str) -> dict[str, Any]:
+        state = self.coach_state(person_id)
+        data = self.coach_store.get(person_id)
+        return {"person": self.people.get(person_id), "focus": self._focus_detail(person_id, data.get("focus")),
+                "skills": state["skills"], "calls_seen": state["calls_seen"],
+                "history": data.get("history", [])[-10:], "actions": data.get("actions", [])[-20:]}
 
     # -- review ---------------------------------------------------------------
 
@@ -382,6 +616,7 @@ class CallService:
             "audio_url": f"/api/calls/{call_id}/audio" if call.get("audio_file") else None,
             "report": self._read(call_id, "report.json"),
             "review": self._read(call_id, "review.json"),
+            "coaching": self._read(call_id, "coaching.json"),
         }
 
     def list(self) -> list[dict[str, Any]]:
@@ -416,6 +651,10 @@ class CallService:
             self._write(call_id, "review.json", review)
             before = {r["item_id"] for r in (self._read(call_id, "report.json") or {}).get("rejected", [])}
             data = self._rebuild(call_id)
+            coaching = self._read(call_id, "coaching.json")
+            if coaching:  # quotes are the transcript's current words
+                self._write(call_id, "coaching.json",
+                            coaching_mod.refresh_quotes(coaching, replace(transcript, segments=segments)))
             after = {r["item_id"] for r in data["rejected"]}
             return {"report": data, "newly_rejected": sorted(after - before), "restored": sorted(before - after)}
 
@@ -498,6 +737,8 @@ class CallService:
                 call["rep_name"] = person["name"]
             self._write(call_id, "call.json", call)
         self._publish(call, origin)
+        if person and call.get("status") == "done":
+            self.request_coach(person["id"])  # this call's moments now count towards their coaching
         return {k: call.get(k) for k in SUMMARY_FIELDS}
 
     def _report(self, call_id: str) -> dict[str, Any] | None:
@@ -569,6 +810,8 @@ class CallService:
             "recent": recent, "skills": to_work_on, "counts": {
                 "calls": len(mine), "needs_input": sum(f["status"] == "needs_input" for f in follow_ups),
                 "ready_for_approval": sum(f["status"] == "ready_for_approval" for f in follow_ups)},
+            "focus": self._focus_detail(person["id"], self.coach_store.get(person["id"]).get("focus"))
+            if person and not manager else None,
         }
         if manager:
             team = []
@@ -578,9 +821,13 @@ class CallService:
                 theirs = [c for c in done if c.get("rep_id") == p["id"]]
                 scores = [(self._report(c["id"]) or {}).get("score", {}).get("overall") for c in theirs[:SKILL_WINDOW]]
                 scores = [x for x in scores if x is not None]
+                focus = self.coach_store.get(p["id"]).get("focus")
                 team.append({"id": p["id"], "name": p["name"], "calls": len(theirs),
                              "average": round(sum(scores) / len(scores)) if scores else None,
-                             "open_follow_ups": sum(f["call"]["rep_id"] == p["id"] for f in follow_ups)})
+                             "open_follow_ups": sum(f["call"]["rep_id"] == p["id"] for f in follow_ups),
+                             "focus": {"title": focus["title"], "pack_id": focus["pack_id"],
+                                       "criterion": focus["criterion"], "set_by": focus.get("set_by")}
+                             if focus and focus.get("status") == "active" else None})
             out["team"] = team
             out["unassigned"] = [ref(c) for c in mine if not c.get("rep_id")][:TODAY_RECENT]
         return out
@@ -588,6 +835,20 @@ class CallService:
     def changed(self, call_id: str, origin: str | None) -> None:
         """Tell other tabs that a review action changed this call."""
         self.bus.publish("calls", "call-changed", {"id": call_id}, origin=origin)
+
+
+def default_coach_factory():
+    """The Coach on the fast chat model (``SEL_CHAT_LLM_*``) when its server answers, otherwise rules."""
+    from .coach import ModelCoach
+    from .llm import LLMError, chat_client_from_env
+
+    try:
+        llm = chat_client_from_env()
+        if llm.health().get("ok"):
+            return ModelCoach(llm)
+    except LLMError:
+        pass
+    return RuleCoach()
 
 
 def default_factory(call: dict[str, Any], speakers: list[Speaker]):

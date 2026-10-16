@@ -1,0 +1,14 @@
+{
+  "_note": "Reference coaching annotation of pos-01, written together with this fictional test call (not an independent human annotation). Used by `python -m sel eval --coaching`.",
+  "moments": [
+    {"kind": "weak", "criterion": "qualify", "segment_ids": ["s07"]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment_ids": ["s05"]},
+    {"kind": "strong", "criterion": "book-demo", "segment_ids": ["s09", "s11"]},
+    {"kind": "strong", "criterion": "accurate-claims", "segment_ids": ["s03", "s07"]}
+  ],
+  "forbidden_lines": [
+    {"pattern": "(?i)\\b(?:integrates?|connects?|syncs?)\\b[^.]*\\baccounting\\b", "unless": "(?i)\\b(?:not|doesn't|does not|no)\\b",
+     "why": "Thali POS does not integrate with accounting software."},
+    {"pattern": "(?i)\\b2,?000\\b", "why": "The Standard plan is NPR 2,500 per month per outlet."}
+  ]
+}

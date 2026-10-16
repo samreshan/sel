@@ -8,7 +8,7 @@ from sel.doctor import check, model_licence
 
 class DoctorTests(unittest.TestCase):
     def env(self, **values):
-        clean = {k: v for k, v in os.environ.items() if not k.startswith("SEL_LLM_") and k != "GROQ_API_KEY"}
+        clean = {k: v for k, v in os.environ.items() if not k.startswith(("SEL_LLM_", "SEL_CHAT_LLM_")) and k != "GROQ_API_KEY"}
         patcher = mock.patch.dict(os.environ, {**clean, **values}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -36,6 +36,13 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(report["ok"])
         with mock.patch("builtins.print"):
             self.assertEqual(main(["doctor", "--offline"]), 1)
+
+    def test_chat_model_is_reported_and_checked(self):
+        self.env(SEL_CHAT_LLM_MODEL="qwen2.5:1.5b")
+        report = check(probe=False)
+        self.assertEqual((report["chat"]["model"], report["chat"]["licence"]), ("qwen2.5:1.5b", "Apache-2.0"))
+        self.env(SEL_CHAT_LLM_BASE_URL="https://api.openai.com/v1")
+        self.assertFalse(check(probe=False)["ok"])
 
     def test_licences(self):
         self.assertEqual(model_licence("qwen2.5:7b"), "Apache-2.0")

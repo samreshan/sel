@@ -29,6 +29,16 @@ whose follow-up drafts wait for approval.
   `sel/dates.py`. The evidence gate (`sel/grounding.py`) refuses anything it
   can't tie back. Any new analyzer (including `RuleAnalyzer`) goes through the
   same gate.
+- **Words Sel suggests are labelled and checked.** Better lines (and, later,
+  the AI customer and briefs) show where they came from ("AI-suggested",
+  "Example line", "Written by a person"). Every suggested line goes through
+  `check_line` in `sel/coach.py`: a product fact must cite a pack passage, its
+  numbers must be in what it cites, it must not flip a "does not", and a figure
+  the pack gives only with a condition must carry it. A refused line is kept
+  and shown with its reasons. A model judge may refuse more; never pass more.
+- **Agents propose, code applies.** The Coach returns actions; `apply_actions`
+  checks each against a whitelist (`COACH_ACTIONS`) and the current state, logs
+  refusals too, and only then writes `coach/<person>.json`.
 - **No invented dates, no false "supported".** Unclear due phrases become
   `ambiguous` with a reason and window. `RuleAnalyzer` never returns
   `supported` or `contradicted` (see [Rules analyzer](#rules-analyzer)).
@@ -57,12 +67,13 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 126 tests; the 4 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 154 tests; the 5 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
+python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm)
 python scripts/perf_ui.py                                 # UI performance on a generated 2-hour call (Playwright)
 python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base   # two browsers, live Whisper
 ```
@@ -83,14 +94,15 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/dates.py` | Due-phrase resolution; `due_phrase_in` finds the spoken due words in a line |
 | `sel/drafts.py` | Email/calendar drafts, edits, approval, `.ics` |
 | `sel/retrieval.py` | BM25 over pack facts/docs; passages are verbatim substrings |
-| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained); one `/chat/completions` client for local servers or Groq (`SEL_LLM_PROVIDER=groq`), proprietary hosts refused |
+| `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained); one `/chat/completions` client for local servers or Groq (`SEL_LLM_PROVIDER=groq`), proprietary hosts refused; `chat_client_from_env` (`SEL_CHAT_LLM_*`, inherits `SEL_LLM_*`) for the Coach and AI customer |
 | `sel/doctor.py` | `sel doctor`: model, endpoint, where it runs, licence; exit 1 on a proprietary service |
 | `sel/asr.py` | faster-whisper: whole recordings (`transcribe`) and live windows (`transcribe_pcm`) |
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
+| `sel/coach.py` | Coaching: `check_line` (gate for suggested lines), moments (rules, `MomentFinder`, `gate_moments`), `LineWriter` (RAG), `diagnose`, moment actions, `CoachStore`, `RuleCoach` / `ModelCoach`, `apply_actions` |
 | `sel/simulator.py` | `SimulatorHub`: rooms, presence, WebRTC signal relay, lines, `PcmSegmenter`, live Whisper worker, filing the call |
 | `sel/events.py` | In-process pub/sub behind the Server-Sent Events stream |
-| `sel/service.py` | Calls on disk, the analysis job, review actions, caches, events, `rep_id` per call, `today()` |
+| `sel/service.py` | Calls on disk, the analysis job then the coaching stage, review and moment actions, caches, events, `rep_id` per call, the Coach queue, focus, `today()` |
 | `sel/people.py` | The team (`people.json`): reps and managers behind "Viewing as"; no login |
 | `sel/server.py` | HTTP API, static files, `/api/events`, simulator routes, TLS |
 | `sel/web/app.js` | Review app; exposes `window.Sel` helpers |
@@ -100,9 +112,13 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `tests/` | stdlib unittest; `test_e2e_browser.py` drives Chromium |
 | `scripts/perf_ui.py`, `scripts/simulate_call.py` | Reproduce the measurements below |
 
-Next to the call folders: `calls/people.json` (the team). Call folder (`calls/<id>/`): `call.json`, `audio.<ext>`, `live_transcript.json`
-(simulated calls), `transcript.json`, `analysis.json`, `review.json`,
-`report.json` (now with a `score` key).
+Next to the call folders: `calls/people.json` (the team) and
+`calls/coach/<person>.json` (focus, history, the Coach's actions log). Call
+folder (`calls/<id>/`): `call.json` (with `coaching_status`), `audio.<ext>`,
+`live_transcript.json` (simulated calls), `transcript.json`, `analysis.json`,
+`review.json`, `report.json` (with a `score` key), `coaching.json`. Example
+calls carry `coaching.json` (hand-written stand-in for the coaching models,
+with deliberate mistakes) and `coaching_gold.json`.
 
 ## Today, people and the Playbook
 
@@ -277,6 +293,94 @@ before price" → discovery, "Book a demo with a time" → next_step). Criteria
 without a signal show "In coaching". While live, criteria that can't be judged
 yet are `open` and don't count; at the end they count as missed.
 
+## Coaching (Phase 2: diagnose and focus)
+
+The loop: real call filed → **diagnose** (moments, better line, gate) →
+**focus** (one skill) → practise → prepare → perform → measure. Phase 2 built
+the first two for every scorecard criterion; price-objection handling is the
+skill the demo follows.
+
+- **When it runs.** After a call's report is ready the job marks the call
+  `done` (reviewable at once), then coaches it in the same job:
+  `coaching_status` queued → running → done | error. The Coaching tab shows
+  the stage meanwhile. A model failure falls back to rules moments and keeps
+  the error. Re-analysing keeps a person's endorsements, edits, dismissals and
+  notes (`carry_over`); a transcript correction refreshes moment quotes.
+- **Moments.** With a model: `MomentFinder` (one request, criterion enum,
+  segment ids). Without: rules from the coaching findings, contradicted or
+  uncovered claims, the scorecard grade and dated promises. `gate_moments`
+  refuses unknown segments and criteria, moves a moment cited on the
+  customer's line to the rep's reply, refuses praise for a line the pack
+  contradicts, caps two per (criterion, kind), and supplies the quotes.
+- **Better lines.** `LineWriter` gets BM25 passages for the customer line, the
+  rep line and the criterion, and returns `{line, passages}`. Code resolves ids
+  to passage text, runs `check_line`, retries once with the reasons, and keeps
+  refused attempts. At most 4 lines per call, most heavily weighted criteria
+  first. The model judge (`verify-lines`) can only refuse more. No model: no
+  line; the tab shows the criterion's own description.
+- **Focus.** `run_coach` (its own queue, never waits behind an analysis) builds
+  the rep's skills from their last 10 coached calls, ranked by calls fell short
+  on, then `SIGNAL_PRIORITY` (objections, discovery, next step, talk ratio,
+  claims), then moments, then weight. `ModelCoach` uses the chat client; any
+  error falls back to `RuleCoach`. Phase 2 whitelist: `set_focus` only, and only
+  when no focus is active. A person can set or clear a focus (`PUT
+  /api/coach/<person>/focus`); the Coach never replaces an active one.
+- **API.** `GET /api/calls/<id>/coaching`, `POST
+  /api/calls/<id>/moments/<m>/{endorse|dismiss|edit|note}` (`by` = viewer),
+  `GET /api/coach/<person>`, `PUT /api/coach/<person>/focus`; `/api/today`
+  has `focus` (with the latest moment and line) and each rep's focus for a
+  manager. Events on `calls`: `coaching` {id}, `coach` {person_id, focus}.
+
+### Coaching: measured
+
+`python -m sel eval <example> --pack <pack> --coaching fixture|rules|llm`
+scores moments against `coaching_gold.json` (same kind and criterion,
+overlapping segments), counts lines accepted and refused, and counts accepted
+lines that match a `forbidden_lines` pattern (e.g. "10 years" without "Care
+Plan").
+
+| solar-01 | Weak moments found | Strong found | Lines accepted / refused | Forbidden claims accepted | Time |
+|---|---|---|---|---|---|
+| Fixture (hand-written) | 5/5, 0 extra | 2/2 | 5 / 1 (the 10-year line) | 0 | – |
+| Rules (no model) | 5/5, 0 extra | 2/2 | no lines | 0 | < 0.1 s |
+| qwen2.5:7b, first prompt (Ollama busy with a second job) | 4/5, 0 extra | 0/2 | 2 / 4 | 0 | 9 min 25 s |
+| qwen2.5:7b, current prompt, Ollama idle | 4/5 (missed NEA timing), 0 extra | 0/2 | 4 / 0 | 0 | 3 min 12 s (moments 51 s, 4 lines 140 s) |
+
+pos-01: fixture and rules both 2/2 weak, 2/2 strong; the fixture's wrong
+"connects to your accounting software" line is refused. Machine: Intel
+i7-1255U (10 cores), 16 GB, CPU only, Ollama, Windows. Gold annotations were
+written with the fixtures, not independently.
+
+### Coaching: findings
+
+- **qwen2.5:7b loops citations into the line** ("… please? [s02] [P2] [P4]
+  [s03] …" until max tokens). The gate refused all of it, but with dozens of
+  "says 3" reasons. Now: the prompt says no ids in the line, `max_tokens` is
+  160, a line with ids is refused with one reason, reasons are deduplicated and
+  capped at 4, and an `LLMError` on one line is a refused attempt, not a failed
+  call.
+- **Cue words miss claims.** "It connects directly to your accounting
+  software" has no claim word, so it passed. A clause now also counts as a fact
+  when BM25 matches a pack passage (score at least 2) with two shared content
+  words.
+- **Questions are not claims, mostly.** "Before I quote a price: how big is
+  your bill?" was refused for citing nothing. In a question only a clause with
+  a number and a claim word counts ("Did you know it has a 10-year warranty?").
+- **Conditions trail.** "330 to 390 units per month, depending on season": the
+  qualifier is its own clause, so it attaches to the number's clause when it
+  starts with depending, if, unless, only or subject to.
+- **Polarity in one direction only.** "The timing is not in our hands" for
+  "outside our control" tripped a both-ways negation check. A line is refused
+  only when the pack says "does not" and the line doesn't.
+- **The number check alone is not enough** (as with the rules analyzer): "10
+  years" is in the inverter fact. The condition check is what refuses it.
+- The Coach on qwen2.5:7b timed out (60 s chat timeout) while Ollama was busy
+  with an eval; the rules set the focus. A small chat model is needed for
+  Phase 3's AI customer anyway (target 2 to 3 s per reply).
+- Tests must wait for the job queue before deleting temp folders now that
+  coaching runs after `done` (`CallService.wait_idle`); Windows refuses to
+  delete a file another thread is writing.
+
 ## Performance
 
 ### Measurements
@@ -397,6 +501,15 @@ Browser (`sel/web/app.js`):
 - `due_phrase_in` stopped at "a.m." for the same reason.
 
 ## Open issues and follow-ups
+
+- Coaching with qwen2.5:7b found no strong moments on solar-01 and missed the
+  NEA-timing moment; the line for the inverter moment was a safe "I'll
+  confirm", not a corrected fact. Try a criterion-at-a-time prompt.
+- The chat model for the Coach and AI customer is not chosen (a decision for
+  the owners: the demo laptop). `SEL_CHAT_LLM_*` inherits the 7B model today.
+- One browser run saw a 409 in the simulator test under heavy CPU load
+  (another model job running); it passed on reruns. Likely a PCM chunk posted
+  after hang-up.
 
 - Nepali speech recognition, live and offline (see the table above). Try
   Whisper `initial_prompt` with pack vocabulary and Nepali time words, and

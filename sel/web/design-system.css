@@ -110,8 +110,9 @@
 .ds-disclosure { margin-top: var(--space-6); border-top: 1px solid var(--border); padding-top: var(--space-4); }
 .ds-disclosure summary { cursor: pointer; font-weight: 500; }
 .ds-disclosure p { margin-top: var(--space-3); color: var(--muted); font-size: var(--text-small); }
-.ds-today-example { display: grid; gap: var(--space-4); margin-top: var(--space-6); }
-.ds-today-example .ds-pattern-header { margin-bottom: 0; }
+.ds-today-example, .ds-coaching-example { display: grid; gap: var(--space-4); margin-top: var(--space-6); }
+.ds-coaching-example .moment { max-width: 560px; }
+.ds-today-example .ds-pattern-header, .ds-coaching-example .ds-pattern-header { margin-bottom: 0; }
 .ds-pattern-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-6); }
 .ds-pattern-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); margin-bottom: var(--space-6); }
 .ds-pattern-panel .tabs { max-width: 460px; margin-bottom: var(--space-6); }

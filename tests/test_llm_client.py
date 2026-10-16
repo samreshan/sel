@@ -5,7 +5,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
-from sel.llm import GROQ_BASE_URL, LLMError, ChatCompletionsClient, client_from_env
+from sel.llm import GROQ_BASE_URL, LLMError, ChatCompletionsClient, chat_client_from_env, client_from_env
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"],
           "additionalProperties": False}
@@ -121,7 +121,8 @@ class ChatCompletionsClientTests(unittest.TestCase):
 
 class ProviderFromEnvTests(unittest.TestCase):
     def env(self, **values):
-        clean = {k: v for k, v in os.environ.items() if not k.startswith("SEL_LLM_") and k != "GROQ_API_KEY"}
+        clean = {k: v for k, v in os.environ.items()
+                 if not k.startswith(("SEL_LLM_", "SEL_CHAT_LLM_")) and k != "GROQ_API_KEY"}
         patcher = mock.patch.dict(os.environ, {**clean, **values}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -177,6 +178,24 @@ class ProviderFromEnvTests(unittest.TestCase):
         self.env(SEL_LLM_PROVIDER="nope")
         with self.assertRaisesRegex(LLMError, "groq"):
             client_from_env()
+
+    def test_chat_client_inherits_the_analysis_settings(self):
+        self.env(SEL_LLM_BASE_URL="http://10.0.0.5:8000/v1", SEL_LLM_MODEL="qwen2.5:7b")
+        chat = chat_client_from_env()
+        self.assertEqual((chat.base_url, chat.model), ("http://10.0.0.5:8000/v1", "qwen2.5:7b"))
+        self.assertTrue(chat.name.startswith("local-chat:"))
+        self.env(SEL_LLM_MODEL="qwen2.5:7b", SEL_CHAT_LLM_MODEL="qwen2.5:1.5b")
+        self.assertEqual(chat_client_from_env().model, "qwen2.5:1.5b")
+
+    def test_chat_client_on_another_provider_does_not_inherit_the_model(self):
+        self.env(SEL_LLM_MODEL="qwen2.5:7b", SEL_CHAT_LLM_PROVIDER="groq", GROQ_API_KEY="k")
+        chat = chat_client_from_env()
+        self.assertEqual((chat.base_url, chat.model), (GROQ_BASE_URL, "openai/gpt-oss-20b"))
+
+    def test_chat_client_refuses_proprietary_hosts(self):
+        self.env(SEL_CHAT_LLM_BASE_URL="https://api.openai.com/v1")
+        with self.assertRaisesRegex(LLMError, "open-weight models only"):
+            chat_client_from_env()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,11 @@ Sel uses open-weight models only. Two providers, chosen with
 Proprietary model services (OpenAI, Anthropic, Google, Azure OpenAI, Cohere)
 are refused by host name: see ``PROPRIETARY_HOSTS``.
 
+Two clients are configured separately: ``SEL_LLM_*`` for call analysis and
+coaching (accurate, runs in the background) and ``SEL_CHAT_LLM_*`` for work at
+conversation speed (the AI customer and the Coach), which inherits anything
+unset from ``SEL_LLM_*``.
+
 Servers that refuse a strict ``json_schema`` response format (some
 OpenAI-compatible servers, and Groq for most models) get JSON mode with the
 schema in the prompt instead; the reply is parsed the same way.
@@ -223,29 +228,61 @@ def _checked(base_url: str) -> str:
     return base_url
 
 
-def client_from_env() -> LLMClient:
-    provider = os.environ.get("SEL_LLM_PROVIDER", "local").lower()
+def _settings(prefix: str, inherit: str | None) -> dict[str, str | None]:
+    """``<prefix>_PROVIDER`` and friends; unset ones come from ``<inherit>_*`` while the provider is the same."""
+    get = os.environ.get
+    provider = (get(f"{prefix}_PROVIDER") or (get(f"{inherit}_PROVIDER") if inherit else None) or "local").lower()
+    same = inherit is not None and provider == (get(f"{inherit}_PROVIDER") or "local").lower()
+    out: dict[str, str | None] = {"provider": provider}
+    for key in ("BASE_URL", "MODEL", "API_KEY", "EFFORT"):
+        value = get(f"{prefix}_{key}")
+        if value is None and same:
+            value = get(f"{inherit}_{key}")
+        out[key.lower()] = value
+    return out
+
+
+def client_from_env(prefix: str = "SEL_LLM", inherit: str | None = None, timeout: float | None = None,
+                    temperature: float = 0.0, label_suffix: str = "") -> LLMClient:
+    """The client configured by ``<prefix>_*`` variables (``SEL_LLM_*`` for call analysis)."""
+    s = _settings(prefix, inherit)
+    provider = s["provider"]
     if provider == "groq":
-        key = os.environ.get("SEL_LLM_API_KEY") or os.environ.get("GROQ_API_KEY")
+        key = s["api_key"] or os.environ.get("GROQ_API_KEY")
         if not key:
-            raise LLMError("SEL_LLM_PROVIDER=groq needs GROQ_API_KEY (or SEL_LLM_API_KEY)")
-        model = os.environ.get("SEL_LLM_MODEL", DEFAULT_GROQ_MODEL)
-        effort = os.environ.get("SEL_LLM_EFFORT") or None
+            raise LLMError(f"{prefix}_PROVIDER=groq needs GROQ_API_KEY (or {prefix}_API_KEY)")
+        model = s["model"] or DEFAULT_GROQ_MODEL
+        effort = s["effort"] or None
         if effort is None and model.startswith("openai/gpt-oss"):
             effort = "low"  # its reasoning tokens share max_tokens; low leaves room for the JSON
         return ChatCompletionsClient(
-            base_url=_checked(os.environ.get("SEL_LLM_BASE_URL", GROQ_BASE_URL)),
+            base_url=_checked(s["base_url"] or GROQ_BASE_URL),
             model=model,
             api_key=key,
-            timeout=120.0,
+            timeout=timeout or 120.0,
+            temperature=temperature,
             reasoning_effort=effort,
-            label="groq",
+            label="groq" + label_suffix,
         )
     if provider not in ("local", "openai"):
-        raise LLMError(f"unknown SEL_LLM_PROVIDER {provider!r}; use 'local' or 'groq'")
+        raise LLMError(f"unknown {prefix}_PROVIDER {provider!r}; use 'local' or 'groq'")
     return ChatCompletionsClient(
-        base_url=_checked(os.environ.get("SEL_LLM_BASE_URL", DEFAULT_BASE_URL)),
-        model=os.environ.get("SEL_LLM_MODEL", DEFAULT_LOCAL_MODEL),
-        api_key=os.environ.get("SEL_LLM_API_KEY") or None,
-        reasoning_effort=os.environ.get("SEL_LLM_EFFORT") or None,
+        base_url=_checked(s["base_url"] or DEFAULT_BASE_URL),
+        model=s["model"] or DEFAULT_LOCAL_MODEL,
+        api_key=s["api_key"] or None,
+        timeout=timeout or 900.0,
+        temperature=temperature,
+        reasoning_effort=s["effort"] or None,
+        label="local" + label_suffix,
     )
+
+
+def chat_client_from_env(temperature: float = 0.0) -> LLMClient:
+    """The fast client for conversation-speed work: the AI customer in drills and the Coach.
+
+    Configured with ``SEL_CHAT_LLM_*``; anything unset is taken from ``SEL_LLM_*``
+    (same server and model) as long as the provider is the same. Point it at a
+    small open-weight model to keep replies within a few seconds.
+    """
+    return client_from_env("SEL_CHAT_LLM", inherit="SEL_LLM", timeout=60.0, temperature=temperature,
+                           label_suffix="-chat")

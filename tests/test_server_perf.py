@@ -41,6 +41,7 @@ class ServerPerfTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.service.wait_idle()
         cls.service.bus.close()
         cls.httpd.shutdown()
         cls.tmp.cleanup()

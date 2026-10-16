@@ -22,7 +22,7 @@
   const CACHE_MAX = 24;
   const TAB = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const SCRIPT = document.currentScript;
-  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "people", "rooms", "room", "line", "live", "signal"];
+  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "people", "rooms", "room", "line", "live", "signal"];
   const COACH_PAGES = new Set(["today", "playbook", "people"]);
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
@@ -102,6 +102,9 @@
     notice: null, // {kind, text} above the transcript
     draftEdits: {}, // unsaved draft form values, by draft id
     draftMsg: {}, // {kind, text} under a draft, by draft id
+    momentForm: null, // {id, kind: "edit" | "note"}: the moment whose line or note is being written
+    momentMsg: {}, // {kind, text} under a moment, by moment id
+    momentBusy: new Set(), // moment ids with a request in flight
     openDocs: new Set(), // "pack|source" keys with the document panel open
     docs: new Map(), // "pack|source" -> {text} or {error}
     audio: null,
@@ -454,6 +457,9 @@
     state.notice = null;
     state.draftEdits = {};
     state.draftMsg = {};
+    state.momentForm = null;
+    state.momentMsg = {};
+    state.momentBusy = new Set();
     state.openDocs = new Set();
     state.audio = null;
     state.segRows = new Map();
@@ -682,6 +688,11 @@
     renderList();
   });
   on("call-changed", (data) => {
+    if (state.view === "call" && state.callId === data.id) loadCall(data.id, true).catch(() => {});
+    else state.cache.delete(data.id);
+  });
+  // Coaching finished, or someone acted on a moment in another tab.
+  on("coaching", (data) => {
     if (state.view === "call" && state.callId === data.id) loadCall(data.id, true).catch(() => {});
     else state.cache.delete(data.id);
   });
@@ -1285,8 +1296,10 @@
     else if (approved) draftPill = ["ok", `${approved} approved`];
     else draftPill = ["neutral", "No drafts"];
 
+    const coached = coachingOf();
+    const weak = coached ? coached.moments.filter((m) => m.kind === "weak" && m.state !== "dismissed").length : 0;
     const spec = [
-      ["coaching", "What happened?", `${plural(count("question"), "question", "questions")}, ${plural(count("objection"), "objection", "objections")}`, ["violet", plural(count("coaching"), "coaching point", "coaching points")]],
+      ["coaching", "What happened?", `${plural(count("question"), "question", "questions")}, ${plural(count("objection"), "objection", "objections")}`, ["violet", coached ? plural(weak, "moment to improve", "moments to improve") : plural(count("coaching"), "coaching point", "coaching points")]],
       ["claims", "What did we claim?", claimLine, claimPill],
       ["followups", "What did we promise?", plural(r.commitments.length, "promise", "promises"), draftPill],
     ];
@@ -1825,8 +1838,9 @@
 
   function renderTabs(tabs) {
     const r = state.call.report;
+    const coached = coachingOf();
     const counts = {
-      coaching: r.findings.length,
+      coaching: coached ? coached.moments.length + r.findings.filter((f) => f.kind !== "coaching").length : r.findings.length,
       claims: r.claims.length,
       followups: r.commitments.length,
       refused: r.rejected.length,
@@ -1949,12 +1963,57 @@
 
   // ---------- coaching ----------
 
+  // coaching.json for the call on screen: moments, better lines, refused lines (sel/coach.py).
+  function coachingOf() {
+    const c = state.call && state.call.coaching;
+    return c && Array.isArray(c.moments) ? c : null;
+  }
+
+  function coachingStatus() {
+    const call = state.call;
+    const st = call.coaching_status;
+    if (st === "queued" || st === "running") {
+      return el(
+        "section",
+        { class: "card is-loading", "aria-busy": "true", role: "status" },
+        el("p", { class: "strong", text: "Sel is coaching this call" }),
+        el("p", { class: "muted small", text: `${stageText(call.coaching_stage || "finding moments")}. The review below is ready; moments and better lines appear here when they are done.` })
+      );
+    }
+    const c = coachingOf();
+    if (c && c.error) {
+      return el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: "The coaching model did not finish." }), el("p", { class: "muted small", text: c.error }));
+    }
+    return null;
+  }
+
   function coachingView(report) {
     const wrap = el("div", { class: "stack" });
     const card = scorecardView(report.score, state.call.live_score);
     if (card) wrap.append(card);
-    if (!report.findings.length) wrap.append(muted("Sel found no questions, objections or coaching points in this call."));
-    for (const kind of ["coaching", "objection", "question"]) {
+    const status = coachingStatus();
+    if (status) wrap.append(status);
+    const coached = coachingOf();
+    if (coached) {
+      const weak = sortDismissedLast(coached.moments.filter((m) => m.kind === "weak"), (m) => m.id);
+      const strong = sortDismissedLast(coached.moments.filter((m) => m.kind === "strong"), (m) => m.id);
+      if (!coached.moments.length) wrap.append(muted("Sel found no coaching moments in this call."));
+      if (weak.length) {
+        wrap.append(
+          el(
+            "section",
+            { class: "group" },
+            el("div", {}, el("h3", { class: "group-title", text: "Where to improve" }), el("p", { class: "card-sub", text: linesExplainer(coached) })),
+            ...weak.map((m) => momentCard(m, coached))
+          )
+        );
+      }
+      if (strong.length) {
+        wrap.append(el("section", { class: "group" }, el("h3", { class: "group-title", text: "What worked" }), ...strong.map((m) => momentCard(m, coached))));
+      }
+    } else if (!report.findings.length) wrap.append(muted("Sel found no questions, objections or coaching points in this call."));
+    // With moments on screen, the analysis's own coaching points are the same advice twice.
+    for (const kind of coached ? ["objection", "question"] : ["coaching", "objection", "question"]) {
       const items = sortDismissedLast(
         report.findings.filter((f) => f.kind === kind),
         (f) => f.id
@@ -1974,6 +2033,236 @@
 
   function labelled(label, value) {
     return el("p", { class: "labelled" }, el("span", { class: "label", text: `${label}: ` }), value);
+  }
+
+  function linesExplainer(coached) {
+    const by = (coached.by && coached.by.lines) || "";
+    if (!by) return "No language model wrote lines for this call, so Sel shows what good looks like from your scorecard.";
+    if (by.startsWith("fixture")) return "Example data: these better lines are hand-written stand-ins for the model, checked against your pack like model lines.";
+    return "Better lines are AI-suggested. Sel checks every product fact in them against your pack and shows the lines it refused, with the reason.";
+  }
+
+  // ---------- coaching moments ----------
+
+  const MOMENT_TAG = { weak: { cls: "warn", label: "Fell short", icon: "target" }, strong: { cls: "ok", label: "Did well", icon: "check" } };
+
+  function lineOrigin(line) {
+    const by = String(line.by || "");
+    if (by.startsWith("person")) return ["neutral", "Written by a person"];
+    if (by.startsWith("fixture")) return ["neutral", "Example line"];
+    if (by.startsWith("playbook")) return ["info", "Team answer"];
+    return ["violet", "AI-suggested"];
+  }
+
+  function lineCheck(line) {
+    if (line.check === "rejected") return ["bad", "Refused"];
+    if (!line.facts || !line.facts.length) return ["neutral", "No claims to check"];
+    return ["ok", "Checked against your pack"];
+  }
+
+  function saidBlock(m) {
+    const rep = speakerOf(m.evidence.segment_ids[0]);
+    const cust = m.customer_said ? speakerOf(m.customer_said.segment_id) : null;
+    return el(
+      "div",
+      { class: "said" },
+      m.customer_said
+        ? el("p", { class: "said-line role-customer" }, el("span", { class: "said-who", text: speakerLabel(cust) || "Customer" }), quoted(m.customer_said.quote))
+        : null,
+      el("p", { class: "said-line role-rep" }, el("span", { class: "said-who", text: speakerLabel(rep) || "Rep" }), quoted(m.evidence.quote))
+    );
+  }
+
+  function betterLine(m, coached) {
+    const line = m.better_line;
+    if (!line) {
+      const crit = packOf(state.call.pack_id) && packOf(state.call.pack_id).scorecard.find((c) => c.id === m.criterion);
+      const text = m.rejected_lines && m.rejected_lines.length
+        ? "Sel kept no line for this moment: every line it tried was refused against your pack."
+        : coached.by && coached.by.lines
+          ? "No better line was written for this moment."
+          : `What good looks like: ${crit ? crit.description : m.title}`;
+      return el("div", { class: "better-line is-empty" }, el("p", { class: "small", text }));
+    }
+    const [ocls, olabel] = lineOrigin(line);
+    const [ccls, clabel] = lineCheck(line);
+    return el(
+      "div",
+      { class: "better-line" },
+      el("div", { class: "better-line-head" }, el("span", { class: "label", text: "Better line" }), pill(ocls, olabel), pill(ccls, clabel)),
+      el("p", { class: "better-line-text", text: quoted(line.text) }),
+      line.check === "rejected" && line.reasons && line.reasons.length ? el("ul", { class: "reasons" }, ...line.reasons.map((r) => el("li", { text: `Sel refused it: it ${r}` }))) : null,
+      line.sources && line.sources.length ? el("div", { class: "sources" }, ...line.sources.map(sourceBlock)) : null
+    );
+  }
+
+  function refusedLines(m) {
+    const lines = m.rejected_lines || [];
+    if (!lines.length) return null;
+    return el(
+      "details",
+      { class: "disclosure" },
+      el("summary", { text: `Sel refused ${plural(lines.length, "line", "lines")} for this moment` }),
+      el(
+        "ul",
+        { class: "refused-lines" },
+        ...lines.map((line) =>
+          el(
+            "li",
+            {},
+            el("div", { class: "better-line-head" }, pill(...lineOrigin(line)), pill("bad", "Refused")),
+            line.text ? el("p", { class: "refused-text", text: quoted(line.text) }) : null,
+            el("ul", { class: "reasons" }, ...(line.reasons || []).map((r) => el("li", { text: `It ${r}` })))
+          )
+        )
+      )
+    );
+  }
+
+  function momentForm(m) {
+    const f = state.momentForm;
+    if (!f || f.id !== m.id) return null;
+    const isEdit = f.kind === "edit";
+    const id = `mf-${m.id}`;
+    const ta = el("textarea", {
+      id,
+      class: "input",
+      rows: isEdit ? "3" : "2",
+      maxlength: isEdit ? "400" : "500",
+      value: isEdit ? (m.better_line ? m.better_line.text : "") : m.note || "",
+    });
+    const save = el("button", { type: "submit", class: "primary small", text: isEdit ? "Check and save" : "Save note" });
+    const cancel = el("button", { type: "button", class: "small", text: "Cancel", on: { click: () => closeMomentForm() } });
+    const form = el(
+      "form",
+      { class: "moment-form", novalidate: true },
+      el("label", { for: id, text: isEdit ? "Your better line" : "Note for this moment" }),
+      ta,
+      isEdit ? el("p", { class: "hint small", text: "Sel checks any product fact in your line against the pack before keeping it." }) : null,
+      el("div", { class: "row" }, save, cancel)
+    );
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const value = ta.value.trim();
+      if (isEdit && !value) {
+        state.momentMsg[m.id] = { kind: "error", text: "Write a line first." };
+        renderPanel();
+        return;
+      }
+      momentAction(m.id, f.kind, isEdit ? { text: value } : { note: value });
+    });
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMomentForm();
+      }
+    });
+    return form;
+  }
+
+  function closeMomentForm() {
+    const { id, kind } = state.momentForm || {};
+    state.momentForm = null;
+    renderPanel();
+    const btn = id && state.refs.panel.querySelector(`[data-item="${id}"] [data-action="${kind}"]`);
+    if (btn) btn.focus();
+  }
+
+  function openMomentForm(id, kind) {
+    state.momentForm = { id, kind };
+    delete state.momentMsg[id];
+    renderPanel();
+    const ta = state.refs.panel.querySelector(`#mf-${id}`);
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  }
+
+  function momentCard(m, coached) {
+    const dismissed = m.state === "dismissed";
+    const tag = MOMENT_TAG[m.kind] || MOMENT_TAG.weak;
+    const segIds = m.evidence.segment_ids || [];
+    const busy = state.momentBusy.has(m.id);
+    const msg = state.momentMsg[m.id];
+    const line = m.better_line;
+    const endorsed = m.state === "endorsed";
+    const actions = [evidenceButton(segIds, m.id)];
+    if (m.kind === "weak" && !dismissed) {
+      if (line && line.check === "ok") {
+        actions.push(
+          el("button", {
+            type: "button",
+            class: "small",
+            text: endorsed ? "Endorsed" : "Endorse line",
+            dataset: { action: "endorse" },
+            "aria-pressed": endorsed ? "true" : "false",
+            disabled: busy,
+            on: { click: () => momentAction(m.id, "endorse", { on: !endorsed }) },
+          })
+        );
+      }
+      actions.push(el("button", { type: "button", class: "small moment-edit", text: line ? "Edit line" : "Write a line", dataset: { action: "edit" }, disabled: busy, on: { click: () => openMomentForm(m.id, "edit") } }));
+    }
+    if (!dismissed) actions.push(el("button", { type: "button", class: "small ghost", text: m.note ? "Edit note" : "Add note", dataset: { action: "note" }, disabled: busy, on: { click: () => openMomentForm(m.id, "note") } }));
+    actions.push(
+      el("button", {
+        type: "button",
+        class: "small ghost push",
+        text: dismissed ? "Restore" : "Dismiss",
+        "aria-pressed": dismissed ? "true" : "false",
+        dataset: { action: "dismiss" },
+        disabled: busy,
+        on: { click: () => momentAction(m.id, "dismiss", { on: !dismissed }) },
+      })
+    );
+    const stateTag = dismissed ? ["neutral", "Dismissed"] : endorsed ? ["ok", "Endorsed"] : m.state === "edited" ? ["info", "Edited"] : null;
+    return el(
+      "article",
+      { class: `card moment${dismissed ? " is-dismissed" : ""}`, dataset: { item: m.id, segs: segIds.join(" ") }, tabindex: "-1", "aria-busy": busy ? "true" : null },
+      el("div", { class: "card-tags" }, cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label), stateTag && !dismissed ? pill(...stateTag) : null),
+      cardHead(dismissed ? "neutral" : tag.cls, tag.icon, m.title, saidBy(segIds)),
+      saidBlock(m),
+      m.why ? labelled(m.kind === "weak" ? "What fell short" : "What worked", m.why) : null,
+      m.kind === "weak" && !dismissed ? betterLine(m, coached) : null,
+      m.kind === "weak" && !dismissed ? refusedLines(m) : null,
+      m.note && !(state.momentForm && state.momentForm.id === m.id && state.momentForm.kind === "note") ? labelled("Note", m.note) : null,
+      momentForm(m),
+      msg ? el("p", { class: `form-status is-${msg.kind}`, role: "status", text: msg.text }) : null,
+      el("div", { class: "card-actions" }, ...actions)
+    );
+  }
+
+  async function momentAction(momentId, action, body) {
+    const callId = state.callId;
+    const me = viewer();
+    state.momentBusy.add(momentId);
+    renderPanel();
+    try {
+      const updated = await api(`/api/calls/${enc(callId)}/moments/${enc(momentId)}/${action}`, { method: "POST", json: { ...body, by: me ? me.id : null } });
+      if (state.callId !== callId || !coachingOf()) return;
+      const list = state.call.coaching.moments;
+      const i = list.findIndex((x) => x.id === momentId);
+      if (i >= 0) list[i] = updated;
+      if (action === "edit") {
+        state.momentMsg[momentId] = updated.better_line && updated.better_line.check === "ok"
+          ? { kind: "ok", text: "Saved. Your line passed the check against the pack." }
+          : { kind: "error", text: "Saved, but Sel refused your line against the pack. The reasons are above." };
+      } else delete state.momentMsg[momentId];
+      if (action === "edit" || action === "note") state.momentForm = null;
+    } catch (e) {
+      if (state.callId !== callId) return;
+      state.momentMsg[momentId] = { kind: "error", text: e.message };
+    } finally {
+      state.momentBusy.delete(momentId);
+    }
+    if (state.callId === callId && state.refs) {
+      renderPanel();
+      renderSummary(state.refs.tiles);
+      // The panel was redrawn: give focus back to the control that was used.
+      const btn = state.refs.panel.querySelector(`[data-item="${momentId}"] [data-action="${action}"]`);
+      if (btn && (!document.activeElement || document.activeElement === document.body)) btn.focus();
+    }
   }
 
   function findingCard(f) {

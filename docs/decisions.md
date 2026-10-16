@@ -28,6 +28,12 @@
 | Live transcription uses Whisper `base` by default | Median 2.2 s from end of speech to line on 4 CPU cores, against 6.1 s for `small`, same accuracy on the English test call |
 | Server-Sent Events, not WebSockets, for pushes and WebRTC signalling | Works with the standard-library server; one stream per tab stays within browsers' six connections per origin |
 | Static files are content-hashed and cached; API reads carry ETags | A reload transfers about 1 kB instead of 450 kB |
+| Coaching is the product: moments, better lines and a weekly focus per rep, built on the reviewed call | Review answers "what happened"; coaching answers "what next", and needs the models (README, "How the AI works") |
+| Suggested lines go through a code gate (`check_line`): cite the pack, same numbers, same subject, no flipped "does not", conditions kept; refused lines are shown with reasons | The model writes words now, so the "no false supported" rule extends to what Sel tells a rep to say |
+| A call is marked done before it is coached | A model coaching pass takes minutes on CPU; the review should not wait for it |
+| The Coach only proposes; code validates against a whitelist and state; one active focus; it never replaces an active focus (a manager's included) | Agents act through code, so a wrong model answer cannot change a rep's plan |
+| Focus ranking without a model: calls fell short on, then objections, discovery, next step, talk ratio, claims | Practice drills train conversation skills; wrong claims are fixed by the playbook and escalated |
+| Two clients: `SEL_LLM_*` for analysis and coaching, `SEL_CHAT_LLM_*` for the Coach and AI customer | Conversation needs a fast model; analysis can be slower and more accurate |
 
 ## Open
 
@@ -44,3 +50,5 @@
 11. **Simulator across the internet.** No STUN/TURN server is configured by default, so calls work on one machine or one network. Run one, or document a provider?
 12. **Login.** Serving to the network (`--host 0.0.0.0`) has no authentication. Needed before the simulator is used beyond a trusted office.
 13. **Live Nepali transcription.** Whisper `base` garbles romanized Nepali; try `initial_prompt` with pack vocabulary and time words, or a Nepali model.
+14. **Chat model and demo laptop.** The AI customer needs replies in 2 to 3 s. On an i7-1255U (CPU) qwen2.5:7b took 35 to 70 s per coaching request. Which small open-weight model (for example qwen2.5:1.5b, Apache-2.0) and which laptop?
+15. **Who confirms a focus.** Today the Coach sets it and a person can change it; should a manager confirm each one?

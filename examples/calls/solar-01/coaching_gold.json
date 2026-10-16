@@ -1,0 +1,20 @@
+{
+  "_note": "Reference coaching annotation of solar-01, written together with this fictional test call (not an independent human annotation). A predicted moment matches a gold moment with the same kind and criterion whose segments overlap. forbidden_lines are claims no accepted better line may make; `unless` names the condition that makes it right. Used by `python -m sel eval --coaching`.",
+  "moments": [
+    {"kind": "weak", "criterion": "discovery", "segment_ids": ["s03"]},
+    {"kind": "weak", "criterion": "objection-handling", "segment_ids": ["s05"]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment_ids": ["s05"]},
+    {"kind": "weak", "criterion": "accurate-claims", "segment_ids": ["s09"]},
+    {"kind": "weak", "criterion": "clear-next-step", "segment_ids": ["s13"]},
+    {"kind": "strong", "criterion": "clear-next-step", "segment_ids": ["s11"]},
+    {"kind": "strong", "criterion": "accurate-claims", "segment_ids": ["s03", "s07"]}
+  ],
+  "forbidden_lines": [
+    {"pattern": "(?i)\\b10\\s*-?\\s*(?:years?|yrs?|barsa|barsha)\\b", "unless": "(?i)care\\s*plan",
+     "why": "The inverter warranty is 10 years only with the paid Care Plan."},
+    {"pattern": "(?i)\\b(?:duita|dui|2|two)\\s+(?:hapta|weeks?)\\b",
+     "why": "NEA approval timing is outside the installer's control."},
+    {"pattern": "(?i)\\bEMI\\b.*\\b(?:dinchau|direct(?:ly)?)\\b", "unless": "(?i)partner|bank",
+     "why": "EMI comes from partner banks; the installer does not offer it directly."}
+  ]
+}

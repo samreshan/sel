@@ -33,6 +33,7 @@ class ServerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.service.wait_idle()
         cls.httpd.shutdown()
         cls.tmp.cleanup()
 

@@ -81,6 +81,7 @@ class BrowserE2E(unittest.TestCase):
     def tearDownClass(cls):
         cls.browser.close()
         cls.pw.stop()
+        cls.service.wait_idle()
         cls.service.bus.close()
         cls.httpd.shutdown()
         cls.tmp.cleanup()
@@ -91,6 +92,7 @@ class BrowserE2E(unittest.TestCase):
         page.errors = []
         page.on("pageerror", lambda e: page.errors.append(str(e)))
         page.on("console", lambda m: m.type == "error" and page.errors.append(m.text))
+        page.on("response", lambda r: r.status >= 400 and page.errors.append(f"{r.status} {r.request.method} {r.url}"))
         self.addCleanup(ctx.close)
         return page
 
@@ -138,6 +140,47 @@ class BrowserE2E(unittest.TestCase):
         page.locator(".doc-row button").first.click()
         page.wait_for_selector(".doc-row .doc-text")
         self.assertEqual(page.errors, [])
+
+    def test_coaching_moments_lines_and_focus(self):
+        page = self.page()
+        page.goto(f"{self.base}/#call/example-solar-01")
+        page.wait_for_selector(".moment")
+        card = page.locator(".moment", has_text="Only approved product claims").first
+        # The accepted line keeps the Care Plan condition; the 10-year line is listed as refused, with the reason.
+        self.assertIn("Care Plan", card.locator(".better-line-text").inner_text())
+        card.locator("summary").click()
+        refused = card.locator(".refused-lines li").first
+        self.assertIn("10-year", refused.inner_text())
+        self.assertIn("Care Plan", refused.locator(".reasons").inner_text())
+        # A person's line goes through the same check.
+        card.locator("[data-action=edit]").click()
+        page.fill(".moment-form textarea", "The inverter has a 10-year warranty.")
+        page.keyboard.press("Tab")
+        card.locator(".moment-form button[type=submit]").click()
+        page.wait_for_selector(".moment .form-status.is-error")
+        self.assertIn("Refused", card.locator(".better-line .better-line-head").inner_text())
+        # Keyboard: J moves between cards, including moments.
+        page.locator("body").click(position={"x": 5, "y": 5})
+        page.keyboard.press("j")
+        page.wait_for_selector(".panel .card.is-focused")
+
+        # Assigning the call to a rep gives them a focus; Today shows it.
+        person = json.loads(self.post("/api/people", {"name": "Focus E2E", "role": "rep"}))
+        page.evaluate(f"localStorage.setItem('sel.viewer', JSON.stringify('{person['id']}'))")
+        page.goto(f"{self.base}/#call/example-pos-01")
+        page.reload()
+        page.select_option("#call-rep", person["id"])
+        page.wait_for_selector(".rep-picker :text('Saved.')")
+        page.goto(f"{self.base}/#today")
+        page.wait_for_selector(".focus-card .focus-title", timeout=15000)
+        self.assertEqual(page.errors, [])
+
+    def post(self, path, body):
+        import urllib.request
+        r = urllib.request.Request(f"{self.base}{path}", data=json.dumps(body).encode(), method="POST",
+                                   headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            return resp.read()
 
     def get(self, path):
         import urllib.request

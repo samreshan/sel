@@ -104,6 +104,49 @@ def score(report: CallReport, gold: dict[str, Any], reference: dict[str, Any] | 
     return out
 
 
+def score_coaching(coaching: dict[str, Any], gold: dict[str, Any]) -> dict[str, Any]:
+    """Score a coaching.json against a ``coaching_gold.json``.
+
+    A moment matches a gold moment of the same kind and criterion whose segments
+    overlap (one-to-one). ``forbidden_lines`` are claims no accepted better line may
+    make (a regex, and optionally an ``unless`` regex for the condition that makes
+    it right); ``accepted_forbidden`` counts accepted lines that make one anyway.
+    """
+    import re
+
+    out: dict[str, Any] = {"by": coaching.get("by", {})}
+    moments = coaching.get("moments", [])
+    for kind in ("weak", "strong"):
+        pred = [{"criterion": m["criterion"], "evidence": m["evidence"]} for m in moments if m["kind"] == kind]
+        g = [{"criterion": m["criterion"], "evidence": {"segment_ids": m["segment_ids"]}}
+             for m in gold.get("moments", []) if m["kind"] == kind]
+        pairs = _match(pred, g, lambda a, b: a["criterion"] == b["criterion"],
+                       lambda p, q: float(len(set(p) & set(q))))
+        out[f"moments.{kind}"] = _prf(len(pairs), len(pred), len(g))
+    accepted = [m["better_line"] for m in moments if m.get("better_line")]
+    rejected = [line for m in moments for line in m.get("rejected_lines", [])]
+    forbidden = 0
+    for line in accepted:
+        for rule in gold.get("forbidden_lines", []):
+            if re.search(rule["pattern"], line["text"]) and not (rule.get("unless") and re.search(rule["unless"], line["text"])):
+                forbidden += 1
+                break
+    weak = [m for m in moments if m["kind"] == "weak"]
+    out["lines"] = {
+        "weak_moments": len(weak),
+        "with_line": sum(1 for m in weak if m.get("better_line")),
+        "accepted": len(accepted),
+        "rejected": len(rejected),
+        "accepted_forbidden": forbidden,
+        "rejected_by_rule": sum(1 for line in rejected for rule in gold.get("forbidden_lines", [])
+                                if re.search(rule["pattern"], line["text"])
+                                and not (rule.get("unless") and re.search(rule["unless"], line["text"]))),
+    }
+    out["moments_refused_by_gate"] = len(coaching.get("rejected", []))
+    out["timings"] = (coaching.get("meta") or {}).get("timings", {})
+    return out
+
+
 def _role(report: CallReport, speaker_id: str) -> str:
     sp = report.transcript.speaker(speaker_id)
     return sp.role if sp else speaker_id

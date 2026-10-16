@@ -40,6 +40,7 @@ from .persona import anonymise
 
 
 STATUSES = ("proposed", "approved", "rejected")
+_PLACEHOLDERS = re.compile(r"\b(?:a different price|a phone number|an email address|a number)\b")
 MIN_SHARED = 1  # content words an answer must share with a customer line to count as an answer to it
 
 
@@ -88,10 +89,18 @@ def match(answers: list[dict[str, Any]], text: str, k: int = 3) -> list[dict[str
     return [a for _, _, a in sorted(scored)[:k]]
 
 
+def _same(criterion: str, text: str) -> tuple[str, str]:
+    return criterion, " ".join(re.findall(r"\w+", text.casefold()))
+
+
 def candidates(coachings: list[tuple[dict[str, Any], dict[str, Any]]], names: list[str],
-               known: set[tuple[str, str]]) -> list[dict[str, Any]]:
-    """Strong moments with a customer line, and endorsed better lines, not proposed before."""
+               known: set[tuple[str, str]], answers: list[dict[str, Any]] = ()) -> list[dict[str, Any]]:
+    """Strong moments with a customer line, and endorsed better lines, not proposed before.
+
+    The same words for the same criterion are proposed once (``answers``: those already on file).
+    """
     out = []
+    said = {_same(a["criterion"], a["answer"]) for a in answers}
     for call, coaching in coachings:
         for m in coaching.get("moments", []):
             key = (call["id"], m["id"])
@@ -99,10 +108,15 @@ def candidates(coachings: list[tuple[dict[str, Any], dict[str, Any]]], names: li
                 continue
             if m["kind"] == "strong":
                 answer, by = m["evidence"]["quote"], "rep"
+                if _PLACEHOLDERS.search(anonymise(answer, names)) and not _PLACEHOLDERS.search(answer):
+                    continue  # it quotes a deal's price or a phone number: not words a whole team can reuse
             elif m.get("state") in ("endorsed", "edited") and (m.get("better_line") or {}).get("check") == "ok":
                 answer, by = m["better_line"]["text"], "endorsed line"
             else:
                 continue
+            if _same(m["criterion"], answer) in said:
+                continue
+            said.add(_same(m["criterion"], answer))
             out.append({"call_id": call["id"], "moment_id": m["id"], "criterion": m["criterion"],
                         "pack_id": coaching.get("pack_id") or call.get("pack_id"),
                         "segment_ids": m["evidence"]["segment_ids"], "answer_from": by,

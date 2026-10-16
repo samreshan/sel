@@ -3057,7 +3057,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 
   .primary-nav {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 6px;
   }
 
@@ -3278,6 +3278,10 @@ button.scope-btn.is-on {
   font-weight: 400;
 }
 
+.rep-picker a {
+  color: var(--text-2);
+}
+
 /* Calls reuses shared interactive cards and table styling. */
 .calls-page-list {
   list-style: none;
@@ -3388,6 +3392,11 @@ button.scope-btn.is-on {
 
 .bento-anchor {
   border-radius: var(--radius-large);
+}
+
+/* A wide child (a .table-scroll) scrolls inside its card instead of widening the column. */
+.bento > * {
+  min-width: 0;
 }
 
 /* Playbook: skills stay the wide card; facts and documents support them. */
@@ -3580,6 +3589,94 @@ button.scope-btn.is-on {
 .team-table tbody tr:last-child > * {
   border-bottom: 0;
 }
+
+/* A wide table scrolls inside its own card, never the page. Focusable so keyboard users can scroll it. */
+.table-scroll {
+  position: relative; /* contains .sr-only cell text, which would otherwise widen the page */
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-radius: var(--radius-sm);
+}
+
+.table-scroll:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Reps × skills: the rep column stays put while the skills scroll past it. */
+.matrix {
+  min-width: max-content;
+}
+
+.matrix th[scope="col"] {
+  max-width: 160px;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.matrix a,
+.timeline a {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.matrix a:hover,
+.timeline a:hover {
+  text-decoration: underline;
+}
+
+.matrix td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.matrix th[scope="row"],
+.matrix thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: left;
+}
+
+.matrix td.matrix-focus {
+  text-align: left;
+  color: var(--text-2);
+}
+
+/* Each reviewed call on a skill, oldest first, along one hairline. */
+.timeline {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0 0 0 var(--space-4);
+  list-style: none;
+  border-left: 1px solid var(--border-2);
+}
+
+.timeline > li {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.timeline > li::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: calc(-1 * var(--space-4) - 4px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+}
+
+.timeline > li.is-met::before { background: var(--success); border-color: var(--success); }
+.timeline > li.is-partial::before { background: var(--warn-ink); border-color: var(--warn-ink); }
+.timeline > li.is-missed::before { background: var(--bad-ink); border-color: var(--bad-ink); }
 
 .person-form {
   display: grid;

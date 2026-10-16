@@ -266,9 +266,10 @@ def _health():
 
 def _serve(args) -> int:
     from .server import serve
-    from .service import CallService, default_chat_factory
+    from .service import CallService, default_analysis_llm, default_chat_factory
 
-    service = CallService(args.calls_dir, args.packs_dir, chat_factory=default_chat_factory)
+    service = CallService(args.calls_dir, args.packs_dir, chat_factory=default_chat_factory,
+                          analysis_llm_factory=default_analysis_llm)
     if not args.no_examples:
         root = Path(__file__).resolve().parent.parent / "examples" / "calls"
         for example, pack_id in (("solar-01", "demo-solar"), ("pos-01", "demo-pos")):

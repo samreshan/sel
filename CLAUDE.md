@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 171 tests; the 6 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 193 tests; the 8 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
@@ -76,6 +76,7 @@ python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules    # Judge vs transfer_gold.json (rules|llm)
 python scripts/drill_latency.py                            # AI customer reply times (--model, --rules)
+python scripts/screens_team.py --out shots/                # Leads, Prep, Team, Settings, Playbook screenshots (desktop, 390 px) + keyboard pass
 python scripts/perf_ui.py                                 # UI performance on a generated 2-hour call (Playwright)
 python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base   # two browsers, live Whisper
 ```
@@ -106,10 +107,15 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/files.py` | JSON reads and atomic replaces that retry Windows sharing violations |
 | `sel/web/practice.js` | Practice (`#practice`, `#practice/<id>`): drills, the AI customer room, debrief; lazy-loaded |
 | `scripts/drill_latency.py` | AI customer reply times on this machine |
+| `sel/leads.py` | `LeadStore`: `leads/<id>/lead.json` (name, phone, rep, notes, `call_ids`) |
+| `sel/prep.py` | `build_brief`: a lead's earlier reports → likely objections with the best answer, promises, gaps, focus; the model picks by id and writes a number-checked summary |
+| `sel/playbook.py` | The overlay `playbook/<pack>.json` (`PlaybookStore`), `match`, the Librarian (`candidates`, `propose`): someone's own words, gated by `check_line` |
+| `sel/web/team.js` | Leads (`#leads`, `#lead/<id>`), Prep (`#prep/<id>`), Team (`#team`, `#team/<person>`), Settings (`#settings`); lazy-loaded |
+| `scripts/screens_team.py` | Screenshots of the Phase 4 pages at desktop and 390 px, and a keyboard-only pass |
 | `sel/coach.py` | Coaching: `check_line` (gate for suggested lines), moments (rules, `MomentFinder`, `gate_moments`), `LineWriter` (RAG), `diagnose`, moment actions, `CoachStore`, `RuleCoach` / `ModelCoach`, `apply_actions` |
 | `sel/simulator.py` | `SimulatorHub`: rooms, presence, WebRTC signal relay, lines, `PcmSegmenter`, live Whisper worker, filing the call |
 | `sel/events.py` | In-process pub/sub behind the Server-Sent Events stream |
-| `sel/service.py` | Calls on disk, the analysis job then the coaching stage, review and moment actions, caches, events, `rep_id` per call, the Coach queue, focus, `today()` |
+| `sel/service.py` | Calls on disk, the analysis job then the coaching stage, review and moment actions, caches, events, `rep_id` and `lead_id` per call, the Coach queue, focus, `today()`; leads, Prep, rehearse, the team view, 1:1 briefs, escalations, the playbook overlay and the Librarian |
 | `sel/people.py` | The team (`people.json`): reps and managers behind "Viewing as"; no login |
 | `sel/server.py` | HTTP API, static files, `/api/events`, simulator routes, TLS |
 | `sel/web/app.js` | Review app; exposes `window.Sel` helpers |
@@ -119,12 +125,15 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `tests/` | stdlib unittest; `test_e2e_browser.py` drives Chromium |
 | `scripts/perf_ui.py`, `scripts/simulate_call.py` | Reproduce the measurements below |
 
-Next to the call folders: `calls/people.json` (the team) and
-`calls/coach/<person>.json` (focus, history, the Coach's actions log). Call
+Next to the call folders: `calls/people.json` (the team),
+`calls/coach/<person>.json` (focus, history, transfer checks, escalations, the
+Coach's actions log), `calls/leads/<id>/lead.json` and
+`calls/playbook/<pack>.json` (team answers: proposed, approved, rejected,
+refused; the pack itself is never written to). Call
 folder (`calls/<id>/`): `call.json` (with `coaching_status`), `audio.<ext>`,
 `live_transcript.json` (simulated calls), `transcript.json`, `analysis.json`,
 `review.json`, `report.json` (with a `score` key), `coaching.json`; `call.json` has
-`kind` (real | practice) and, for drills, `drill_id`. `calls/drills/<id>.json`
+`kind` (real | practice), `lead_id` and, for drills, `drill_id`. `calls/drills/<id>.json`
 holds drills and their attempts. Example
 calls carry `coaching.json` (hand-written stand-in for the coaching models,
 with deliberate mistakes) and `coaching_gold.json`.
@@ -505,6 +514,107 @@ one ended with the stage direction "End call.", now stripped.
   you are"; it re-renders on `people-changed`.
 - Today's skills counted practice calls; they count real calls only.
 
+## Prepare, team and the flywheel (Phase 4)
+
+The loop gains **prepare** (a brief before the next call with a lead, and a
+rehearsal) and a manager's view, and closes on itself: answers that worked on
+real calls, once a manager approves them, coach the next call.
+
+- **Leads** (`sel/leads.py`) are thin: name, phone, rep, notes and their calls.
+  A call joins a lead from the upload form or the call page (`PUT
+  /api/calls/<id>/lead` writes `call.json` `lead_id` and the lead's
+  `call_ids`; moving a call unlinks it from the old lead; deleting a call
+  unlinks it).
+- **Prep** (`GET /api/leads/<id>/prep`, `sel/prep.py`) reads the lead's
+  reviewed real calls (reports and coaching, never raw transcripts). Each
+  earlier objection gets the best answer Sel has: an approved team answer for
+  that criterion that shares words with it, else the call's better line. Sel's
+  rules answer at once; when the analysis model answers
+  (`default_analysis_llm`, health-checked once a minute) a model brief is
+  built on the agent queue (it picks objections and gaps by id and writes a
+  summary whose numbers must all be in the items), announced with a `lead`
+  event, and cached in memory against a signature of the lead's calls (their
+  ETags), the approved answer ids and the focus.
+- **Rehearse** (`POST /api/leads/<id>/rehearse`): a drill from the latest
+  weak moment on an `objections`-signal criterion, newest call first, through
+  `create_drill` (so one drill per rep and moment); 400 when there is none.
+- **Team** (`GET /api/team`, managers): reps × criteria over each rep's last
+  10 real calls (met / scored per cell), patterns (a skill at least two reps
+  fell short on; objections grouped by Sel's cue words, with up to three
+  quotes), open escalations, and the review queue (proposed answers, calls with
+  no rep). `GET /api/team/<person>`: focus, skill timelines (each real call
+  oldest first, with its status and the matching weak or strong moment),
+  transfer checks, drills and a 1:1 brief: talking points from code, plus a
+  two-sentence summary from the chat model on the agent queue that is dropped
+  if it has a number the points don't.
+- **Escalations**: `PUT /api/coach/<person>/escalations/<key>` `{status:
+  "resolved", by}`; only a manager (403 otherwise). Keys hold ":" and "+",
+  so the route percent-decodes them.
+- **The playbook overlay** (`GET /api/playbook/<pack>`, `POST
+  .../answers {action: propose|approve|reject, id, by}`). `propose` queues the
+  Librarian (202, then a `playbook` event): candidates are strong moments with
+  a customer line and better lines a person endorsed, on the team's real calls
+  of that pack; the chat model only picks candidates and labels the objection
+  (by number); the answer is always the rep's or the endorsed line's words,
+  anonymised for names, then gated by `check_line` (with BM25 passages when it
+  states a fact). Refused answers are stored as `refused` with reasons and
+  can't be approved. Approve and reject need a manager.
+- **The flywheel**: `_coach_call` passes the pack's approved answers to
+  `diagnose(answers=)` and `LineWriter(answers=)`. The writer's prompt lists
+  the approved answers for the moment's criterion, closest first. When no line
+  passed (no model, or both attempts refused), the best-matching approved
+  answer becomes the better line as `playbook:<id>`, through `check_line`
+  like any line, labelled "Team answer".
+- **Settings** (`#settings`, `GET /api/doctor`): `doctor.check(probe=True)`,
+  cached 30 s.
+- **UI**: `team.js` (lazy, like practice.js), navigation Leads · Team
+  (managers only) · Settings, lead pickers on the upload form and the call
+  page, Team answers and (managers) the review queue on the Playbook. New
+  primitives `.table-scroll`, `.matrix`, `.timeline` (DESIGN.md, design-system
+  `#patterns`).
+
+### Phase 4: measured
+
+Rules only (no model server in the cloud sandbox): 4 vCPU, Linux, the solar
+fixture filed 30 times across 3 reps, 5 of them for one lead.
+
+| | Time |
+|---|---|
+| `team()` (matrix, patterns, escalations, queue) | median 4.1 ms |
+| `team_member()` (timelines, 1:1 points) | median 1.3 ms |
+| `prep()` rules brief, 5 calls | median 1.0 ms |
+| Librarian, rules, 30 calls (62 strong moments) | 5 ms; 1 answer proposed |
+
+Screens (`scripts/screens_team.py`, Chromium 1440 and 390 px wide): Leads,
+lead, Prep, Team, a rep, Settings, Playbook and the call page, 0 px horizontal
+overflow at both widths, no page errors. Keyboard only: Today → Leads → a
+lead's Prep → Rehearse this call → the drill page, with a visible focus ring.
+Not measured: the Prep writer, the Librarian's model pass and the 1:1 summary
+on qwen2.5 (no model server here; tested with scripted models).
+
+### Phase 4: findings
+
+- **The Librarian flooded the queue.** Thirty calls with the same strong line
+  gave thirty proposals. The same words for the same criterion are now
+  proposed once, also against answers already on file (any status).
+- **Anonymising a rep's answer broke it.** "Our 3 kW system costs NPR
+  4,20,000" became "costs a different price". A rep's line that only survives
+  anonymisation by losing an amount, phone number or email is skipped: a team
+  answer must be someone's own words, not a mangled version.
+- **Proposed answers looked approved.** The Playbook's review queue showed the
+  "Team answer" pill on proposals; they now say "Proposed" until a manager
+  approves.
+- **A wide table widened the phone page** by 550 px even inside an
+  `overflow-x: auto` wrapper: the `.sr-only` "Not scored" text is absolutely
+  positioned and its containing block was outside the scroller.
+  `.table-scroll` is `position: relative`, and bento children get
+  `min-width: 0`.
+- Prep labelled the example call's hand-written line "AI-suggested"; it now
+  uses the Coaching tab's `lineOrigin` (Example line, Team answer, Written by
+  a person, AI-suggested).
+- The upload browser test had been failing since the restyle (customer name
+  moved into the "More about this call" disclosure); it opens it now.
+
 ## Performance
 
 ### Measurements
@@ -633,9 +743,18 @@ Browser (`sel/web/app.js`):
   variable, `SEL_CHAT_LLM_MODEL`): 4.4 s median per AI-customer reply, above
   the 2 to 3 s target. Try keeping the reply prompt shorter (last N lines) or
   a GPU/Apple Silicon demo laptop.
-- One browser run saw a 409 in the simulator test under heavy CPU load
-  (another model job running); it passed on reruns. Likely a PCM chunk posted
-  after hang-up.
+- The simulator browser test sees a 409 on `POST .../audio` (a PCM chunk
+  at about 0.5 s) in roughly one run in three in the cloud sandbox, also before
+  Phase 4; it passes on reruns. Likely a chunk posted before the call is live
+  or after hang-up: the client should not post outside a live call.
+- The drill browser test timed out once in a full-suite run (waiting for the
+  AI customer's second line) and passed alone; watch it.
+- Phase 4's model passes (Prep writer, Librarian, 1:1 summary) are tested only
+  with scripted models; measure them on the demo machines.
+- Model briefs (Prep, 1:1) are cached in memory: a restart rebuilds them on
+  the next view.
+- Leads have no delete and no merge yet; a lead's rep is not inferred from its
+  calls.
 
 - Nepali speech recognition, live and offline (see the table above). Try
   Whisper `initial_prompt` with pack vocabulary and Nepali time words, and

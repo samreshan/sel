@@ -225,6 +225,44 @@ class BrowserE2E(unittest.TestCase):
         self.assertIn("What does the other quote include", page.locator(".debrief .compare").inner_text())
         self.assertEqual(page.errors, [])
 
+    def test_flywheel_approve_then_prep_then_rehearse(self):
+        """A manager approves a proposed team answer; the lead's Prep shows it; Rehearse opens a drill."""
+        svc = self.service
+        manager = svc.add_person("Flywheel Manager", "manager")["id"]
+        rep = svc.add_person("Flywheel Rep", "rep")["id"]
+        svc.set_rep("example-solar-01", rep)
+        svc.wait_idle()
+        lead = svc.add_lead("Flywheel Lead", None, rep)["id"]
+        svc.set_lead("example-solar-01", lead)
+        weak = next(m for m in svc.coaching("example-solar-01")["moments"]
+                    if m["criterion"] == "objection-handling" and m["kind"] == "weak")
+        svc.moment_action("example-solar-01", weak["id"], "endorse", {"by": rep})
+        svc.run_librarian("demo-solar")
+        answer = weak["better_line"]["text"]
+
+        boss = self.page()
+        boss.add_init_script(f"localStorage.setItem('sel.viewer', JSON.stringify('{manager}'))")
+        boss.goto(f"{self.base}/#playbook/demo-solar")
+        boss.wait_for_selector("a[data-nav=team]:visible")  # Team is in the navigation for a manager
+        item = boss.locator(".skill", has_text=answer).filter(has=boss.locator("text=Approve for the team"))
+        item.locator("text=Approve for the team").click()
+        boss.wait_for_selector("text=Approved for the team.")
+        boss.wait_for_function("(t) => [...document.querySelectorAll('.playbook-side .skill')].some(e => e.textContent.includes(t))", arg=answer[:40])
+        self.assertEqual(boss.errors, [])
+
+        page = self.page()
+        page.add_init_script(f"localStorage.setItem('sel.viewer', JSON.stringify('{rep}'))")
+        page.goto(f"{self.base}/#prep/{lead}")
+        page.wait_for_selector("text=Likely objections")
+        self.assertFalse(page.locator("a[data-nav=team]").is_visible())
+        objection = page.locator(".skill").first
+        self.assertIn("Team answer", objection.inner_text())
+        self.assertIn(answer[:40], objection.inner_text())
+        page.click("text=Rehearse this call")
+        page.wait_for_url("**/#practice/*")
+        page.wait_for_selector("text=Start the drill", timeout=15000)
+        self.assertEqual(page.errors, [])
+
     def post(self, path, body, method="POST"):
         import urllib.request
         r = urllib.request.Request(f"{self.base}{path}", data=json.dumps(body).encode(), method=method,
@@ -296,6 +334,7 @@ class BrowserE2E(unittest.TestCase):
         page.wait_for_selector("#upload-form")
         page.set_input_files("#f-audio", str(SOLAR / "audio.ogg"))
         page.select_option("#f-pack", "demo-solar")
+        page.click("text=More about this call")  # names live in a disclosure
         page.fill("#f-cust", "Ramesh")
         page.click("#upload-submit")
         page.wait_for_url("**/#call/2*")

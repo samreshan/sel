@@ -47,6 +47,7 @@ GZIP_MIN = 1024
 COMPRESSIBLE = ("text/", "application/javascript", "application/json", "image/svg+xml")
 SSE_PING_S = 15.0
 HEALTH_TTL_S = 30.0
+DOCTOR_TTL_S = 30.0
 
 
 class ApiError(Exception):
@@ -109,8 +110,15 @@ def _entry(body: bytes, ctype: str) -> dict[str, Any]:
             "hash": digest[:12], "etag": f'"{digest[:20]}"'}
 
 
-def make_handler(service: CallService, health=None, quiet: bool = False, hub: SimulatorHub | None = None):
+def make_handler(service: CallService, health=None, quiet: bool = False, hub: SimulatorHub | None = None,
+                 doctor=None):
     hub = hub or SimulatorHub(service)
+    if doctor is None:
+        from .doctor import check
+
+        def doctor():
+            return check(probe=True)
+    doctor_cache: dict[str, Any] = {"at": 0.0, "value": None}
     static_files = StaticFiles(WEB_DIR)
     health_cache: dict[str, Any] = {"at": 0.0, "value": None}
     health_lock = threading.Lock()
@@ -367,6 +375,7 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
                     "pack_id": q["pack"], "started_at": q["started_at"], "rep_name": q.get("rep_name"),
                     "rep_id": q.get("rep_id"),
                     "customer_name": q.get("customer_name"), "customer_email": q.get("customer_email"),
+                    "lead_id": q.get("lead_id"),
                     "channels": q.get("channels", "auto"), "rep_channel": q.get("rep_channel", "0"),
                 })
             finally:
@@ -376,6 +385,66 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         def set_rep(self, q, call_id):
             b = self._json_body()
             self._json(service.set_rep(call_id, b.get("rep_id") or None, self._tab()))
+
+        def set_lead(self, q, call_id):
+            b = self._json_body()
+            self._json(service.set_lead(call_id, b.get("lead_id") or None, self._tab()))
+
+        # -- leads and Prep ----------------------------------------------------------
+
+        def leads(self, q):
+            self._json(service.list_leads(q.get("rep") or None))
+
+        def add_lead(self, q):
+            b = self._json_body()
+            self._json(service.add_lead(b.get("name"), b.get("phone"), b.get("rep_id") or None, b.get("notes"),
+                                        self._tab()), 201)
+
+        def lead(self, q, lead_id):
+            self._json(service.lead_view(lead_id))
+
+        def update_lead(self, q, lead_id):
+            self._json(service.update_lead(lead_id, self._json_body(), self._tab()))
+
+        def prep(self, q, lead_id):
+            self._json(service.prep(lead_id))
+
+        def rehearse(self, q, lead_id):
+            b = self._json_body()
+            self._json(service.rehearse(lead_id, b.get("by") or None, self._tab()), 201)
+
+        # -- team, playbook, settings -------------------------------------------------
+
+        def team(self, q):
+            self._json(service.team())
+
+        def team_patterns(self, q):
+            self._json(service.team_patterns())
+
+        def team_member(self, q, person_id):
+            self._json(service.team_member(person_id))
+
+        def escalation(self, q, person_id, key):
+            b = self._json_body()
+            key = urllib.parse.unquote(key)  # keys hold ":" and "+" (e.g. a time), sent percent-encoded
+            self._json(service.resolve_escalation(person_id, key, b.get("status"), b.get("by") or None, self._tab()))
+
+        def playbook(self, q, pack_id):
+            self._json(service.playbook_view(pack_id))
+
+        def playbook_answers(self, q, pack_id):
+            b = self._json_body()
+            action = b.get("action")
+            out = service.playbook_action(pack_id, action, b.get("id"), b.get("by") or None, self._tab())
+            self._json(out, 202 if action == "propose" else 200)
+
+        def doctor(self, q):
+            with health_lock:
+                if doctor_cache["value"] is None or time.monotonic() - doctor_cache["at"] > DOCTOR_TTL_S:
+                    doctor_cache["value"] = doctor()
+                    doctor_cache["at"] = time.monotonic()
+                value = doctor_cache["value"]
+            self._json(value)
 
         # -- people and Today ------------------------------------------------------
 
@@ -613,12 +682,26 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("POST", r"/api/people", Handler.add_person),
         ("PUT", rf"/api/people/{D}", Handler.update_person),
         ("GET", r"/api/today", Handler.today),
+        ("GET", r"/api/leads", Handler.leads),
+        ("POST", r"/api/leads", Handler.add_lead),
+        ("GET", rf"/api/leads/{C}", Handler.lead),
+        ("PUT", rf"/api/leads/{C}", Handler.update_lead),
+        ("GET", rf"/api/leads/{C}/prep", Handler.prep),
+        ("POST", rf"/api/leads/{C}/rehearse", Handler.rehearse),
+        ("GET", r"/api/team", Handler.team),
+        ("GET", r"/api/team/patterns", Handler.team_patterns),
+        ("GET", rf"/api/team/{D}", Handler.team_member),
+        ("PUT", rf"/api/coach/{D}/escalations/([^/]{{1,300}})", Handler.escalation),
+        ("GET", rf"/api/playbook/{D}", Handler.playbook),
+        ("POST", rf"/api/playbook/{D}/answers", Handler.playbook_answers),
+        ("GET", r"/api/doctor", Handler.doctor),
         ("GET", r"/api/calls", Handler.calls),
         ("POST", r"/api/calls", Handler.create_call),
         ("GET", rf"/api/calls/{C}", Handler.call),
         ("DELETE", rf"/api/calls/{C}", Handler.delete_call),
         ("POST", rf"/api/calls/{C}/retry", Handler.retry),
         ("PUT", rf"/api/calls/{C}/rep", Handler.set_rep),
+        ("PUT", rf"/api/calls/{C}/lead", Handler.set_lead),
         ("GET", rf"/api/calls/{C}/audio", Handler.audio),
         ("PUT", rf"/api/calls/{C}/segments/{D}", Handler.edit_segment),
         ("PUT", rf"/api/calls/{C}/drafts/{D}", Handler.edit_draft),
@@ -652,10 +735,11 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
 
 
 def serve(service: CallService, host: str = "127.0.0.1", port: int = 8765, health=None,
-          quiet: bool = False, hub: SimulatorHub | None = None, tls: tuple[str, str] | None = None) -> ThreadingHTTPServer:
+          quiet: bool = False, hub: SimulatorHub | None = None, tls: tuple[str, str] | None = None,
+          doctor=None) -> ThreadingHTTPServer:
     """The app server. ``tls=(certfile, keyfile)`` serves https, which browsers on other computers
     need before they allow the microphone (only localhost counts as secure over plain http)."""
-    httpd = ThreadingHTTPServer((host, port), make_handler(service, health, quiet, hub))
+    httpd = ThreadingHTTPServer((host, port), make_handler(service, health, quiet, hub, doctor))
     if tls:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(*tls)

@@ -22,8 +22,10 @@
   const CACHE_MAX = 24;
   const TAB = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const SCRIPT = document.currentScript;
-  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "drill", "people", "rooms", "room", "line", "live", "signal"];
-  const COACH_PAGES = new Set(["today", "playbook", "people", "practice"]);
+  const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "drill", "lead", "playbook", "people", "rooms", "room", "line", "live", "signal"];
+  const COACH_PAGES = new Set(["today", "playbook", "people", "practice", "leads", "lead", "prep", "team", "settings"]);
+  const TEAM_PAGES = new Set(["leads", "lead", "prep", "team", "settings"]); // team.js
+  const NAV_OF = { lead: "leads", prep: "leads" };
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -84,6 +86,7 @@
     coachPage: null, // "today" | "playbook" | "people"
     coachArg: null, // e.g. the pack id on #playbook/<id>
     people: [], // the team, from the event stream (people.json on the server)
+    leads: null, // GET /api/leads, loaded on first need (lead pickers)
     viewerId: null, // who this browser is viewing as (localStorage "sel.viewer")
     modules: {}, // lazily loaded scripts: name -> promise
     callId: null,
@@ -700,6 +703,9 @@
     else state.cache.delete(data.id);
   });
   on("people", applyPeople);
+  on("lead", () => {
+    if (state.leads) loadLeads();
+  });
   on("rooms", (rooms) => {
     state.rooms = rooms || [];
   });
@@ -874,7 +880,9 @@
   }
 
   function renderNav() {
-    const active = state.view === "coach" ? state.coachPage : state.view === "sim" ? "practice" : state.view === "calls" || state.view === "call" ? "calls" : null;
+    const team = document.querySelector(".primary-nav a[data-nav=team]");
+    if (team) team.hidden = !(viewer() && viewer().role === "manager");
+    const active = state.view === "coach" ? NAV_OF[state.coachPage] || state.coachPage : state.view === "sim" ? "practice" : state.view === "calls" || state.view === "call" ? "calls" : null;
     for (const a of document.querySelectorAll(".primary-nav a[data-nav]")) {
       const on_ = a.dataset.nav === active;
       a.classList.toggle("is-active", on_);
@@ -1447,6 +1455,7 @@
       .join(" · ");
     const when = [formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
     const owner = state.people.length ? repPicker(call) : null;
+    const lead = call.kind !== "practice" ? leadPicker(call) : null;
     const rules = String(meta.analyzer || "").startsWith("rules");
     const sim = call.source === "simulator";
     head.replaceChildren(
@@ -1458,6 +1467,7 @@
           el("h1", { text: title }),
           el("p", { class: "meta", text: when }),
           owner,
+          lead,
           el("p", { class: "meta small", text: `Transcribed by ${meta.transcriber || "unknown"} · analysed by ${meta.analyzer || "unknown"}` }),
           timings ? el("p", { class: "meta small", text: `Timings: ${timings}` }) : null
         ),
@@ -1512,6 +1522,54 @@
       sel.disabled = false;
     });
     return el("p", { class: "meta rep-picker" }, el("label", { for: "call-rep", text: "Whose call: " }), sel, " ", msg);
+  }
+
+  // Leads for the pickers on the upload form and the call page; re-read on every `lead` event.
+  async function loadLeads() {
+    try {
+      state.leads = await api("/api/leads", { fresh: true });
+    } catch (_) {
+      state.leads = state.leads || [];
+    }
+    fillLeadSelect($("#f-lead"));
+    fillLeadSelect($("#call-lead"), state.call ? state.call.lead_id : null);
+  }
+
+  function fillLeadSelect(sel, current) {
+    if (!sel) return;
+    const keep = current !== undefined ? current : sel.value;
+    const leads = state.leads || [];
+    sel.replaceChildren(
+      el("option", { value: "", text: state.leads === null ? "Loading leads…" : leads.length ? "No lead" : "No leads yet" }),
+      ...leads.map((l) => el("option", { value: l.id, text: l.rep_name ? `${l.name} (${l.rep_name})` : l.name }))
+    );
+    sel.value = keep && leads.some((l) => l.id === keep) ? keep : "";
+  }
+
+  // Which lead this call was with: Prep reads the lead's earlier calls before the next one.
+  function leadPicker(call) {
+    const sel = el("select", { id: "call-lead", class: "small-select" });
+    fillLeadSelect(sel, call.lead_id || "");
+    if (state.leads === null) loadLeads();
+    const msg = el("span", { class: "muted small", role: "status" });
+    const prep = el("a", { class: "small", href: call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads", text: call.lead_id ? "Prep" : "Leads" });
+    sel.addEventListener("change", async () => {
+      sel.disabled = true;
+      try {
+        const summary = await api(`/api/calls/${enc(call.id)}/lead`, { method: "PUT", json: { lead_id: sel.value || null } });
+        call.lead_id = summary.lead_id;
+        upsertCall(summary);
+        prep.href = call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads";
+        prep.textContent = call.lead_id ? "Prep" : "Leads";
+        msg.textContent = "Saved.";
+        emit("lead", { id: call.lead_id }); // this tab's own change is not echoed on the stream
+      } catch (e) {
+        sel.value = call.lead_id || "";
+        msg.textContent = e.message;
+      }
+      sel.disabled = false;
+    });
+    return el("p", { class: "meta rep-picker" }, el("label", { for: "call-lead", text: "Lead: " }), sel, " ", prep, " ", msg);
   }
 
   function renderNotice(node) {
@@ -2871,6 +2929,9 @@
     const repSel = el("select", { id: "f-rep-person", name: "rep_id" }, el("option", { value: "", text: reps.length ? "Choose a rep" : "No reps yet" }));
     for (const p of reps) repSel.append(el("option", { value: p.id, text: p.name }));
     repSel.value = me && me.role === "rep" ? me.id : saved.rep_id && personName(saved.rep_id) ? saved.rep_id : "";
+    const leadSel = el("select", { id: "f-lead", name: "lead_id" });
+    fillLeadSelect(leadSel, "");
+    if (state.leads === null) loadLeads();
     const fileInput = el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*", class: "sr-file" });
     const fileName = el("span", { class: "drop-name", "aria-live": "polite", hidden: true });
     const mark = iconTile("neutral", "doc");
@@ -2936,6 +2997,7 @@
             formField("f-pack", "Business pack", packSel),
             formField("f-start", "Call started", el("input", { type: "datetime-local", id: "f-start", name: "started", step: "60", value: defaultStartValue(offset) }), timeHint),
             formField("f-rep-person", optionalLabel("Whose call is this?"), repSel, reps.length ? "Today and coaching follow this rep." : "Add a rep under Manage people to track whose call it is."),
+            formField("f-lead", optionalLabel("Lead"), leadSel, "Prep reads a lead's earlier calls before the next one."),
             errBox,
             bar
           ),
@@ -3041,6 +3103,7 @@
       rep_id: val("#f-rep-person"),
       customer_name: val("#f-cust"),
       customer_email: val("#f-cust-email"),
+      lead_id: val("#f-lead"),
       channels: val("#f-channels") || "auto",
       rep_channel: val("#f-rep-channel") || "0",
     });
@@ -3088,6 +3151,19 @@
   }
 
   function renderCoach(main) {
+    if (TEAM_PAGES.has(state.coachPage)) {
+      if (window.Sel.team) {
+        window.Sel.team.render(main, state.coachPage, state.coachArg);
+        return;
+      }
+      main.replaceChildren(skeleton());
+      loadModule("team", "this page")
+        .then(() => {
+          if (state.view === "coach" && TEAM_PAGES.has(state.coachPage)) renderMain();
+        })
+        .catch((e) => main.replaceChildren(el("div", { class: "error-box", role: "alert" }, el("p", { class: "strong", text: e.message }))));
+      return;
+    }
     if (state.coachPage === "practice") {
       if (window.Sel.practice) {
         window.Sel.practice.render(main, state.coachArg);
@@ -3187,6 +3263,10 @@
     worklet: (SCRIPT && SCRIPT.dataset.worklet) || "/static/pcm-worklet.js",
     sim: null,
     coach: null,
+    team: null,
+    leads: () => state.leads,
+    loadLeads,
+    lineOrigin,
   };
 
   async function boot() {

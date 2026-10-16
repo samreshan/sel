@@ -51,6 +51,60 @@ Each card shows evidence first: the call moment, which plays when clicked, and, 
 5. Switch to the POS pack and load `pos-01` without changing any code. The demo agreed on Sunday at 3pm (*"diuso 3 baje"*), so Sel produces a ready calendar invite.
 6. Show the evaluation table and the timings measured on the demo laptop.
 
+## Coaching loop demo (5 minutes, English, network off)
+
+Recorded with Wi-Fi off on either demo machine (the i7-1255U laptop or the
+M2). Everything below runs on the laptop: Ollama with `qwen2.5:7b` (analysis
+and coaching) and `qwen2.5:1.5b` (`SEL_CHAT_LLM_MODEL`, the Coach and the AI
+customer), Whisper through faster-whisper.
+
+**Before recording (network on, once).**
+
+1. `scripts/setup_local.sh`, then `ollama pull qwen2.5:1.5b`. Run one upload
+   so Whisper `small` is downloaded and cached.
+2. Make the "next real call": solar-01 with the rep asking before defending
+   the price (the `asks what the other quote includes` case in
+   `examples/calls/solar-01/transfer_gold.json`), read by Piper:
+
+   ```bash
+   python - <<'PY'
+   import json
+   t = json.load(open("examples/calls/solar-01/transcript.json", encoding="utf-8"))
+   for s in t["segments"]:
+       if s["id"] == "s05":
+           s["text"] = "What does the other quote include: which panel brand and inverter, and how many years of warranty?"
+   json.dump(t, open("solar-asks.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+   PY
+   python scripts/synth_call.py solar-asks.json --out solar-asks.wav --stereo \
+       --rep-voice models/piper/en_US-ryan-medium.onnx --customer-voice models/piper/en_US-lessac-medium.onnx
+   ```
+
+3. Turn the network off. `python -m sel serve`. Under Manage people add
+   **Asha Gurung** (rep) and **Mina Shrestha** (manager). Open solar-01 and set
+   "Whose call" to Asha: the Coach sets her focus (price objections) and makes
+   a drill; Mina's Team page shows one escalation (the 10-year inverter claim).
+4. About 10 minutes before recording on the i7 (analysis then coaching take
+   about 3 + 3 minutes with qwen2.5:7b; not yet measured on the M2): New call →
+   `solar-asks.wav`, pack Ghamghar Solar, Whose call Asha, layout Stereo. Its
+   transfer check runs after its coaching.
+
+**The demo.**
+
+| Time | Screen | What to show |
+|---|---|---|
+| 0:00 | solar-01 → Coaching tab | The price objection: what the customer said, what Asha said, why it fell short, the better line (AI-suggested, "Checked against your pack", with its passage). Open "Sel refused 1 line": the 10-year warranty line and the reason (the pack gives 10 years only with the paid Care Plan). |
+| 1:00 | Practise this (90 s) | The drill: the real moment, the anonymised AI persona. Start the call; the AI customer opens with the objection (labelled AI). Type "What does the other quote include: which panels and inverter?" The customer warms up. End and get feedback: Passed, judged by AI and Sel's rules, the real answer beside the practice answer and the better line. |
+| 2:30 | Today (Viewing as Asha) | This week's focus, the real moment and the better line, the drill and its attempt. |
+| 3:15 | Calls → the new call (solar-asks) | Reviewed and coached on this laptop. Today: the transfer check passed on the real call, quoting the line; the Coach closed the focus ("Done") and chose the next skill. Switch Viewing as to Mina → Team → Asha: the skill timeline (missed, then met) and the 1:1 brief. |
+| 4:15 | Settings | Every model, what it is for, "runs on this machine", its licence; "Open models only". In a terminal: `python -m sel doctor` prints the same and ends with OK. |
+| 5:00 | | End. Nothing was sent and nothing left the laptop. |
+
+If the transfer check is not done yet at 3:15, show the call's progress and
+come back to it after Settings. Rehearse the whole run once on each machine
+before recording: it has been checked end to end with Sel's rules and
+scripted models (`tests/test_practice.py`, `tests/test_team.py`), not yet with
+the live models on the demo laptops.
+
 ## Done means
 
 - The workflow runs end to end on an ordinary laptop with no network connection.

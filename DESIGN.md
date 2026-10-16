@@ -85,7 +85,8 @@ The call date stays on its own line and shortens with an ellipsis.
 ## Navigation, Today and the Playbook
 
 - Sidebar order: brand, **Viewing as** (dropdown; no login), New call,
-  section navigation (Today · Calls · Practice · Playbook), device health.
+  section navigation (Today · Calls · Practice · Playbook · Leads · Team ·
+  Settings), device health.
 - `.primary-nav` links: 40 px, 12 px corners, Solar icons. Desktop active uses
   the charcoal action gradient and inverse text; compact mobile navigation uses
   the neutral surface with a hairline border.
@@ -149,6 +150,41 @@ The call date stays on its own line and shortens with an ellipsis.
 - Manager Today starts with **Needs you**: escalations only (a contradicted
   claim reached a customer, a drill failed three times, the Coach wants to move
   on from a manager's focus).
+
+## Leads, Prep, Team and Settings
+
+- Sidebar order continues: Today · Calls · Practice · Playbook · **Leads** ·
+  **Team** (only when viewing as a manager) · **Settings**. Same neutral
+  `.primary-nav` links; on a phone the links wrap in as many 104 px columns
+  as fit. `#lead/<id>` and `#prep/<id>` keep Leads active.
+- Leads and a lead use `.bento`: the list (or the lead's calls) is the anchor,
+  Add a lead (or Notes) supports it. Prep: **Likely objections** is the anchor
+  (each with "They said" and the answer as a `.better-line`, labelled "Team
+  answer", "Example line" or "AI-suggested" as on the Coaching tab), with the
+  focus, gaps and promises stacked beside it. One primary action: **Rehearse
+  this call**.
+- Team (managers): **Needs you** first (escalations only), then the bento:
+  **Skills by rep** as the anchor beside **Patterns**, then the review queue.
+  A rep's page: the 1:1 brief as the anchor beside transfer checks, then
+  **Skills over time**.
+- `.table-scroll`: a wide table scrolls inside its card, never the page. It
+  is focusable (`tabindex="0"`, `role="region"` with a label) so the keyboard
+  can scroll it, and is `position: relative` so `.sr-only` cell text cannot
+  widen the page. Bento children have `min-width: 0` for the same reason.
+- `.matrix` (with `.team-table`): reps × skills. The rep column is sticky,
+  headers wrap at 160 px, cells are centred pills ("2 of 4": met of scored;
+  sage all met, honey some short, rose half or more short) and an unscored
+  cell is a dash with "Not scored" for screen readers.
+- `.timeline`: an `<ol>` of reviewed calls, oldest first, on one hairline;
+  each `li.is-met | is-partial | is-missed` carries a dot in the status colour
+  plus the status pill (colour never alone), the call link and the moment as
+  a `.said-line`.
+- Playbook gains **Team answers** at the top of the supporting column and, for
+  managers, the **Review queue** below the bento (Approve for the team is the
+  primary action; refused answers sit in a `details.disclosure` with reasons).
+- Settings is one status card (`.is-success` or `.is-error`) and the models
+  list. Examples of the matrix and timeline are under `#patterns` in the
+  reference.
 
 ## Buttons
 

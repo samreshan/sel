@@ -9,6 +9,7 @@
   <link rel="prefetch" href="/static/sim.js" as="script">
   <link rel="prefetch" href="/static/coach.js" as="script">
   <link rel="prefetch" href="/static/practice.js" as="script">
+  <link rel="prefetch" href="/static/team.js" as="script">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -50,6 +51,18 @@
           <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg>
           Playbook
         </a>
+        <a href="#leads" data-nav="leads">
+          <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#user"/></svg>
+          Leads
+        </a>
+        <a href="#team" data-nav="team" hidden>
+          <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#gauge"/></svg>
+          Team
+        </a>
+        <a href="#settings" data-nav="settings">
+          <svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#lock"/></svg>
+          Settings
+        </a>
       </nav>
 
       <section class="device-card" aria-labelledby="device-title">
@@ -72,6 +85,6 @@
   </div>
 
   <script src="/static/dropdown.js"></script>
-  <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-practice="/static/practice.js" data-worklet="/static/pcm-worklet.js"></script>
+  <script src="/static/app.js" data-sim="/static/sim.js" data-coach="/static/coach.js" data-practice="/static/practice.js" data-team="/static/team.js" data-worklet="/static/pcm-worklet.js"></script>
 </body>
 </html>

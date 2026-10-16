@@ -53,6 +53,7 @@ def _items(lead: dict[str, Any], calls: list[tuple[dict[str, Any], dict[str, Any
                           and m["customer_said"]["segment_id"] in f["evidence"].get("segment_ids", [])
                           and (m.get("better_line") or {}).get("check") == "ok"), None)
                 item["better_line"] = m["better_line"]["text"] if m else None
+                item["better_line_by"] = m["better_line"].get("by") if m else None
                 item["criterion"] = m["criterion"] if m else None
                 objections.append(item)
             elif f["kind"] == "question":
@@ -81,7 +82,7 @@ def build_brief(lead: dict[str, Any], calls: list[tuple[dict[str, Any], dict[str
             o["answer"] = {"from": "team answer", "text": best[0]["answer"], "objection": best[0]["objection"],
                            "answer_id": best[0]["id"]}
         elif o.get("better_line"):
-            o["answer"] = {"from": "better line", "text": o["better_line"]}
+            o["answer"] = {"from": "better line", "text": o["better_line"], "by": o.get("better_line_by")}
         else:
             o["answer"] = None
     picked_o, picked_g, summary, by = objections, gaps + questions, None, "rules (no language model)"

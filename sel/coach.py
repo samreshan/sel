@@ -574,7 +574,8 @@ class LineWriter:
         cust = moment.get("customer_said")
         moment_lines = (f"[{cust['segment_id']}] CUSTOMER: {cust['quote']}\n" if cust else "") + \
             f"[{moment['evidence']['segment_ids'][0]}] REP: {moment['evidence']['quote']}"
-        answers = "\n".join(f"- {a.get('objection', '')}: {a.get('answer', '')}" for a in self.answers[:3])
+        answers = "\n".join(f"- {a.get('objection', '')}: {a.get('answer', '')}"
+                            for a in team_answers(self.answers, moment)[:3])
         user = (f"Business: {pack.name}\nScorecard criterion: {crit.title if crit else moment['criterion']}. "
                 f"{crit.description if crit else ''}\n\nThe moment:\n{moment_lines}\nWhat fell short: {moment.get('why', '')}\n\n"
                 f"Passages:\n{listed}" + (f"\n\nAnswers the team approved for this:\n{answers}" if answers else ""))
@@ -590,6 +591,25 @@ class LineWriter:
         if unknown:
             line["unknown_passages"] = unknown
         return line
+
+
+def team_answers(answers: list[dict[str, Any]], moment: dict[str, Any], k: int = 3) -> list[dict[str, Any]]:
+    """Approved team answers for this moment's criterion, closest to what was said first."""
+    from .playbook import match
+
+    same = [a for a in answers if a.get("criterion") == moment["criterion"]]
+    said = f"{(moment.get('customer_said') or {}).get('quote', '')} {moment['evidence']['quote']}"
+    return match(same, said, k=k)
+
+
+def playbook_line(answers: list[dict[str, Any]], moment: dict[str, Any], pack: Pack, index) -> dict[str, Any] | None:
+    """The best-matching approved team answer as this moment's better line, through the same gate."""
+    best = team_answers(answers, moment, k=1)
+    if not best:
+        return None
+    a = best[0]
+    return _finish_line({"text": a["answer"], "sources": (a.get("check") or {}).get("sources") or [],
+                         "by": f"playbook:{a['id']}"}, pack, index)
 
 
 def model_verdicts(llm: LLMClient, lines: list[dict[str, Any]], pack: Pack) -> dict[int, dict[str, Any]]:
@@ -635,10 +655,13 @@ def _attempt(writer: LineWriter, moment: dict[str, Any], pack: Pack, index,
 
 def diagnose(report: dict[str, Any], pack: Pack, index, finder: MomentFinder | None = None,
              writer: LineWriter | None = None, judge: LLMClient | None = None, fixture: dict[str, Any] | None = None,
-             progress: Progress | None = None, max_lines: int = MAX_LINES) -> dict[str, Any]:
+             progress: Progress | None = None, max_lines: int = MAX_LINES,
+             answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Moments, better lines and what was refused, for one reviewed call (``report`` as in report.json).
 
-    ``fixture`` is a hand-written stand-in for the models' output (example calls).
+    ``fixture`` is a hand-written stand-in for the models' output (example calls). ``answers`` are the
+    pack's approved team answers (the playbook overlay): when no line passed (or no model writes one),
+    the best-matching answer for the moment's criterion becomes the better line, checked like any line.
     """
     def step(stage: str, frac: float) -> None:
         if progress:
@@ -675,6 +698,10 @@ def diagnose(report: dict[str, Any], pack: Pack, index, finder: MomentFinder | N
             if first["check"] == "rejected":
                 attempts.append(_attempt(writer, m, pack, index, first))
         ok = [a for a in attempts if a["check"] == "ok"]
+        if not ok and answers:
+            team = playbook_line(answers, m, pack, index)
+            if team is not None:
+                (ok if team["check"] == "ok" else attempts).append(team)
         m["better_line"] = ok[0] if ok else None
         m["rejected_lines"] = [a for a in attempts if a["check"] == "rejected"]
     if judge is not None:
@@ -696,7 +723,9 @@ def diagnose(report: dict[str, Any], pack: Pack, index, finder: MomentFinder | N
     step("coaching: done", 1.0)
     lines = [m["better_line"] for m in moments if m["better_line"]]
     by_lines = ("fixture (hand-written, not model output)" if fixture is not None
-                else writer.name if writer is not None else None)
+                else writer.name if writer is not None
+                else "playbook (approved team answers)" if any(str(x.get("by", "")).startswith("playbook:") for x in lines)
+                else None)
     return {
         "call_id": report["transcript"]["call_id"], "pack_id": pack.id, "built_at": _now(),
         "by": {"moments": by_moments, "lines": by_lines},

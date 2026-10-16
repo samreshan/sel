@@ -14,8 +14,10 @@ Each call is a folder under ``SEL_CALLS_DIR`` (default ``calls/``)::
 
 and next to the call folders: ``people.json`` holds the team (``sel/people.py``),
 ``coach/<person>.json`` each rep's focus, transfer checks, escalations and the
-Coach's actions log, and ``drills/<id>.json`` the practice drills
-(``sel/drills.py``). A call is ``kind`` real (uploaded, examples) or practice
+Coach's actions log, ``drills/<id>.json`` the practice drills
+(``sel/drills.py``), ``leads/<id>/lead.json`` the leads Prep reads
+(``sel/leads.py``) and ``playbook/<pack>.json`` the answers the team approved
+(``sel/playbook.py``, the overlay on a pack, which is never written to). A call is ``kind`` real (uploaded, examples) or practice
 (the simulator); only real calls count towards skills and transfer checks.
 A call's ``rep_id`` says whose call it is; Today (``today()``) gathers what
 needs each person's attention across their calls.
@@ -50,27 +52,34 @@ from typing import Any
 
 from . import coach as coaching_mod
 from . import drills as drills_mod
+from . import playbook as playbook_mod
+from . import prep as prep_mod
 from . import transfer as transfer_mod
 from .files import read_json, write_json
 from .coach import CoachStore, LineWriter, ModelCoach, MomentFinder, RuleCoach
 from .drills import DrillStore
 from .drafts import apply_edits, approve
 from .events import EventBus
-from .live import pack_index
+from .grounding import numbers
+from .leads import LeadStore
+from .live import objection_cue, pack_index
 from .models import Analysis, Speaker, Transcript
 from .pack import Pack, load_pack
 from .people import PeopleStore
 from .pipeline import analyze_call, build_report
-from .scoring import score_report
+from .playbook import PlaybookStore
+from .scoring import criterion_signal, score_report
 
 AUDIO_TYPES = {".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".mp4"}
 SUMMARY_FIELDS = ("id", "pack_id", "source", "status", "stage", "progress", "started_at", "customer_name",
                   "original_filename", "created_at", "updated_at", "rep_id", "rep_name", "coaching_status", "kind",
-                  "drill_id")
+                  "drill_id", "lead_id")
 MOMENT_ACTIONS = ("endorse", "dismiss", "edit", "note")
 TODAY_RECENT = 8  # calls listed under "Recent calls"
 SKILL_WINDOW = 10  # a person's latest finished calls that "Skills to work on" counts over
 EMPTY_REVIEW = {"dismissed": [], "drafts": {}, "transcript_edits": []}
+ESCALATION_STATUSES = ("open", "resolved")
+SEVERAL_REPS = 2  # a team pattern: a skill at least this many reps fell short on
 
 
 def _now() -> str:
@@ -88,7 +97,8 @@ def _new_id() -> str:
 
 class CallService:
     def __init__(self, calls_dir: str | Path, packs_dir: str | Path, analysis_factory=None,
-                 bus: EventBus | None = None, coaching_factory=None, coach_factory=None, chat_factory=None):
+                 bus: EventBus | None = None, coaching_factory=None, coach_factory=None, chat_factory=None,
+                 analysis_llm_factory=None):
         self.root = Path(calls_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self.packs_dir = Path(packs_dir)
@@ -103,6 +113,11 @@ class CallService:
         self.people = PeopleStore(self.root / "people.json")
         self.coach_store = CoachStore(self.root / "coach")
         self.drills = DrillStore(self.root / "drills")
+        self.leads = LeadStore(self.root / "leads")
+        self.playbook = PlaybookStore(self.root / "playbook")
+        # Model-written briefs (Prep, 1:1) by (kind, id), kept with a signature of what they were built from.
+        self._briefs: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
+        self._pending: set[tuple[str, str]] = set()  # agent work queued and not finished, so it is queued once
         # Builds (transcriber, analyzer, speaker_labeler) for a call; injectable for tests.
         self._factory = analysis_factory or default_factory
         # The language model that coaches a call (moments, better lines), or None for rules.
@@ -111,6 +126,9 @@ class CallService:
         # The fast chat model (``SEL_CHAT_LLM_*``) for personas, the AI customer and debriefs, or None for
         # rules. None unless given: ``sel serve`` passes ``default_chat_factory``; tests stay deterministic.
         self._chat_factory = chat_factory or (lambda: None)
+        # The analysis model when its server answers, for Prep; None for rules (``sel serve`` passes
+        # ``default_analysis_llm``; tests stay deterministic).
+        self._analysis_llm_factory = analysis_llm_factory or (lambda: None)
         # The Coach: on the chat model when there is one, else rules.
         self._coach_factory = coach_factory or (lambda: ModelCoach(llm) if (llm := self._chat_factory()) else RuleCoach())
         self._worker = threading.Thread(target=self._work, daemon=True)
@@ -245,6 +263,9 @@ class CallService:
             raise ValueError(f"unsupported audio type {suffix or '(none)'}; use one of {', '.join(sorted(AUDIO_TYPES))}")
         datetime.fromisoformat(meta["started_at"])  # validates, raises ValueError
         rep_id, rep_name = self._rep(meta.get("rep_id"), meta.get("rep_name"))
+        lead_id = meta.get("lead_id") or None
+        if lead_id:
+            self.leads.get(lead_id)  # KeyError for an unknown lead
         call_id = _new_id()
         d = self.root / call_id
         d.mkdir(parents=True)
@@ -255,12 +276,14 @@ class CallService:
             "rep_id": rep_id, "rep_name": rep_name, "customer_name": meta.get("customer_name") or None,
             "customer_email": meta.get("customer_email") or None,
             "channels": meta.get("channels", "auto"), "rep_channel": int(meta.get("rep_channel", 0)),
-            "kind": "real",
+            "kind": "real", "lead_id": lead_id,
             "status": "queued", "stage": "waiting", "progress": 0.0, "error": None,
             "created_at": _now(), "updated_at": _now(),
         }
         self._write(call_id, "call.json", call)
         self._write(call_id, "review.json", EMPTY_REVIEW)
+        if lead_id:
+            self.leads.link(lead_id, call_id)
         self._jobs.put(call_id)
         self._publish(call)
         return call_id
@@ -365,7 +388,13 @@ class CallService:
         self._jobs.put(call_id)
 
     def delete(self, call_id: str) -> None:
+        lead_id = (self._read(self._dir(call_id).name, "call.json") or {}).get("lead_id")
         shutil.rmtree(self._dir(call_id))
+        if lead_id:
+            try:
+                self.leads.link(lead_id, call_id, linked=False)
+            except KeyError:
+                pass
         self._summaries.pop(call_id, None)
         self._reports.pop(call_id, None)
         self.bus.publish("calls", "call-deleted", {"id": call_id})
@@ -432,6 +461,7 @@ class CallService:
         old = self._read(call_id, "coaching.json")
         llm = None if fixture is not None else self._coaching_factory(call, analyzer)
         index = pack_index(pack)
+        answers = self.playbook.approved(pack.id)  # the flywheel: what the team approved coaches the next call
         before = llm.stats.to_dict() if llm is not None else None
         self._set_status(call_id, coaching_status="running", coaching_stage="finding moments", coaching_error=None)
 
@@ -442,13 +472,14 @@ class CallService:
         try:
             coaching = coaching_mod.diagnose(
                 report, pack, index, finder=MomentFinder(llm) if llm else None,
-                writer=LineWriter(llm, index) if llm else None, judge=llm, fixture=fixture, progress=progress)
+                writer=LineWriter(llm, index, answers) if llm else None, judge=llm, fixture=fixture, progress=progress,
+                answers=answers)
             if llm is not None:
                 after = llm.stats.to_dict()
                 coaching["meta"]["llm_usage"] = {k: round(after[k] - before[k], 2) for k in after}
         except Exception as e:  # noqa: BLE001 - the model failed; rules still give the rep their moments
             error = f"{type(e).__name__}: {e}"
-            coaching = coaching_mod.diagnose(report, pack, index)
+            coaching = coaching_mod.diagnose(report, pack, index, answers=answers)
             coaching["error"] = f"The coaching model failed, so Sel's rules found these moments: {error}"
         self._write(call_id, "coaching.json", coaching_mod.carry_over(coaching, old))
         self._set_status(call_id, coaching_status="error" if error else "done", coaching_stage=None,
@@ -530,6 +561,12 @@ class CallService:
                     self.prepare_drill(arg)
                 elif kind == "debrief":
                     self.run_debrief(arg)
+                elif kind == "prep":
+                    self.build_prep(arg)
+                elif kind == "one_on_one":
+                    self.build_one_on_one(arg)
+                elif kind == "librarian":
+                    self.run_librarian(arg)
                 elif kind == "transfer":
                     if self.check_transfer(arg, self._chat_factory()):
                         rep_id = (self._read(arg, "call.json") or {}).get("rep_id")
@@ -538,6 +575,8 @@ class CallService:
             except Exception:  # noqa: BLE001 - agents are best effort; the next event asks again
                 traceback.print_exc()
             finally:
+                with self._lock:
+                    self._pending.discard((kind, arg))
                 self._agents.task_done()
 
     def coach_state(self, person_id: str) -> dict[str, Any]:
@@ -1063,12 +1102,428 @@ class CallService:
                                   for e in self.coach_store.get(p["id"]).get("escalations", []) if e.get("status") == "open"]
         return out
 
+    # -- leads and Prep ----------------------------------------------------------
+
+    def _queue_agent(self, kind: str, arg: str) -> bool:
+        """Queue agent work once: a second request while it is waiting or running is the same work."""
+        with self._lock:
+            if (kind, arg) in self._pending:
+                return False
+            self._pending.add((kind, arg))
+        self._agents.put((kind, arg))
+        return True
+
+    def _lead_out(self, lead: dict[str, Any]) -> dict[str, Any]:
+        rep = self.people.get(lead["rep_id"]) if lead.get("rep_id") else None
+        return {**lead, "rep_name": rep["name"] if rep else None}
+
+    def list_leads(self, rep_id: str | None = None) -> list[dict[str, Any]]:
+        return [self._lead_out(lead) for lead in self.leads.list(rep_id)]
+
+    def add_lead(self, name: Any, phone: Any = None, rep_id: Any = None, notes: Any = None,
+                 origin: str | None = None) -> dict[str, Any]:
+        rep_id, _ = self._rep(rep_id, None)
+        lead = self.leads.add(name, phone, rep_id, notes)
+        self.bus.publish("calls", "lead", {"id": lead["id"]}, origin=origin)
+        return self._lead_out(lead)
+
+    def update_lead(self, lead_id: str, changes: dict[str, Any], origin: str | None = None) -> dict[str, Any]:
+        allowed = {k: v for k, v in changes.items() if k in ("name", "phone", "notes", "rep_id")}
+        if allowed.get("rep_id"):
+            allowed["rep_id"], _ = self._rep(allowed["rep_id"], None)
+        self.leads.update(lead_id, **allowed)
+        self.bus.publish("calls", "lead", {"id": lead_id}, origin=origin)
+        return self.lead_view(lead_id)
+
+    def lead_view(self, lead_id: str) -> dict[str, Any]:
+        """The lead with a summary of each of its calls, newest first."""
+        lead = self.leads.get(lead_id)
+        ids = set(lead.get("call_ids", []))
+        calls = sorted((c for c in self.list() if c["id"] in ids), key=lambda c: c.get("started_at") or "", reverse=True)
+        names = {p["id"]: p["name"] for p in self.people.list()}
+        out = []
+        for c in calls:
+            score = (self._report(c["id"]) or {}).get("score") or {}
+            out.append({**c, "rep_name": names.get(c.get("rep_id")) or c.get("rep_name"), "overall": score.get("overall")})
+        return {**self._lead_out(lead), "calls": out}
+
+    def set_lead(self, call_id: str, lead_id: str | None, origin: str | None = None) -> dict[str, Any]:
+        """Say which lead a call was with (or none): call.json ``lead_id`` and the lead's ``call_ids``."""
+        with self._lock:
+            self._dir(call_id)
+            if lead_id:
+                self.leads.get(lead_id)
+            call = self._read(call_id, "call.json")
+            old = call.get("lead_id")
+            call.update(lead_id=lead_id or None, updated_at=_now())
+            self._write(call_id, "call.json", call)
+            if old and old != lead_id:
+                try:
+                    self.leads.link(old, call_id, linked=False)
+                except KeyError:
+                    pass  # the old lead is gone
+            if lead_id:
+                self.leads.link(lead_id, call_id)
+        self._publish(call, origin)
+        for changed in {old, lead_id} - {None}:
+            self.bus.publish("calls", "lead", {"id": changed}, origin=origin)
+        return {k: call.get(k) for k in SUMMARY_FIELDS}
+
+    def _prep_inputs(self, lead_id: str):
+        """(lead, [(call, report, coaching)] oldest first, approved answers, the rep's focus, signature)."""
+        lead = self.leads.get(lead_id)
+        ids = set(lead.get("call_ids", []))
+        calls = [c for c in self.list() if c["id"] in ids and c.get("status") == "done" and call_kind(c) == "real"]
+        calls.sort(key=lambda c: c.get("started_at") or "")
+        triples = [(c, r, self._coaching(c["id"])) for c in calls if (r := self._report(c["id"]))]
+        answers = [a for pack_id in dict.fromkeys(c["pack_id"] for c, _, _ in triples)
+                   for a in self.playbook.approved(pack_id)]
+        rep_id = lead.get("rep_id") or next((c.get("rep_id") for c, _, _ in reversed(triples) if c.get("rep_id")), None)
+        focus = self.coach_store.get(rep_id).get("focus") if rep_id else None
+        focus = focus if (focus or {}).get("status") == "active" else None
+        sig = json.dumps([lead.get("name"), [self.etag(c["id"]) for c, _, _ in triples], [a["id"] for a in answers],
+                          (focus or {}).get("since")])
+        return lead, triples, answers, focus, sig
+
+    def prep(self, lead_id: str) -> dict[str, Any]:
+        """The brief before the next call with this lead. Sel's rules answer at once; with the analysis
+        model, a model brief (it picks by id and writes a checked summary) is built on the agent queue,
+        announced with a ``lead`` event, and returned from then on until the lead's calls change."""
+        lead, calls, answers, focus, sig = self._prep_inputs(lead_id)
+        cached = self._briefs.get(("prep", lead_id))
+        if cached and cached[0] == sig:
+            return cached[1]
+        brief = prep_mod.build_brief(lead, calls, answers, focus)
+        if calls and self._analysis_llm_factory() is not None:
+            self._queue_agent("prep", lead_id)
+            brief["model_pending"] = True
+        return brief
+
+    def build_prep(self, lead_id: str) -> dict[str, Any]:
+        lead, calls, answers, focus, sig = self._prep_inputs(lead_id)
+        llm = self._analysis_llm_factory()
+        try:
+            brief = prep_mod.build_brief(lead, calls, answers, focus, llm)
+        except Exception as e:  # noqa: BLE001 - the rules brief stands
+            brief = prep_mod.build_brief(lead, calls, answers, focus)
+            brief["model_error"] = f"{type(e).__name__}: {e}"
+        self._briefs[("prep", lead_id)] = (sig, brief)
+        self.bus.publish("calls", "lead", {"id": lead_id, "prep": True})
+        return brief
+
+    def rehearse(self, lead_id: str, by: str | None = None, origin: str | None = None) -> dict[str, Any]:
+        """A drill from the lead's latest weak objection moment (newest real call first)."""
+        lead = self.leads.get(lead_id)
+        _, calls, _, _, _ = self._prep_inputs(lead_id)
+        for call, _, coaching in reversed(calls):
+            pack = self.pack(call["pack_id"])
+            for m in sorted((coaching or {}).get("moments", []), key=lambda m: -(m.get("start") or 0)):
+                crit = pack.criterion(m["criterion"])
+                if m["kind"] == "weak" and m.get("state") != "dismissed" and crit and criterion_signal(crit) == "objections":
+                    person = call.get("rep_id") or lead.get("rep_id") or by
+                    return self.create_drill(call["id"], m["id"], person, by=f"person:{by}" if by else "prep",
+                                             origin=origin)
+        raise ValueError(f"no objection to rehearse: none of {lead['name']}'s reviewed calls has one the rep fell short on")
+
+    # -- the team (managers) --------------------------------------------------------
+
+    def _real_done(self, rep_id: str | None = None) -> list[dict[str, Any]]:
+        """Reviewed real calls, newest first; one rep's when ``rep_id`` is given."""
+        calls = [c for c in self.list() if c.get("status") == "done" and call_kind(c) == "real"
+                 and (rep_id is None or c.get("rep_id") == rep_id)]
+        return sorted(calls, key=lambda c: c.get("started_at") or "", reverse=True)
+
+    def _criteria_order(self) -> dict[str, tuple[int, int, dict[str, Any]]]:
+        out = {}
+        for i, p in enumerate(self.packs()):
+            for j, c in enumerate(p.scorecard):
+                out[f"{p.id}/{c.id}"] = (i, j, {"key": f"{p.id}/{c.id}", "pack_id": p.id, "criterion": c.id, "title": c.title})
+        return out
+
+    def _matrix(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """(reps, criteria): per rep and criterion, scored and fell-short counts over their last 10 real calls."""
+        order = self._criteria_order()
+        reps, used = [], set()
+        for p in self.people.list():
+            if p["role"] != "rep":
+                continue
+            skills: dict[str, dict[str, Any]] = {}
+            calls = self._real_done(p["id"])[:SKILL_WINDOW]
+            for c in calls:
+                for cr in ((self._report(c["id"]) or {}).get("score") or {}).get("criteria", []):
+                    if cr.get("status") not in ("met", "partial", "missed"):
+                        continue
+                    key = f"{c['pack_id']}/{cr['id']}"
+                    s = skills.setdefault(key, {"scored": 0, "short": 0, "calls": []})
+                    s["scored"] += 1
+                    if cr["status"] != "met":
+                        s["short"] += 1
+                        s["calls"].append(c["id"])
+                    used.add(key)
+            focus = self.coach_store.get(p["id"]).get("focus")
+            reps.append({"id": p["id"], "name": p["name"], "calls": len(calls), "skills": skills,
+                         "focus": {k: focus.get(k) for k in ("title", "pack_id", "criterion", "set_by")}
+                         if focus and focus.get("status") == "active" else None})
+        criteria = [order[k][2] for k in sorted(used, key=lambda k: order.get(k, (99, 99))[:2]) if k in order]
+        return reps, criteria
+
+    def team_patterns(self, reps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """What repeats across reps: skills several fell short on, and the objections customers raise.
+
+        Objections are the reports' own findings, grouped by Sel's cue words for the customer's line.
+        """
+        if reps is None:
+            reps, _ = self._matrix()
+        order = self._criteria_order()
+        skills = []
+        for key in {k for r in reps for k in r["skills"]}:
+            scored = [r for r in reps if r["skills"].get(key, {}).get("scored")]
+            short = [r for r in scored if r["skills"][key]["short"]]
+            if len(short) >= SEVERAL_REPS and key in order:
+                skills.append({**order[key][2], "reps_scored": len(scored), "reps_short": len(short),
+                               "reps": [{"id": r["id"], "name": r["name"]} for r in short]})
+        skills.sort(key=lambda s: (-s["reps_short"], -s["reps_short"] / s["reps_scored"], s["title"]))
+        names = {p["id"]: p["name"] for p in self.people.list()}
+        cues: dict[str, dict[str, Any]] = {}
+        for c in self._real_done():
+            if not c.get("rep_id"):
+                continue
+            report = self._report(c["id"]) or {}
+            dismissed = set(((self._read(c["id"], "review.json") or {}).get("dismissed")) or [])
+            segs = {s["id"]: s["text"] for s in (report.get("transcript") or {}).get("segments", [])}
+            for f in report.get("findings", []):
+                if f.get("kind") != "objection" or f["id"] in dismissed:
+                    continue
+                quote = f["evidence"].get("quote") or " ".join(segs.get(s, "") for s in f["evidence"].get("segment_ids", []))
+                cue = objection_cue(quote) or "other concerns"
+                g = cues.setdefault(cue, {"cue": cue, "count": 0, "reps": set(), "examples": []})
+                g["count"] += 1
+                g["reps"].add(c["rep_id"])
+                if len(g["examples"]) < 3:
+                    g["examples"].append({"call_id": c["id"], "rep_id": c["rep_id"], "rep_name": names.get(c["rep_id"]),
+                                          "customer_name": c.get("customer_name"), "quote": quote,
+                                          "segment_ids": f["evidence"].get("segment_ids", [])})
+        objections = sorted(({**g, "reps": len(g["reps"])} for g in cues.values()),
+                            key=lambda g: (-g["count"], g["cue"]))
+        return {"skills": skills, "objections": objections}
+
+    def _open_escalations(self) -> list[dict[str, Any]]:
+        return [{**e, "person_id": p["id"], "person_name": p["name"]}
+                for p in self.people.list() if p["role"] == "rep"
+                for e in self.coach_store.get(p["id"]).get("escalations", []) if e.get("status") == "open"]
+
+    def team(self) -> dict[str, Any]:
+        """The manager's view: the reps × skills matrix, patterns, open escalations and the review queue."""
+        reps, criteria = self._matrix()
+        proposals = [{**a, "pack_id": p.id} for p in self.packs()
+                     for a in self.playbook.get(p.id)["answers"] if a["status"] == "proposed"]
+        names = {p["id"]: p["name"] for p in self.people.list()}
+        unassigned = [{"id": c["id"], "pack_id": c.get("pack_id"), "customer_name": c.get("customer_name"),
+                       "rep_name": names.get(c.get("rep_id")) or c.get("rep_name"), "started_at": c.get("started_at")}
+                      for c in self._real_done() if not c.get("rep_id")][:TODAY_RECENT]
+        return {"reps": reps, "criteria": criteria, "patterns": self.team_patterns(reps),
+                "escalations": self._open_escalations(),
+                "review": {"proposals": proposals, "unassigned": unassigned}}
+
+    def _one_on_one_points(self, person: dict[str, Any], data: dict[str, Any], timelines: list[dict[str, Any]],
+                           drills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Talking points for a 1:1, every one read from the rep's files."""
+        points = []
+        focus = data.get("focus") if (data.get("focus") or {}).get("status") == "active" else None
+        if focus:
+            points.append({"kind": "focus", "icon": "target", "title": f"Focus: {focus['title']}",
+                           "detail": focus.get("reason")})
+            practice = [d for d in drills if d["criterion"] == focus["criterion"] and d["pack_id"] == focus["pack_id"]]
+            tries = sum(d["attempts"] for d in practice)
+            if practice:
+                passes = sum(d["passes"] for d in practice)
+                points.append({"kind": "practice", "icon": "target", "drill_id": practice[0]["id"],
+                               "title": f"Practised it {tries} time{'s' if tries != 1 else ''}, passed {passes}"
+                               if tries else "A drill is ready but not tried yet",
+                               "detail": practice[0].get("title")})
+            checks = [t for t in data.get("transfer", []) if t.get("criterion") == focus["criterion"]
+                      and (t.get("at") or "") >= (focus.get("since") or "")]
+            if checks:
+                t = checks[-1]
+                verdict = {"pass": "showed up", "fail": "did not show up yet", "not_applicable": "did not come up",
+                           "unsure": "was unclear"}.get(t["verdict"], t["verdict"])
+                points.append({"kind": "transfer", "icon": "phone", "call_id": t["call_id"],
+                               "title": f"On the latest real call, the skill {verdict}", "detail": t.get("why")})
+        for h in data.get("history", [])[-3:]:
+            if h.get("status") == "passed":
+                points.append({"kind": "closed", "icon": "check", "title": f"Done: {h['title']}",
+                               "detail": (h.get("evidence") or {}).get("quote"),
+                               "call_id": (h.get("evidence") or {}).get("call_id")})
+        weakest = max(timelines, key=lambda t: (t["short"], -t["met"]), default=None)
+        if weakest and weakest["short"] and (not focus or weakest["criterion"] != focus["criterion"]):
+            last = next((p for p in reversed(weakest["points"]) if p["status"] != "met"), None)
+            points.append({"kind": "short", "icon": "alert", "call_id": last["call_id"] if last else None,
+                           "title": f"Fell short on {weakest['title']} in {weakest['short']} of {len(weakest['points'])} calls",
+                           "detail": (last.get("moment") or {}).get("quote") if last else None})
+        strong = [t for t in timelines if t["met"] and not t["short"] and len(t["points"]) >= 2]
+        if strong:
+            points.append({"kind": "strong", "icon": "check", "title": f"Doing well: {strong[0]['title']}",
+                           "detail": f"Met on all {len(strong[0]['points'])} reviewed calls."})
+        for e in data.get("escalations", []):
+            if e.get("status") == "open":
+                points.append({"kind": "escalation", "icon": "alert", "title": "Open escalation", "detail": e.get("note"),
+                               "call_id": e.get("call_id"), "drill_id": e.get("drill_id")})
+        return points
+
+    def team_member(self, person_id: str) -> dict[str, Any]:
+        """One rep for a manager: focus, skill timelines (oldest call first), transfer checks, drills, 1:1 brief."""
+        person = self.people.get(person_id)
+        if person is None:
+            raise KeyError(f"no person {person_id!r}")
+        data = self.coach_store.get(person_id)
+        calls = list(reversed(self._real_done(person_id)[:SKILL_WINDOW]))
+        order = self._criteria_order()
+        lines: dict[str, dict[str, Any]] = {}
+        for c in calls:
+            coaching = self._coaching(c["id"]) or {}
+            for cr in ((self._report(c["id"]) or {}).get("score") or {}).get("criteria", []):
+                if cr.get("status") not in ("met", "partial", "missed"):
+                    continue
+                key = f"{c['pack_id']}/{cr['id']}"
+                want = "strong" if cr["status"] == "met" else "weak"
+                m = next((m for m in coaching.get("moments", []) if m["criterion"] == cr["id"] and m["kind"] == want
+                          and m.get("state") != "dismissed"), None)
+                tl = lines.setdefault(key, {**(order.get(key, (0, 0, {}))[2] or {"key": key, "pack_id": c["pack_id"],
+                                                                                   "criterion": cr["id"]}),
+                                            "title": cr["title"], "met": 0, "short": 0, "points": []})
+                tl["met" if cr["status"] == "met" else "short"] += 1
+                tl["points"].append({"call_id": c["id"], "customer_name": c.get("customer_name"),
+                                     "started_at": c.get("started_at"), "status": cr["status"],
+                                     "moment": {"id": m["id"], "kind": m["kind"], "quote": m["evidence"]["quote"],
+                                                "why": m.get("why")} if m else None})
+        timelines = sorted(lines.values(), key=lambda t: order.get(t["key"], (99, 99))[:2])
+        drills = self.list_drills(person_id)
+        points = self._one_on_one_points(person, data, timelines, drills)
+        sig = json.dumps(points, sort_keys=True)
+        cached = self._briefs.get(("one_on_one", person_id))
+        fresh = bool(cached and cached[0] == sig)
+        summary = cached[1].get("summary") if fresh else None
+        if not fresh and points and self._chat_factory() is not None:
+            self._queue_agent("one_on_one", person_id)
+        pending = ("one_on_one", person_id) in self._pending
+        return {"person": person, "focus": self._focus_detail(person_id, data.get("focus")), "timelines": timelines,
+                "transfer": data.get("transfer", [])[-10:], "drills": drills, "history": data.get("history", [])[-10:],
+                "escalations": data.get("escalations", []),
+                "brief": {"points": points, "summary": summary, "model_pending": pending}}
+
+    def build_one_on_one(self, person_id: str) -> dict[str, Any] | None:
+        """A two-sentence summary of the 1:1 points from the chat model; numbers must come from the points."""
+        view = self.team_member(person_id)
+        points = view["brief"]["points"]
+        sig = json.dumps(points, sort_keys=True)
+        llm = self._chat_factory()
+        summary = None
+        if llm is not None and points:
+            listed = "\n".join(f"- {p['title']}" + (f": {p['detail']}" if p.get("detail") else "") for p in points)
+            schema = {"type": "object", "additionalProperties": False, "required": ["summary"],
+                      "properties": {"summary": {"type": "string", "maxLength": 300}}}
+            try:
+                out = llm.complete_json(ONE_ON_ONE_SYSTEM, f"Rep: {view['person']['name']}\n\n{listed}", schema,
+                                        "one-on-one", max_tokens=160)
+                text = " ".join(str(out.get("summary") or "").split())
+                # Generated text is checked: a number the points don't contain is made up.
+                if text and numbers(text) <= numbers(listed):
+                    summary = {"text": text, "by": f"model:{llm.name}"}
+            except Exception:  # noqa: BLE001 - the points stand on their own
+                traceback.print_exc()
+        self._briefs[("one_on_one", person_id)] = (sig, {"summary": summary})
+        self.bus.publish("calls", "coach", {"person_id": person_id, "brief": True})
+        return summary
+
+    def resolve_escalation(self, person_id: str, key: str, status: str, by: str | None,
+                           origin: str | None = None) -> dict[str, Any]:
+        """A manager marks an escalation handled. Only a manager may (no login: ``by`` is who is viewing)."""
+        if status not in ESCALATION_STATUSES:
+            raise ValueError(f"status must be one of {', '.join(ESCALATION_STATUSES)}")
+        setter = self.people.get(by) if by else None
+        if setter is None or setter["role"] != "manager":
+            raise PermissionError("only a manager can mark an escalation handled")
+        with self.coach_store.lock:
+            data = self.coach_store.get(person_id)
+            e = next((e for e in data.get("escalations", []) if e["key"] == key), None)
+            if e is None:
+                raise KeyError(f"no escalation {key!r}")
+            e.update(status=status, resolved_by=setter["id"] if status == "resolved" else None,
+                     resolved_at=_now() if status == "resolved" else None)
+            self.coach_store.save(person_id, data)
+        self.bus.publish("calls", "coach", {"person_id": person_id, "escalation": key}, origin=origin)
+        return e
+
+    # -- the playbook overlay (team answers) ------------------------------------------
+
+    def playbook_view(self, pack_id: str) -> dict[str, Any]:
+        pack = self.pack(pack_id)
+        answers = [{**a, "pack_id": pack.id} for a in self.playbook.get(pack.id)["answers"]]
+        return {"pack_id": pack.id, "name": pack.name, **{
+            status: [a for a in answers if a["status"] == status] for status in ("approved", "proposed", "refused", "rejected")}}
+
+    def playbook_action(self, pack_id: str, action: str, answer_id: str | None, by: str | None,
+                        origin: str | None = None) -> dict[str, Any]:
+        """propose (the Librarian, on the agent queue), approve or reject (managers only)."""
+        pack = self.pack(pack_id)
+        person = self.people.get(by) if by else None
+        if by and person is None:
+            raise KeyError(f"no person {by!r}")
+        if action == "propose":
+            self._queue_agent("librarian", pack.id)
+            return {"queued": True, "pack_id": pack.id}
+        if action not in ("approve", "reject"):
+            raise ValueError("action must be propose, approve or reject")
+        if person is None or person["role"] != "manager":
+            raise PermissionError("only a manager can approve or reject a team answer")
+        with self.playbook.lock:
+            data = self.playbook.get(pack.id)
+            a = next((a for a in data["answers"] if a["id"] == answer_id), None)
+            if a is None:
+                raise KeyError(f"no answer {answer_id!r}")
+            if a["status"] == "refused":
+                raise ValueError("Sel refused this answer: " + "; ".join((a.get("check") or {}).get("reasons", [])))
+            a.update(status="approved" if action == "approve" else "rejected", decided_by=person["id"], decided_at=_now())
+            self.playbook.save(data)
+        self.bus.publish("calls", "playbook", {"pack_id": pack.id, "id": a["id"], "status": a["status"]}, origin=origin)
+        return {**a, "pack_id": pack.id}
+
+    def run_librarian(self, pack_id: str) -> dict[str, Any]:
+        """Propose team answers from strong moments and endorsed lines on the team's real calls."""
+        pack = self.pack(pack_id)
+        calls = [c for c in self._real_done() if c.get("pack_id") == pack.id and c.get("rep_id")]
+        coachings = [(c, x) for c in calls if (x := self._coaching(c["id"]))]
+        names = sorted({n for c, _ in coachings for n in self._real_names(c)})
+        on_file = self.playbook.get(pack.id)["answers"]
+        known = {(a["source"]["call_id"], a["source"]["moment_id"]) for a in on_file}
+        cands = [c for c in playbook_mod.candidates(coachings, names, known, on_file) if c.get("pack_id") in (None, pack.id)]
+        index = pack_index(pack)
+        llm = self._chat_factory()
+        error = None
+        try:
+            proposals, refused = playbook_mod.propose(cands, pack, index, llm)
+        except Exception as e:  # noqa: BLE001 - the rules propose every candidate instead
+            error = f"{type(e).__name__}: {e}"
+            proposals, refused = playbook_mod.propose(cands, pack, index, None)
+        with self.playbook.lock:
+            data = self.playbook.get(pack.id)
+            data["answers"].extend(proposals + refused)
+            self.playbook.save(data)
+        result = {"pack_id": pack.id, "proposed": len(proposals), "refused": len(refused), "model_error": error}
+        self.bus.publish("calls", "playbook", result)
+        return result
+
     def changed(self, call_id: str, origin: str | None) -> None:
         """Tell other tabs that a review action changed this call."""
         self.bus.publish("calls", "call-changed", {"id": call_id}, origin=origin)
 
 
+ONE_ON_ONE_SYSTEM = """You help a sales manager prepare a one-to-one with a salesperson. Below are talking points from
+the rep's calls, practice and checks. Write summary: two short sentences on where the rep stands and what to discuss,
+using only the points. Return only JSON."""
+
 _CHAT_HEALTH: dict[str, Any] = {"at": 0.0, "llm": None}
+_ANALYSIS_HEALTH: dict[str, Any] = {"at": 0.0, "llm": None}
 
 
 def default_chat_factory():
@@ -1085,6 +1540,22 @@ def default_chat_factory():
             _CHAT_HEALTH["llm"] = None
         _CHAT_HEALTH["at"] = time.monotonic()
     return _CHAT_HEALTH["llm"]
+
+
+def default_analysis_llm():
+    """The analysis model (``SEL_LLM_*``) when its server answers (checked at most once a minute), else None."""
+    import time
+
+    from .llm import LLMError, client_from_env
+
+    if time.monotonic() - _ANALYSIS_HEALTH["at"] > 60:
+        try:
+            llm = client_from_env()
+            _ANALYSIS_HEALTH["llm"] = llm if llm.health().get("ok") else None
+        except LLMError:
+            _ANALYSIS_HEALTH["llm"] = None
+        _ANALYSIS_HEALTH["at"] = time.monotonic()
+    return _ANALYSIS_HEALTH["llm"]
 
 
 def default_factory(call: dict[str, Any], speakers: list[Speaker]):

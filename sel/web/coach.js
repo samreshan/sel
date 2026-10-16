@@ -7,7 +7,9 @@
  * own files; nothing here is guessed.
  *
  * Playbook shows a business pack as reps use it: the skills the scorecard
- * checks, the approved facts and the documents claims are checked against.
+ * checks, the approved facts and the documents claims are checked against,
+ * and the answers the team approved (the playbook overlay, GET /api/playbook/<pack>);
+ * a manager also sees the answers the Librarian proposed, to approve or reject.
  * People is the team list behind "Viewing as" (no login; see docs/decisions.md).
  */
 (function () {
@@ -25,6 +27,8 @@
     loading: false,
     refetch: 0, // debounce timer for call events
     packs: new Map(), // pack id -> detail
+    answers: new Map(), // pack id -> GET /api/playbook/<pack> (team answers) or {error}
+    librarian: null, // status line after "Ask the Librarian"
     docs: new Map(), // "pack|ref" -> text or {error}
     openDocs: new Set(),
     main: null,
@@ -68,6 +72,15 @@
     else page.todayFor = undefined;
   });
   S.on("people-changed", rerender);
+  // The Librarian proposed answers, or a manager approved or rejected one (here or in another tab).
+  S.on("playbook", (d) => {
+    if (d && d.pack_id) page.answers.delete(d.pack_id);
+    if (d && d.proposed !== undefined && page.librarian) page.librarian = `The Librarian proposed ${plural(d.proposed, "answer", "answers")}${d.refused ? `; Sel refused ${d.refused}` : ""}.`;
+    if (S.view() === "coach" && S.coachRoute().page === "playbook") rerender();
+  });
+  S.on("viewer", () => {
+    if (S.view() === "coach" && S.coachRoute().page === "playbook") rerender();
+  });
   // Leaving a page means the next visit counts as arriving (see render).
   window.addEventListener("hashchange", () => {
     const h = location.hash.replace(/^#/, "") || "today";
@@ -576,6 +589,94 @@
     rerender();
   }
 
+  async function loadAnswers(id) {
+    try {
+      page.answers.set(id, await api(`/api/playbook/${enc(id)}`, { fresh: true }));
+    } catch (e) {
+      page.answers.set(id, { error: e.message });
+    }
+    rerender();
+  }
+
+  function answerItem(a, actions) {
+    return el(
+      "li",
+      { class: "skill" },
+      el("div", { class: "skill-head" }, el("span", { class: "strong", text: a.objection }), a.status === "approved" ? pill("info", "Team answer") : pill("warn", "Proposed")),
+      el("p", { class: "better-line-text", text: S.quoted(a.answer) }),
+      el("p", { class: "muted small", text: `${a.answer_from === "rep" ? "Said by a rep on a real call" : "A better line a rep endorsed"} · ${a.check && a.check.check === "ok" ? "Checked against your pack" : "Refused"}` }),
+      actions || null
+    );
+  }
+
+  function teamAnswers(id) {
+    const data = page.answers.get(id);
+    if (!data) {
+      loadAnswers(id);
+      return section("Team answers", null, "check", "info", muted("Loading…"));
+    }
+    if (data.error) return section("Team answers", null, "check", "info", el("p", { class: "form-error", text: data.error }));
+    return section(
+      "Team answers",
+      "Answers a manager approved from the team's own calls. They become the better line, Prep's answer and the rehearsal's model answer.",
+      "check",
+      "info",
+      data.approved.length ? el("ul", { class: "skills" }, ...data.approved.map((a) => answerItem(a))) : muted("None approved yet. A manager approves what the Librarian proposes.")
+    );
+  }
+
+  function reviewQueue(id) {
+    const me = S.viewer();
+    const data = page.answers.get(id);
+    if (!me || me.role !== "manager" || !data || data.error) return null;
+    const msg = el("p", { class: "form-status", role: "status", text: page.librarian || "" });
+    const run = el("button", { type: "button", class: "small", text: "Ask the Librarian" });
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      page.librarian = "The Librarian is reading the team's strong moments and endorsed lines…";
+      msg.textContent = page.librarian;
+      try {
+        await api(`/api/playbook/${enc(id)}/answers`, { method: "POST", json: { action: "propose", by: me.id } });
+      } catch (e) {
+        page.librarian = e.message;
+        msg.textContent = e.message;
+        run.disabled = false;
+      }
+    });
+    const decide = (a, action) => async (ev) => {
+      ev.currentTarget.disabled = true;
+      try {
+        await api(`/api/playbook/${enc(id)}/answers`, { method: "POST", json: { action, id: a.id, by: me.id } });
+        page.librarian = action === "approve" ? "Approved for the team." : "Rejected.";
+        loadAnswers(id); // this tab's own change is not echoed back
+      } catch (e) {
+        page.librarian = e.message;
+        rerender();
+      }
+    };
+    const rows = data.proposed.map((a) =>
+      answerItem(
+        a,
+        el(
+          "div",
+          { class: "row" },
+          el("button", { type: "button", class: "small primary", text: "Approve for the team", on: { click: decide(a, "approve") } }),
+          el("button", { type: "button", class: "small ghost", text: "Reject", on: { click: decide(a, "reject") } }),
+          a.source && a.source.call_id ? el("a", { class: "button small", href: `#call/${enc(a.source.call_id)}`, text: "Open the call" }) : null
+        )
+      )
+    );
+    const refused = data.refused.length
+      ? el(
+          "details",
+          { class: "disclosure" },
+          el("summary", { text: `Sel refused ${plural(data.refused.length, "answer", "answers")}` }),
+          el("ul", { class: "refused-lines" }, ...data.refused.map((a) => el("li", {}, el("p", { text: S.quoted(a.answer) }), muted((a.check.reasons || []).join("; ")))))
+        )
+      : null;
+    return section("Review queue", "For managers: answers the Librarian found in the team's real calls, checked against the pack.", "lines", "accent", el("div", { class: "row" }, run), msg, rows.length ? el("ul", { class: "skills" }, ...rows) : muted("Nothing waiting."), refused);
+  }
+
   function renderPlaybook(main, packId) {
     const packs = S.packs();
     if (!packs.length) {
@@ -623,10 +724,12 @@
           el(
             "div",
             { class: "playbook-side" },
+            teamAnswers(id),
             section("Approved facts", "Claims on calls are checked against these and the documents below.", "check", "ok", detail.facts.length ? facts : muted("No facts in this pack.")),
             section("Documents", null, "doc", "accent", detail.docs.length ? docs : muted("No documents in this pack."))
           )
         ),
+        reviewQueue(id),
         el("p", { class: "muted small", text: `Languages: ${detail.languages.join(", ") || "not set"} · week starts on ${detail.week_starts_on}` })
       )
     );

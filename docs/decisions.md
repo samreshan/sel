@@ -43,6 +43,12 @@
 | Switzer stays under its Personal Use Only licence for now (owners, 16 Oct 2026) | Fine for the Frogtoberfest demo; a commercial release must license it or switch to an open font (Inter and Geist are already bundled) |
 | Escalate to a manager only for a contradicted claim on a real call, a drill failed three times, or moving on from a manager's focus | Managers see what needs them; the Coach handles the rest |
 | Practice calls (simulator, drills) never count towards skills, focus or transfer | Practice is where reps try things out |
+| What the team learns lives in an overlay next to the calls (`playbook/<pack>.json`); packs are never written to | Packs are the business's documents; team answers are reviewed separately and can be rejected |
+| A team answer is always someone's own words (a rep's line from a real call, or a better line a person endorsed); the Librarian's model only picks and labels | The model points; code supplies the words. A rep's line that only survives anonymisation by losing an amount is skipped |
+| Only a manager approves or rejects a team answer, or marks an escalation handled ("Viewing as", no login) | Approved answers coach every rep, so a person who owns the team decides; without login this is a convenience, not access control |
+| Approved answers become the better line when no line passed (or no model wrote one), labelled "Team answer" and checked by `check_line` | The flywheel: what worked on a real call coaches the next one, with the same claim gate |
+| Prep and the 1:1 brief show Sel's rules at once; the model's version is built on the agent queue and replaces it | A 7B model takes tens of seconds on CPU; a page should not wait for it |
+| Leads are thin (name, phone, rep, notes, calls); not a CRM | Prep needs a lead's earlier calls, nothing more (scope: no CRM integrations) |
 
 ## Open
 
@@ -63,3 +69,5 @@
 15. **Who confirms a focus.** Today the Coach sets it and a person can change it; should a manager confirm each one?
 16. ~~**How many real-call passes close a focus.**~~ Decided: one (table above).
 17. ~~**Drill language.**~~ Decided: English only for now. ~~**Switzer licence.**~~ Decided: Personal Use Only for now (table above).
+18. **Leads**: delete and merge, and whether a lead's rep should follow its latest call.
+19. **Team answers across packs**: an answer is per pack today; a team selling two products may want to share some.

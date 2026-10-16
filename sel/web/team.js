@@ -27,7 +27,7 @@
     change_manager_focus: "The Coach wants to move on from the focus you set",
   };
 
-  const page = { main: null, data: new Map(), errors: new Map(), loading: new Set() };
+  const page = { main: null, data: new Map(), errors: new Map(), loading: new Set(), librarian: null };
 
   const route = () => S.coachRoute();
   const here = () => S.view() === "coach" && ["leads", "lead", "prep", "team", "settings"].includes(route().page);
@@ -64,9 +64,26 @@
     rerender();
   });
   S.on("drill", () => invalidate("/api/team"));
+  S.on("coach", (d) => {
+    if (d && d.brief) rerender();
+  });
   S.on("call", () => {
     invalidate("/api/leads");
     invalidate("/api/team");
+  });
+  // A lead changed, or a model brief for one is ready: re-read what is on screen.
+  S.on("lead", () => {
+    invalidate("/api/leads");
+    rerender();
+  });
+  // The Librarian finished, or a manager approved or rejected a team answer.
+  S.on("playbook", (d) => {
+    invalidate("/api/team");
+    invalidate("/api/leads");
+    if (d && d.proposed !== undefined && page.librarian) {
+      page.librarian = d.model_error ? `The model failed, so Sel's rules picked: ${d.model_error}` : `The Librarian proposed ${plural(d.proposed, "answer", "answers")}${d.refused ? ` and Sel refused ${d.refused}` : ""}.`;
+    }
+    rerender();
   });
   S.on("people-changed", rerender);
   S.on("viewer", rerender);
@@ -103,6 +120,9 @@
       el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: `${title} could not be loaded.` }), muted(message), el("div", { class: "row" }, el("button", { type: "button", text: "Try again", on: { click: () => { page.errors.delete(retryPath); load(retryPath); } } })))
     );
   }
+
+  // Where an answer came from, labelled as on the Coaching tab.
+  const answerLabel = (a) => (a.from === "team answer" ? ["info", "Team answer"] : S.lineOrigin(a));
 
   function aiPill(by) {
     const b = String(by || "");
@@ -237,7 +257,7 @@
         el("div", { class: "skill-head" }, el("span", { class: "strong", text: o.text }), el("span", { class: "muted small", text: formatStarted(o.started_at) })),
         o.quote ? el("p", { class: "said-line role-customer" }, el("span", { class: "said-who", text: "They said" }), quoted(o.quote)) : null,
         o.answer
-          ? el("div", { class: "better-line" }, el("div", { class: "better-line-head" }, el("span", { class: "label", text: "Answer" }), pill(o.answer.from === "team answer" ? "info" : "violet", o.answer.from === "team answer" ? "Team answer" : "AI-suggested")), el("p", { class: "better-line-text", text: quoted(o.answer.text) }))
+          ? el("div", { class: "better-line" }, el("div", { class: "better-line-head" }, el("span", { class: "label", text: "Answer" }), pill(...answerLabel(o.answer))), el("p", { class: "better-line-text", text: quoted(o.answer.text) }))
           : muted("No answer on file yet. Ask what is behind the concern.")
       )
     );
@@ -258,7 +278,7 @@
             "What they raised before, with the best answer Sel has: the team's approved answer, else the better line.",
             "alert",
             "warn",
-            el("div", { class: "focus-body" }, el("p", {}, brief.summary.text, " ", aiPill(brief.summary.by))),
+            el("div", { class: "focus-body" }, el("p", {}, brief.summary.text, " ", aiPill(brief.summary.by)), brief.model_pending ? muted("The language model is reading these calls too; this brief updates by itself.") : null),
             objections.length ? el("ul", { class: "skills" }, ...objections) : muted("No objections on earlier calls.")
           ),
           el(
@@ -328,15 +348,15 @@
         el("th", { scope: "row" }, el("a", { href: `#team/${enc(r.id)}`, text: r.name })),
         ...t.criteria.map((c) => {
           const s = r.skills[c.key];
-          if (!s || !s.scored) return el("td", { class: "muted", text: "–" });
+          if (!s || !s.scored) return el("td", { class: "muted" }, el("span", { "aria-hidden": "true", text: "–" }), el("span", { class: "sr-only", text: "Not scored" }));
           const ratio = s.short / s.scored;
           const tone = ratio === 0 ? "ok" : ratio >= 0.5 ? "bad" : "warn";
           return el("td", {}, pill(tone, `${s.scored - s.short} of ${s.scored}`));
         }),
-        el("td", { text: r.focus ? r.focus.title : "None" })
+        el("td", { class: "matrix-focus", text: r.focus ? r.focus.title : "None" })
       )
     );
-    return section("bento-anchor", "Skills by rep", "Calls where each skill was met, of the reviewed real calls it was scored on (last 10 per rep).", "target", "violet", el("div", { class: "table-scroll" }, el("table", { class: "team-table matrix" }, el("thead", {}, head), el("tbody", {}, ...rows))));
+    return section("bento-anchor", "Skills by rep", "Calls where each skill was met, of the reviewed real calls it was scored on (last 10 per rep).", "target", "violet", el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Skills by rep" }, el("table", { class: "team-table matrix" }, el("thead", {}, head), el("tbody", {}, ...rows))));
   }
 
   function patterns(p) {
@@ -349,15 +369,16 @@
 
   function reviewQueue(review, me) {
     const run = el("button", { type: "button", class: "small", text: "Ask the Librarian" });
-    const msg = el("p", { class: "form-status", role: "status" });
+    const msg = el("p", { class: "form-status", role: "status", text: page.librarian || "" });
     run.addEventListener("click", async () => {
       run.disabled = true;
-      msg.textContent = "Reading the team's strong moments…";
+      page.librarian = "The Librarian is reading the team's strong moments and endorsed lines…";
+      msg.textContent = page.librarian;
       try {
+        // Queued on the server; a `playbook` event says when each pack is done.
         for (const p of S.packs()) await api(`/api/playbook/${enc(p.id)}/answers`, { method: "POST", json: { action: "propose", by: me.id } });
-        invalidate("/api/team");
-        rerender();
       } catch (e) {
+        page.librarian = e.message;
         msg.textContent = e.message;
         run.disabled = false;
       }
@@ -402,7 +423,7 @@
             const st = STATUS[p.status] || ["neutral", p.status];
             return el(
               "li",
-              {},
+              { class: `is-${p.status}` },
               el("div", { class: "better-line-head" }, pill(st[0], st[1]), el("a", { href: `#call/${enc(p.call_id)}`, text: compact([p.customer_name, formatStarted(p.started_at)]).join(" · ") })),
               p.moment ? el("p", { class: "said-line role-rep" }, el("span", { class: "said-who", text: p.moment.kind === "strong" ? "Did well" : "Fell short" }), quoted(p.moment.quote)) : null
             );
@@ -429,8 +450,8 @@
             "Talking points from this rep's calls, drills and transfer checks.",
             "user",
             "accent",
-            brief.summary ? el("p", {}, brief.summary.text, " ", aiPill(brief.summary.by)) : null,
-            el("ul", { class: "page-rows" }, ...brief.points.map((p) => el("li", { class: "page-row" }, icon(p.icon || "check", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: p.title }), p.detail ? el("span", { class: "muted small", text: p.detail }) : null), p.call_id ? el("a", { class: "button small", href: `#call/${enc(p.call_id)}`, text: "Open" }) : null)))
+            brief.summary ? el("p", {}, brief.summary.text, " ", aiPill(brief.summary.by)) : brief.model_pending ? muted("The chat model is writing a short summary of these points…") : null,
+            el("ul", { class: "page-rows" }, ...brief.points.map((p) => el("li", { class: "page-row" }, icon(p.icon || "check", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: p.title }), p.detail ? el("span", { class: "muted small", text: p.detail }) : null), p.call_id ? el("a", { class: "button small", href: `#call/${enc(p.call_id)}`, text: "Open the call", "aria-label": `Open the call: ${p.title}` }) : p.drill_id ? el("a", { class: "button small", href: `#practice/${enc(p.drill_id)}`, text: "Open the drill" }) : null)))
           ),
           section("", "On real calls since the focus", null, "phone", "info", transfer.length ? el("ul", { class: "page-rows" }, ...transfer) : muted("No real call checked against the focus yet."))
         ),

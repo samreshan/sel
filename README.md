@@ -95,7 +95,8 @@ real call → DIAGNOSE (moments, better line, gate) → FOCUS (one skill) → PR
 | Persona builder | a weak moment, anonymised by code | a short customer persona | the AI customer's system prompt | built |
 | AI customer | the persona + the drill so far | `{say, end_call, mood}` | the practice room as the customer (rules customer if the model fails) | built |
 | Judge | a drill transcript, or a newly filed real call | pass / fail / not applicable + a segment id | debrief; transfer check → the Coach closes the focus (needs the rules to agree) | built |
-| Librarian, Prep writer | strong moments; a lead's past reports | playbook answers; a brief | manager approval → retrieval; Prep page | later |
+| Librarian | strong moments and endorsed better lines on the team's real calls | which candidates to propose + a short label for the objection, by number | `check_line` → review queue → a manager approves → better lines, Prep, rehearsals | built |
+| Prep writer | a lead's earlier reports (never raw transcripts) | likely objections and gaps by id + a two-sentence summary | code attaches the best answer (approved team answer, else the better line); a summary with a number not in the items is dropped → Prep page | built |
 
 The model points; code supplies the words and checks the facts. Quotes are the
 transcript's own words, sources are the pack's own text, and a suggested line

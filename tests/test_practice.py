@@ -91,6 +91,14 @@ class AICustomerTests(unittest.TestCase):
         lines.append({"role": "rep", "text": "I'll email you the comparison by tomorrow evening."})
         self.assertTrue(rules_reply(lines, 1)["end_call"])
 
+    def test_the_model_cannot_hang_up_early(self):
+        llm = ScriptedLLM({"customer": {"say": "Okay, bye.", "end_call": True, "mood": "calm"}})
+        ai = AICustomer(self.PERSONA, llm)
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "It has a warranty."}]
+        self.assertFalse(ai.reply(lines)["end_call"])
+        lines.append({"role": "rep", "text": "I'll email you the quote by tomorrow evening."})
+        self.assertTrue(ai.reply(lines)["end_call"])  # a dated next step was agreed
+
     def test_model_reply_is_checked_and_falls_back_to_rules(self):
         llm = ScriptedLLM({"customer": [
             {"say": "Fine, what is in the price?", "end_call": False, "mood": "calm"},

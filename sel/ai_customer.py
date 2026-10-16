@@ -71,7 +71,7 @@ class AICustomer:
                 # Small models write stage directions into the line ("Sounds good, thanks. End call.").
                 say = _STAGE.sub("", " ".join(str(out.get("say") or "").split())).strip()
                 if say and not _IDS.search(say):
-                    return {"say": say[:MAX_SAY], "end_call": bool(out.get("end_call")),
+                    return {"say": say[:MAX_SAY], "end_call": bool(out.get("end_call")) and may_end(lines),
                             "mood": out.get("mood") if out.get("mood") in MOODS else "calm", "by": self.name,
                             "seconds": round(self.timings[-1], 2)}
             except LLMError:
@@ -82,6 +82,22 @@ class AICustomer:
 def render(lines: list[dict[str, Any]]) -> str:
     return "\n".join(f"{'SALESPERSON' if x['role'] == 'rep' else 'YOU (CUSTOMER)'}: {x['text']}" for x in lines[-20:]) + \
         "\nYOU (CUSTOMER):"
+
+
+MIN_TURNS_TO_END = 4  # customer lines before a model may end the call without an agreed next step
+
+
+def may_end(lines: list[dict[str, Any]]) -> bool:
+    """Whether the customer may hang up: a dated next step was just agreed, or the call has gone on a while.
+
+    Small models set end_call on their first reply; code decides, so a drill is never cut short.
+    """
+    from .dates import due_phrase_in
+    from .live import is_commitment, sentences
+
+    reps = [x["text"] for x in lines if x["role"] == "rep"]
+    agreed = bool(reps) and any(is_commitment(s, s) and due_phrase_in(s) for s in sentences(reps[-1]))
+    return agreed or sum(1 for x in lines if x["role"] == "customer") >= MIN_TURNS_TO_END
 
 
 def rules_reply(lines: list[dict[str, Any]], difficulty: int = 2) -> dict[str, Any]:

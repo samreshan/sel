@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 169 tests; the 6 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 171 tests; the 6 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
@@ -472,12 +472,19 @@ AI worker of a real drill room), Intel i7-1255U, CPU only, Ollama, Windows:
 |---|---|---|---|
 | Rules (no model) | under 0.01 s | – | under 0.01 s |
 | qwen2.5:7b (the chat client inherits the analysis model) | median 12.0 s, p90 17.3 s (4 replies) | 28.4 s | 52 s |
+| qwen2.5:1.5b (`SEL_CHAT_LLM_MODEL`, chosen 16 Oct 2026) | median 4.4 s, p90 4.8 s, max 5.3 s (8 replies); about 2 s on the first turn | 7.0 s | 8 to 17 s |
 
-Target: 2 to 3 s. A 7B model on this CPU is four to six times too slow for a
-conversation; the chat model has to be a small one (an owner decision,
-docs/decisions.md 14). The replies themselves were in character ("Can you tell
+Target: 2 to 3 s. 7B is four to six times too slow. 1.5B is about three
+times faster and fine for typed practice, but still above the target once
+the transcript grows (each turn re-reads it); its customer also gives in
+easily ("Absolutely, that's very helpful"), so drills are less demanding
+than the persona asks. The replies themselves were in character ("Can you tell
 me what their quote includes, like panel brand and warranty details?"), but
 one ended with the stage direction "End call.", now stripped.
+
+- **qwen2.5:1.5b set `end_call` on its first reply** in every drill. Code now
+  decides (`ai_customer.may_end`): the model may hang up only after a dated
+  next step is agreed or after 4 customer lines.
 
 ### Practice: findings
 
@@ -622,8 +629,10 @@ Browser (`sel/web/app.js`):
 - Coaching with qwen2.5:7b found no strong moments on solar-01 and missed the
   NEA-timing moment; the line for the inverter moment was a safe "I'll
   confirm", not a corrected fact. Try a criterion-at-a-time prompt.
-- The chat model for the Coach and AI customer is not chosen (a decision for
-  the owners: the demo laptop). `SEL_CHAT_LLM_*` inherits the 7B model today.
+- The chat model is qwen2.5:1.5b on the i7-1255U (set as a user environment
+  variable, `SEL_CHAT_LLM_MODEL`): 4.4 s median per AI-customer reply, above
+  the 2 to 3 s target. Try keeping the reply prompt shorter (last N lines) or
+  a GPU/Apple Silicon demo laptop.
 - One browser run saw a 409 in the simulator test under heavy CPU load
   (another model job running); it passed on reruns. Likely a PCM chunk posted
   after hang-up.

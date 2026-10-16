@@ -56,6 +56,6 @@
 11. **Simulator across the internet.** No STUN/TURN server is configured by default, so calls work on one machine or one network. Run one, or document a provider?
 12. **Login.** Serving to the network (`--host 0.0.0.0`) has no authentication. Needed before the simulator is used beyond a trusted office.
 13. **Live Nepali transcription.** Whisper `base` garbles romanized Nepali; try `initial_prompt` with pack vocabulary and time words, or a Nepali model.
-14. **Chat model and demo laptop.** The AI customer needs replies in 2 to 3 s. On an i7-1255U (CPU) qwen2.5:7b took 35 to 70 s per coaching request. Which small open-weight model (for example qwen2.5:1.5b, Apache-2.0) and which laptop?
+14. **Demo laptop.** Chat model chosen: qwen2.5:1.5b (Apache-2.0). On the i7-1255U it answers in 4.4 s median, above the 2 to 3 s target; is that laptop the demo machine, or is a faster one assumed?
 15. **Who confirms a focus.** Today the Coach sets it and a person can change it; should a manager confirm each one?
 16. **How many real-call passes close a focus.** One today.

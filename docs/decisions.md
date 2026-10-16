@@ -35,9 +35,12 @@
 | Focus ranking without a model: calls fell short on, then objections, discovery, next step, talk ratio, claims | Practice drills train conversation skills; wrong claims are fixed by the playbook and escalated |
 | Two clients: `SEL_LLM_*` for analysis and coaching, `SEL_CHAT_LLM_*` for the Coach and AI customer | Conversation needs a fast model; analysis can be slower and more accurate |
 | Practice personas are anonymised by code before any prompt and named from a fictional list | Real calls are private; the practice customer must not carry a real customer's name, number or price |
-| Drills are typed first, in English; the AI customer is labelled on every line | Text works on any machine and is easy to test; voice and Nepali are a stretch |
+| Drills are typed first; the AI customer is labelled on every line | Text works on any machine and is easy to test; voice is a stretch |
 | The Judge's pass needs Sel's rules to agree where they measure the skill; disagreement is "unsure" | A false pass would close a focus the rep has not earned |
-| A transfer pass on one later real call closes the focus | The loop's measure is the skill showing up on a real call; more calls can be required later |
+| A transfer pass on one later real call closes the focus (owners, 16 Oct 2026) | The loop's measure is the skill showing up on a real call; more calls can be required later |
+| Demo machine: an Intel i7-1255U laptop (CPU only) or an Apple M2; measure on both. Chat model qwen2.5:1.5b, analysis model qwen2.5:7b (owners, 16 Oct 2026) | On the i7 the AI customer answers in 4.4 s median against a 2 to 3 s target; the M2 is expected to be faster and is still to be measured |
+| Drills are English only for now (owners, 16 Oct 2026) | Nepali personas and speech come after the English loop works |
+| Switzer stays under its Personal Use Only licence for now (owners, 16 Oct 2026) | Fine for the Frogtoberfest demo; a commercial release must license it or switch to an open font (Inter and Geist are already bundled) |
 | Escalate to a manager only for a contradicted claim on a real call, a drill failed three times, or moving on from a manager's focus | Managers see what needs them; the Coach handles the rest |
 | Practice calls (simulator, drills) never count towards skills, focus or transfer | Practice is where reps try things out |
 
@@ -56,6 +59,7 @@
 11. **Simulator across the internet.** No STUN/TURN server is configured by default, so calls work on one machine or one network. Run one, or document a provider?
 12. **Login.** Serving to the network (`--host 0.0.0.0`) has no authentication. Needed before the simulator is used beyond a trusted office.
 13. **Live Nepali transcription.** Whisper `base` garbles romanized Nepali; try `initial_prompt` with pack vocabulary and time words, or a Nepali model.
-14. **Demo laptop.** Chat model chosen: qwen2.5:1.5b (Apache-2.0). On the i7-1255U it answers in 4.4 s median, above the 2 to 3 s target; is that laptop the demo machine, or is a faster one assumed?
+14. ~~**Demo laptop.**~~ Decided: i7-1255U or Apple M2 (table above). Still to do: measure on the M2.
 15. **Who confirms a focus.** Today the Coach sets it and a person can change it; should a manager confirm each one?
-16. **How many real-call passes close a focus.** One today.
+16. ~~**How many real-call passes close a focus.**~~ Decided: one (table above).
+17. ~~**Drill language.**~~ Decided: English only for now. ~~**Switzer licence.**~~ Decided: Personal Use Only for now (table above).

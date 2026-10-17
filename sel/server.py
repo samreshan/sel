@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from .service import CallService
+from .playground import Playground
 from .simulator import RoomStateError, SimulatorHub
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -113,6 +114,7 @@ def _entry(body: bytes, ctype: str) -> dict[str, Any]:
 def make_handler(service: CallService, health=None, quiet: bool = False, hub: SimulatorHub | None = None,
                  doctor=None):
     hub = hub or SimulatorHub(service)
+    playground = Playground(service)
     if doctor is None:
         from .doctor import check
 
@@ -569,6 +571,12 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
 
         # -- drills --------------------------------------------------------------
 
+        def playground_list(self, q):
+            self._json(playground.list(q.get("person"), q.get("pack")))
+
+        def playground_submit(self, q):
+            self._json(playground.submit(self._json_body()), 201)
+
         def drills(self, q):
             self._json(service.list_drills(q.get("person") or None))
 
@@ -712,6 +720,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("GET", rf"/api/calls/{C}/coaching", Handler.coaching),
         ("POST", rf"/api/calls/{C}/moments/{D}/(endorse|dismiss|edit|note)", Handler.moment),
         ("POST", rf"/api/calls/{C}/moments/{D}/drill", Handler.moment_drill),
+        ("GET", r"/api/playground", Handler.playground_list),
+        ("POST", r"/api/playground", Handler.playground_submit),
         ("GET", r"/api/drills", Handler.drills),
         ("GET", rf"/api/drills/{C}", Handler.drill),
         ("POST", rf"/api/drills/{C}/start", Handler.drill_start),

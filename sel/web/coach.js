@@ -51,7 +51,7 @@
 
   function rerender() {
     const r = S.coachRoute();
-    if (S.view() === "coach" && page.main) render(page.main, r.page, r.arg);
+    if (S.view() === "coach" && page.main && ["today", "playbook", "people"].includes(r.page)) render(page.main, r.page, r.arg);
   }
 
   // Calls change while Today is open: refetch once things settle.
@@ -184,8 +184,7 @@
           manager ? escalations(t) : null,
           t.focus ? focusCard(t.focus) : skills(t, manager),
           t.focus && t.skills.length ? skills(t, manager, false) : null,
-          recent(t),
-          manager ? team(t) : null),
+          recent(t)),
         el("div", { class: "today-side" },
           peopleCard(me),
           followUps(t, manager),
@@ -203,7 +202,7 @@
         el("h1", { text: manager ? "Your team today" : `Today, ${me.name.split(" ")[0]}` }),
         el("p", { class: "lede", text: manager ? "Good conversations. Clear next steps. Make room for your team's next small win." : "A little practice. A clearer next step. Build on what your last conversation taught you." }),
         el("div", { class: "row today-hero-actions" },
-          el("a", { class: "button primary", href: "#new" }, icon("add", 16), "New call"),
+          el("a", { class: "button primary", href: "#new" }, icon("phone", 16), "New call"),
           el("a", { class: "button", href: "#practice" }, icon("target", 16), "Start practising"))));
   }
 
@@ -402,34 +401,6 @@
     );
   }
 
-  function team(t) {
-    if (!t.team.length) return section("Team", null, "user", "accent", muted("Add reps under Manage people to see each rep here."));
-    const rows = t.team.map((r) =>
-      el(
-        "tr",
-        {},
-        el("th", { scope: "row" }, el("span", { class: "person-label" }, S.personAvatar(r), el("span", { text: r.name }))),
-        el("td", { text: String(r.calls) }),
-        el("td", { text: r.average === null ? "–" : `${r.average}` }),
-        el("td", { text: r.focus ? r.focus.title : "None yet" }),
-        el("td", { text: String(r.open_follow_ups) }),
-        el("td", {}, el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(r.id) } }))
-      )
-    );
-    return section(
-      "Team",
-      "Average scorecard over each rep's last 10 reviewed calls, and the skill each rep is focusing on.",
-      "user",
-      "accent",
-      el(
-        "table",
-        { class: "team-table" },
-        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Rep" }), el("th", { scope: "col", text: "Calls" }), el("th", { scope: "col", text: "Average score" }), el("th", { scope: "col", text: "Focus" }), el("th", { scope: "col", text: "Open follow-ups" }), el("th", { scope: "col", text: "" }))),
-        el("tbody", {}, ...rows)
-      )
-    );
-  }
-
   function unassigned(t) {
     const reps = S.people().filter((p) => p.role === "rep");
     const rows = t.unassigned.map((c) => {
@@ -578,6 +549,124 @@
     );
   }
 
+  const playground = { tab: "practise", data: new Map(), pending: new Set(), exercise: null, busy: false, error: null, result: null };
+  const objectionPrompts = { pricing: "That is too expensive. Why should I pay that much?", timing: "This is not a priority right now.", competitor: "We already use another provider.", details: "Just send me some details." };
+  const playgroundKey = (id) => `${S.viewer()?.id || "none"}|${id}`;
+  const draftKey = (id) => `sel.playground.${playgroundKey(id)}`;
+  function saveExercise(id) {
+    try { localStorage.setItem(draftKey(id), JSON.stringify(playground.exercise)); }
+    catch (_) { playground.error = "This browser could not save your unfinished response. Keep this page open until you submit."; }
+  }
+  function openExercise(id, mode, ref = "", topic = "pricing") {
+    playground.exercise = { key: playgroundKey(id), mode, ref, topic, response: "" };
+    playground.result = null;
+    playground.error = null;
+    playground.tab = "practise";
+    saveExercise(id);
+    rerender();
+    page.main.querySelector("textarea")?.focus();
+  }
+  async function loadPlayground(id) {
+    const me = S.viewer();
+    if (!me || me.role !== "rep") return;
+    const key = playgroundKey(id);
+    if (playground.pending.has(key)) return;
+    playground.pending.add(key);
+    try {
+      const [attempts, drills] = await Promise.all([api(`/api/playground?person=${enc(me.id)}&pack=${enc(id)}`, { fresh: true }), api(`/api/drills?person=${enc(me.id)}`, { fresh: true })]);
+      playground.data.set(key, { attempts, drills: drills.filter((d) => d.pack_id === id) });
+    } catch (e) { playground.data.set(key, { error: e.message }); }
+    finally { playground.pending.delete(key); rerender(); }
+  }
+  S.on("drill", () => { playground.data.clear(); if (S.coachRoute().page === "playbook") rerender(); });
+  function playgroundTabs() {
+    return el("div", { class: "scope-toggle", "aria-label": "Playground sections" }, ...[["practise", "Practise"], ["library", "Library"], ["progress", "My progress"]].map(([id, label]) =>
+      el("button", { type: "button", class: `scope-btn${playground.tab === id ? " is-on" : ""}`, text: label, "aria-pressed": String(playground.tab === id), on: { click: () => { playground.tab = id; rerender(); page.main.querySelector(`[aria-label="Playground sections"] button[aria-pressed="true"]`)?.focus(); } } })));
+  }
+  function exerciseForm(id, detail) {
+    const ex = playground.exercise;
+    const me = S.viewer();
+    const input = el("textarea", { id: "playground-response", rows: "6", maxlength: "4000", placeholder: "Write what you would say to the buyer…", disabled: playground.busy });
+    input.value = ex.response;
+    input.addEventListener("input", () => { ex.response = input.value; saveExercise(id); });
+    const feedback = playground.result;
+    const status = el("p", { class: "muted small", role: "status", text: playground.busy ? "Saving your response and preparing feedback…" : "Your draft is saved in this browser. Submitted attempts are saved for this rep." });
+    const submit = el("button", { type: "submit", class: "primary", text: feedback ? "Submit another attempt" : "Get feedback", disabled: playground.busy || !me || me.role !== "rep" });
+    const form = el("form", { class: "playground-form" },
+      el("label", { for: "playground-response", text: "Your response (English)" }), input,
+      el("div", { class: "row" }, submit, el("button", { type: "button", text: "Back to exercises", disabled: playground.busy, on: { click: () => { playground.exercise = null; playground.result = null; try { localStorage.removeItem(draftKey(id)); } catch (_) {} rerender(); } } })), status);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (playground.busy) return;
+      if (!ex.response.trim()) { input.setCustomValidity("Write your response first."); input.reportValidity(); input.setCustomValidity(""); return; }
+      const key = playgroundKey(id);
+      playground.busy = true; playground.error = null; rerender();
+      try {
+        const result = await api("/api/playground", { method: "POST", json: { person_id: me.id, pack_id: id, mode: ex.mode, topic: ex.topic, ref: ex.ref, response: ex.response } });
+        playground.data.delete(key);
+        if (playgroundKey(id) === key && playground.exercise === ex) playground.result = result;
+      } catch (e) { playground.error = e.message; }
+      finally { playground.busy = false; rerender(); }
+    });
+    const source = ex.ref ? el("ul", { class: "page-rows" }, docRow(id, ex.ref, false)) : muted("This is a generic buyer scenario. Do not invent product details.");
+    return section("Practice response", "A short exercise. This does not change your real-call focus.", "target", "violet",
+      pill("neutral", ex.mode === "document" ? "Document practice" : "Example objection"),
+      el("p", { class: "focus-title", text: ex.mode === "document" ? "Explain the main point to a buyer, including relevant conditions." : objectionPrompts[ex.topic] }), source, form,
+      playground.error ? el("p", { class: "form-error", role: "alert", text: playground.error }) : null,
+      feedback ? el("section", { class: "card debrief", "aria-label": "Exercise feedback", role: "status" },
+        pill("info", feedback.feedback.by), el("h3", { text: "One thing to work on" }), el("p", { text: feedback.feedback.tip }),
+        el("blockquote", { text: feedback.feedback.response_quote }), feedback.feedback.source_quote ? el("blockquote", { class: "source", text: feedback.feedback.source_quote }) : null, feedback.feedback.model_status ? muted(feedback.feedback.model_status) : null, muted(feedback.feedback.observation), muted(feedback.feedback.limitation),
+        el("button", { type: "button", text: "Try again", on: { click: () => { playground.result = null; rerender(); page.main.querySelector("textarea")?.focus(); } } })) : null);
+  }
+  function playgroundBody(id, detail) {
+    const me = S.viewer();
+    const key = playgroundKey(id);
+    if (playground.exercise?.key !== key) {
+      playground.exercise = null; playground.result = null;
+      try { const saved = JSON.parse(localStorage.getItem(draftKey(id)) || "null"); if (saved?.key === key && ["document", "objection"].includes(saved.mode) && typeof saved.response === "string" && objectionPrompts[saved.topic]) playground.exercise = saved; } catch (_) {}
+    }
+    const data = playground.data.get(key);
+    if (me?.role === "rep" && !data) loadPlayground(id);
+    const retry = data?.error ? el("div", { class: "card is-error", role: "alert" }, muted(data.error), el("button", { type: "button", text: "Retry loading practice", on: { click: () => loadPlayground(id) } })) : null;
+    if (playground.tab === "progress") {
+      if (!me || me.role !== "rep") return section("My progress", "Choose a rep using Viewing as to see their attempts.", "target", "violet");
+      if (!data) return section("My progress", "Loading your attempts…", "target", "violet");
+      if (retry) return retry;
+      return el("div", { class: "playbook-side" },
+        section("Short exercises", "Practice history only. These attempts do not verify improvement on real calls.", "target", "violet",
+          data.attempts.length ? el("ul", { class: "skills" }, ...data.attempts.map((a) => el("li", { class: "skill" },
+            el("div", { class: "skill-head" }, el("span", { class: "strong", text: a.mode === "document" ? `Explain: ${a.ref}` : `Objection: ${a.topic}` }), pill("neutral", "Attempt saved")),
+            el("p", { class: "muted small", text: formatStarted(a.created_at) }),
+            el("details", { class: "disclosure" }, el("summary", { text: "Review response and feedback" }), el("p", { text: a.prompt }), el("blockquote", { text: a.response }), pill("info", a.feedback.by), el("p", { text: a.feedback.tip }), muted(a.feedback.limitation), a.source_text ? el("pre", { class: "doc-text", text: a.source_text }) : null),
+            el("button", { type: "button", class: "small", text: "Practise again", on: { click: () => openExercise(id, a.mode, a.ref, a.topic) } })))) : muted("No submitted exercises yet. Start in Practise.")),
+        section("Call-moment drills", "Results from the existing practice room, separate from real-call transfer checks.", "lines", "accent", drillLinks(data.drills)),
+        el("a", { class: "button", href: "#today", text: "Review real-call coaching" }));
+    }
+    if (playground.exercise) return exerciseForm(id, detail);
+    const drills = data?.drills || [];
+    return el("div", { class: "playground-home" }, retry,
+      !me || me.role !== "rep" ? el("p", { class: "muted small playground-notice", text: "Choose a rep using Viewing as to save exercises and see personal progress." }) : !data ? el("p", { class: "muted small playground-notice", text: "Loading your call drills…" }) : null,
+      el("div", { class: "playground-grid" },
+        el("section", { class: "card playground-conversation" },
+          el("div", {}, el("h2", { text: "Practise a conversation" }), el("p", { class: "muted", text: "Turn what you know into a better conversation. Start a call, invite a partner, and get feedback as you practise." })),
+          el("div", { class: "row" }, el("a", { class: "button primary", href: "#sim", text: "Start practice" }), el("span", { class: "muted small", text: "Talk or type · Share a call code" }))),
+        sectionOf("list-card page-section playground-reading", "Read & practise", "Build confidence in your product knowledge.", "doc", "accent",
+          el("p", { class: "muted", text: "Explore your business documents, then practise explaining them to a buyer." }),
+          el("button", { type: "button", text: "Open Library", on: { click: () => { playground.tab = "library"; rerender(); } } })),
+        sectionOf("list-card page-section playground-objections", "Objection drills", "Pick one concern. Practise a clear, helpful response.", "lines", "accent",
+          el("ul", { class: "page-rows" }, ...Object.entries(objectionPrompts).map(([topic, prompt]) => el("li", { class: "page-row" },
+            el("div", { class: "page-row-main" }, el("span", { class: "muted small", text: { pricing: "Pricing", timing: "Timing", competitor: "Competition", details: "Follow-up" }[topic] }), el("span", { text: prompt })),
+            el("button", { type: "button", class: "small", text: "Practise", "aria-label": `Practise: ${prompt}`, on: { click: () => openExercise(id, "objection", "", topic) } }))))),
+        sectionOf("list-card page-section playground-moments", "Retry a call moment", "Build on a conversation you have already had.", "target", "violet",
+          drillLinks(drills), el("a", { class: "button", href: "#calls", text: "Find a moment in Calls" }))));
+  }
+
+  function drillLinks(drills) {
+    return drills.length ? el("ul", { class: "page-rows" }, ...drills.map((d) => el("li", { class: "page-row" },
+      el("a", { class: "page-row-link", href: `#practice/${enc(d.id)}`, text: d.title }),
+      el("span", { class: "muted small", text: `${d.attempts || 0} attempts · ${d.passes || 0} passed${d.status === "preparing" ? " · Preparing" : ""}` })))) : muted("No call-moment drills in this pack yet. Open a call's Coaching tab and choose Practise this.");
+  }
+
   // ---------- Playbook ----------
 
   async function loadPack(id) {
@@ -680,18 +769,22 @@
   function renderPlaybook(main, packId) {
     const packs = S.packs();
     if (!packs.length) {
-      main.replaceChildren(el("div", { class: "page" }, header("Playbook", "Playbook", "No business packs found. Add one under packs/ (docs/business-pack.md).")));
+      main.replaceChildren(el("div", { class: "page playground-page" }, header("Playground", "Playground", "No business packs found. Add one under packs/ (docs/business-pack.md).")));
       return;
     }
     const id = packId && packs.some((p) => p.id === packId) ? packId : packs[0].id;
     const detail = page.packs.get(id);
     if (!detail) {
-      main.replaceChildren(el("div", { class: "page" }, playbookHead(packs, id, null), S.skeleton()));
+      main.replaceChildren(el("div", { class: "page playground-page" }, playbookHead(packs, id, null), S.skeleton()));
       loadPack(id);
       return;
     }
     if (detail.error) {
-      main.replaceChildren(el("div", { class: "page" }, playbookHead(packs, id, null), el("p", { class: "form-error", text: detail.error })));
+      main.replaceChildren(el("div", { class: "page playground-page" }, playbookHead(packs, id, null), el("p", { class: "form-error", text: detail.error })));
+      return;
+    }
+    if (playground.tab !== "library") {
+      main.replaceChildren(el("div", { class: "page playground-page" }, playbookHead(packs, id, "Read, practise, and build on your conversations."), playgroundTabs(), playgroundBody(id, detail)));
       return;
     }
     const skillsList = el(
@@ -715,8 +808,9 @@
     main.replaceChildren(
       el(
         "div",
-        { class: "page" },
-        playbookHead(packs, id, detail.description, el("a", { class: "button", href: "#sim", text: "Practise a call" })),
+        { class: "page playground-page" },
+        playbookHead(packs, id, detail.description),
+        playgroundTabs(),
         el(
           "div",
           { class: "bento" },
@@ -741,7 +835,7 @@
       "select",
       {
         id: "pack-switch",
-        class: "title-select",
+        class: "playground-pack-select",
         "aria-label": "Business pack",
         on: { change: () => navigate(`#playbook/${enc(select.value)}`) },
       },
@@ -750,20 +844,20 @@
     select.value = id;
     return el(
       "header",
-      { class: "page-head" },
+      { class: "page-head playground-head" },
       el(
         "div",
         {},
-        el("p", { class: "eyebrow", text: "Playbook" }),
-        el("h1", packs.length > 1 ? { class: "sr-only", text: current.name } : { text: current.name }),
-        packs.length > 1 ? select : null,
+        el("p", { class: "eyebrow", text: "Learn and rehearse" }),
+        el("h1", { text: "Playground" }),
         description ? el("p", { class: "lede", text: description }) : null
       ),
+      el("div", { class: "field playground-pack" }, el("label", { for: "pack-switch", text: "Business pack" }), packs.length > 1 ? select : el("p", { class: "muted", text: current.name })),
       ...compact(extra)
     );
   }
 
-  function docRow(packId, ref) {
+  function docRow(packId, ref, practise = true) {
     const key = `${packId}|${ref}`;
     const open = page.openDocs.has(key);
     const doc = page.docs.get(key);
@@ -772,7 +866,8 @@
       if (page.openDocs.has(key)) page.openDocs.delete(key);
       else {
         page.openDocs.add(key);
-        if (!page.docs.has(key)) {
+        rerender();
+        if (!page.docs.has(key) || page.docs.get(key)?.error) {
           try {
             page.docs.set(key, (await api(`/api/packs/${enc(packId)}/source?ref=${enc(ref)}`)).text);
           } catch (e) {
@@ -788,6 +883,7 @@
       icon("doc", 18),
       el("span", { class: "page-row-main mono small", text: ref }),
       toggle,
+      practise ? el("button", { type: "button", class: "small", text: "Practise this", on: { click: () => openExercise(packId, "document", ref) } }) : null,
       open ? (doc === undefined ? muted("Loading…") : doc && doc.error ? el("p", { class: "form-error", text: doc.error }) : el("pre", { class: "doc-text", text: doc })) : null
     );
   }

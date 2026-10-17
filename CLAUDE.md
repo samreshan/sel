@@ -140,7 +140,8 @@ with deliberate mistakes) and `coaching_gold.json`.
 
 ## Today, people and the Playbook
 
-Navigation: **Today · Practice · Playbook**, then the call list. The browser
+Navigation: **Today · Calls · Leads · Playground · Team · Settings**. Practice
+stays at `#practice`, opened from Today and from a drill. The browser
 picks who it is **viewing as** (`localStorage` `sel.viewer`); there is no
 login, so this is a convenience, not access control. UI follows DESIGN.md
 (see "Navigation, Today and the Playbook" there).

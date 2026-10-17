@@ -25,7 +25,7 @@
   const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "drill", "lead", "playbook", "people", "rooms", "room", "line", "live", "signal"];
   const COACH_PAGES = new Set(["today", "playbook", "people", "practice", "leads", "lead", "prep", "team", "settings"]);
   const TEAM_PAGES = new Set(["leads", "lead", "prep", "team", "settings"]); // team.js
-  const NAV_OF = { lead: "leads", prep: "leads" };
+  const NAV_OF = { practice: "playbook", lead: "leads", prep: "leads" };
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -85,6 +85,7 @@
     view: "empty", // "empty" | "new" | "calls" | "call" | "sim" | "coach" (Today, Playbook, People: coach.js)
     coachPage: null, // "today" | "playbook" | "people"
     coachArg: null, // e.g. the pack id on #playbook/<id>
+    peopleReady: false,
     people: [], // the team, from the event stream (people.json on the server)
     leads: null, // GET /api/leads, loaded on first need (lead pickers)
     viewerId: null, // who this browser is viewing as (localStorage "sel.viewer")
@@ -219,6 +220,19 @@
     const [, y, mo, d, hh, mi, off] = m;
     const zone = !off || off === "Z" ? "UTC" : `UTC${off}`;
     return `${Number(d)} ${MONTHS[Number(mo) - 1]} ${y}, ${hh}:${mi} (${zone})`;
+  }
+
+  function ago(iso) {
+    const t = Date.parse(iso || "");
+    if (!Number.isFinite(t)) return "";
+    const mins = Math.floor((Date.now() - t) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return formatStarted(iso);
   }
 
   function normalizeOffset(raw) {
@@ -844,6 +858,7 @@
   function applyPeople(list) {
     const hadPeople = state.people.length > 0;
     state.people = list || [];
+    state.peopleReady = true;
     if (state.viewerId && !viewer()) state.viewerId = null;
     renderViewer();
     renderList();
@@ -888,13 +903,6 @@
       a.classList.toggle("is-active", on_);
       if (on_) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
-    }
-    const neu = $("#new-call");
-    if (neu) {
-      const onNew = state.view === "new";
-      neu.classList.toggle("is-current", onNew);
-      if (onNew) neu.setAttribute("aria-current", "page");
-      else neu.removeAttribute("aria-current");
     }
   }
 
@@ -945,28 +953,47 @@
     );
   }
 
+  function callKind(c) {
+    if (c.source === "fixture") return "Example";
+    if (c.source === "simulator") return "Simulated";
+    return "";
+  }
+
+  function callMark(c) {
+    const status = CALL_STATUS[c.status] || { cls: "neutral", label: c.status || "Unknown" };
+    const iconName = c.status === "done" ? "check" : c.status === "error" ? "x" : c.status === "running" ? "bolt" : "lines";
+    const tone = c.status === "done" ? " is-ok" : c.status === "error" ? " is-bad" : "";
+    const mark = el("span", { class: `lead-status${tone}` }, icon(iconName, 16), status.label);
+    if (!isActive(c.status)) return mark;
+    const pct = Math.round((c.progress || 0) * 100);
+    return el("div", { class: "lead-result" },
+      mark,
+      el("span", { class: "muted small", text: `${stageText(c.stage)} · ${pct}%` }),
+      el("span", { class: "lead-bar is-progress", "aria-hidden": "true" }, el("span", { style: `width:${pct}%` })));
+  }
+
   function callsTable() {
     const rows = state.calls.map((c) => {
-      const status = CALL_STATUS[c.status] || { cls: "neutral", label: c.status || "Unknown" };
       const title = c.customer_name || c.original_filename || c.id;
+      const kind = callKind(c);
       return el("tr", { on: { click: (e) => {
         if (e.target.closest("a, button, input, select, textarea") || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || window.getSelection()?.toString()) return;
         navigate(`#call/${enc(c.id)}`);
       } } },
         el("th", { scope: "row" },
-          el("a", { class: "calls-table-link", href: `#call/${enc(c.id)}`, dataset: { id: c.id } }, icon("phone", 16), title),
-          c.source === "fixture" ? pill("neutral", "Example") : c.source === "simulator" ? pill("violet", "Simulated") : null),
-        el("td", { text: c.started_at ? formatStarted(c.started_at) : "Not recorded" }),
+          el("a", { class: "leads-name calls-table-link", href: `#call/${enc(c.id)}`, dataset: { id: c.id } },
+            el("span", { class: "lead-name", text: title }),
+            kind ? el("span", { class: "muted small", text: kind }) : null)),
+        el("td", {}, callMark(c)),
+        el("td", {}, c.started_at
+          ? el("time", { datetime: c.started_at, title: formatStarted(c.started_at), text: ago(c.started_at) })
+          : el("span", { class: "muted", text: "Not recorded" })),
         el("td", { text: personName(c.rep_id) || c.rep_name || "Unassigned" }),
-        el("td", { text: packName(c.pack_id) }),
-        el("td", {}, pill(status.cls, status.label), isActive(c.status)
-          ? el("div", { class: "call-progress" },
-              el("progress", { max: "1", value: String(c.progress || 0), "aria-label": `${title}: analysis progress` }),
-              el("span", { class: "call-stage", text: `${stageText(c.stage)} · ${Math.round((c.progress || 0) * 100)}%` })) : null));
+        el("td", { text: packName(c.pack_id) }));
     });
-    return el("div", { class: "calls-table-scroll", tabindex: "0", role: "region", "aria-label": "All calls table" },
+    return el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "All calls table" },
       el("table", { class: "team-table calls-table", "aria-label": "All calls" },
-        el("thead", {}, el("tr", {}, ...["Call", "Date", "Rep", "Business pack", "Status"].map((label) => el("th", { scope: "col", text: label })))),
+        el("thead", {}, el("tr", {}, ...["Call", "Status", "Date", "Rep", "Business pack"].map((label) => el("th", { scope: "col", text: label })))),
         el("tbody", {}, ...rows)));
   }
 
@@ -974,7 +1001,7 @@
     const head = el("header", { class: "page-head calls-head" },
       el("div", {}, el("h1", { text: "Calls" }),
         el("p", { class: "lede", text: "All recorded calls, including examples and simulated calls. Open a call to review it." })),
-      el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } }));
+      el("button", { type: "button", class: "primary", on: { click: () => navigate("#new") } }, icon("phone", 16), "New call"));
     const nodes = [head];
     if (state.listError) {
       nodes.push(el("section", { class: "card is-error", role: "alert" },
@@ -1000,11 +1027,12 @@
             } } }),
           el("label", { for: `calls-view-${value}`, text: label }));
       }
-      nodes.push(el("div", { class: "page-head" },
-        el("h2", { class: "section-title", text: plural(state.calls.length, "call", "calls") }), toggle));
-      nodes.push(state.callLayout === "table"
-        ? el("section", { class: "list-card page-section" }, callsTable())
-        : el("ul", { class: "calls-page-list", "aria-label": "All calls" }, ...state.calls.map((c) => callItem(c, false))));
+      const body = state.callLayout === "table"
+        ? callsTable()
+        : el("ul", { class: "calls-page-list", "aria-label": "All calls" }, ...state.calls.map((c) => callItem(c, false)));
+      nodes.push(el("section", { class: "list-card leads-panel" },
+        el("div", { class: "leads-toolbar" }, el("span", { class: "muted", text: plural(state.calls.length, "call", "calls") }), toggle),
+        body));
     }
     main.replaceChildren(el("div", { class: "page" }, ...nodes));
   }
@@ -1090,7 +1118,7 @@
         el(
           "div",
           { class: "row" },
-          el("button", { type: "button", class: "primary", text: "New call", on: { click: () => navigate("#new") } }),
+          el("button", { type: "button", class: "primary", on: { click: () => navigate("#new") } }, icon("phone", 16), "New call"),
           el("button", { type: "button", text: "Call simulator", on: { click: () => navigate("#sim") } })
         )
       )
@@ -2934,7 +2962,7 @@
     if (state.leads === null) loadLeads();
     const fileInput = el("input", { type: "file", id: "f-audio", name: "audio", accept: "audio/*", class: "sr-file" });
     const fileName = el("span", { class: "drop-name", "aria-live": "polite", hidden: true });
-    const mark = iconTile("neutral", "doc");
+    const mark = iconTile("neutral", "mic");
     mark.classList.add("drop-mark");
     const drop = el(
       "label",
@@ -2984,7 +3012,7 @@
         el(
           "section",
           { class: "list-card page-section bento-anchor upload-recording" },
-          sectionHead("Recording", "The file Sel will transcribe.", "doc"),
+          sectionHead("Recording", "The file Sel will transcribe.", "mic"),
           el("div", { class: "page-section-body" }, fileInput, drop)
         ),
         el(
@@ -3242,6 +3270,7 @@
     packs: () => state.packList,
     calls: () => state.calls,
     people: () => state.people,
+    peopleReady: () => state.peopleReady,
     // The server doesn't echo a tab's own changes back on the stream, so after one, re-read the list.
     refreshPeople: () => api("/api/people", { fresh: true }).then(applyPeople),
     viewer,
@@ -3270,7 +3299,6 @@
   };
 
   async function boot() {
-    $("#new-call").addEventListener("click", () => navigate("#new"));
     state.viewerId = store("sel.viewer") || null;
     state.callLayout = store("sel.calls.view") === "card" ? "card" : "table";
     $("#viewer").addEventListener("change", (e) => setViewer(e.target.value));

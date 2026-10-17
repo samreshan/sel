@@ -71,7 +71,7 @@ Keep existing responsive stacking, column relationships and content order.
 Normalize spacing within those layouts; do not introduce Chatbase navigation,
 workspace switchers, page templates or sheets. Product routes (Today, Practice,
 Playbook, People) come from the product plan, not from visual work. The static
-design-system reference is linked from the sidebar.
+design-system reference, and the Solar icon credit, live under Settings → References.
 
 The desktop sidebar is 256 px. Preserve its real call list and device-health
 section. Navigation uses a neutral active surface, restrained borders, and
@@ -84,8 +84,8 @@ The call date stays on its own line and shortens with an ellipsis.
 
 ## Navigation, Today and the Playbook
 
-- Sidebar order: brand, **Viewing as** (dropdown; no login), New call,
-  section navigation (Today · Calls · Practice · Playbook · Leads · Team ·
+- Sidebar order: brand, **Viewing as** (dropdown; no login),
+  section navigation (Today · Calls · Leads · Playground · Team ·
   Settings), device health.
 - `.primary-nav` links: 40 px, 12 px corners, Solar icons. Desktop active uses
   the charcoal action gradient and inverse text; compact mobile navigation uses
@@ -132,8 +132,9 @@ The call date stays on its own line and shortens with an ellipsis.
 
 ## Practice: drills, the AI customer and the debrief
 
-- Navigation **Practice** opens `#practice` (the rep's focus and drills; free
-  practice with a person stays at `#sim`). A drill page shows the scenario as a
+- Practice (`#practice`) is the rep's focus and drills. It is opened from
+  Today and from a drill, and is not a sidebar item. Free practice with a
+  person stays at `#sim`. A drill page shows the scenario as a
   `.bento-anchor` card: the real moment (`.said`), what fell short, the better
   line, and `.drill-persona` (who the AI customer is, labelled "AI persona" or
   "Built by Sel's rules", with the anonymisation note).
@@ -153,18 +154,34 @@ The call date stays on its own line and shortens with an ellipsis.
 
 ## Leads, Prep, Team and Settings
 
-- Sidebar order continues: Today · Calls · Practice · Playbook · **Leads** ·
+- Sidebar order continues: Today · Calls · **Leads** · Playground ·
   **Team** (only when viewing as a manager) · **Settings**. Same neutral
   `.primary-nav` links; on a phone the links wrap in as many 104 px columns
   as fit. `#lead/<id>` and `#prep/<id>` keep Leads active.
-- Leads and a lead use `.bento`: the list (or the lead's calls) is the anchor,
-  Add a lead (or Notes) supports it. Prep: **Likely objections** is the anchor
-  (each with "They said" and the answer as a `.better-line`, labelled "Team
+- Leads (`#leads`) is one card. **Add a lead** is the page's primary button
+  and opens a `.dialog` (name, optional phone). Inside the card: a search
+  field, a status filter (All, Ready to prep, No calls yet) and a Table / Card
+  switch. The table lists name, status, calls, rep and when the lead changed;
+  a row opens the lead, and Prep is there when the lead has calls. Card view
+  is the same leads as separate cards. A lead (`#lead/<id>`) opens with a
+  `.crumbs` trail (Leads / name) and a `.stat-strip`: phone, rep, status,
+  updated. **Edit details** changes the name, phone and rep. **Prep for the
+  next call** is the primary action once a call is linked; with no calls, the
+  calls card links to Calls. The page stays a bento: calls anchor, notes
+  support. Prep continues the trail (Leads / name / Prep). **Likely objections**
+  is the anchor (each with "They said" and the answer as a `.better-line`, labelled "Team
   answer", "Example line" or "AI-suggested" as on the Coaching tab), with the
   focus, gaps and promises stacked beside it. One primary action: **Rehearse
   this call**.
-- Team (managers): **Needs you** first (escalations only), then the bento:
-  **Skills by rep** as the anchor beside **Patterns**, then the review queue.
+- Calls (`#calls`) uses the same card as Leads. The toolbar shows the count
+  and the Table / Card switch. The customer is the row, with Example or
+  Simulated on the line under the name. Status is an icon and a word (Done in
+  sage, Failed in rose), with a progress line while Sel is still working. The
+  date is relative; the full time is on the timestamp.
+- Team (managers): **Needs you** first (escalations only), then **Reps**
+  (calls, average score over the last 10 reviewed calls, focus, open
+  follow-ups, and View as), then the bento: **Skills by rep** as the anchor
+  beside **Patterns**, then the review queue.
   A rep's page: the 1:1 brief as the anchor beside transfer checks, then
   **Skills over time**.
 - `.table-scroll`: a wide table scrolls inside its card, never the page. It
@@ -197,6 +214,9 @@ The call date stays on its own line and shortens with an ellipsis.
 - Secondary: white surface, 1 px neutral border; muted surface on hover.
 - Ghost: transparent background and border; neutral hover surface.
 - Danger: semantic danger fill; existing destructive behavior only.
+- `.dialog` is a native dialog: white surface, large radius, quiet overlay.
+  Escape closes it and focus returns to the control that opened it. Use it
+  for a short create step, such as Add a lead.
 - Disabled: 50% opacity and existing disabled interaction semantics.
 - Focus: visible 3 px blue-grey ring. Keep the focus outline separate from semantic state.
 - Control depth uses `--shadow-control`; gradient actions use `--shadow-action`.
@@ -224,8 +244,6 @@ The call date stays on its own line and shortens with an ellipsis.
   disclosure. The customer-email hint says Sel does not send it.
 - The recording drop zone is a solid quiet inset. A chosen file uses the
   sage border and label. Dashed outlines stay on dismissed and empty content.
-- While `#new` is open, the sidebar New call button is the current page and
-  uses the neutral selected surface, so the form owns the primary action.
 
 ## Cards and surfaces
 
@@ -368,7 +386,9 @@ Use `.person-avatar` with `.portrait-0` through `.portrait-5` for character art;
 it. Portraits are decorative fictional characters, not inferred likenesses or
 unique identifiers. The same six portraits may repeat in larger teams.
 The live call uses the same portraits at `.avatar-call` (128px), with no fill
-or border, so the drawing is not clipped by a frame. A seat with no team
+or border, so the drawing is not clipped by a frame. A team member page
+(`#team/<person>`) uses that same size and multiply treatment beside the name.
+A seat with no team
 member keeps that space empty, with an initial only when someone joined without
 a person id.
 The welcome banner uses the 20px featured-card radius, cards 16px and controls
@@ -386,3 +406,20 @@ tool from the user's landscape dashboard and monochrome portrait references:
   white fill, varied hair and glasses, consistent scale, no labels or gutters.
 
 The complete generation prompts are in `docs/dashboard-image-prompts.md`.
+
+## Playground · 17 October 2026
+
+Playground replaces the Playbook label while preserving `#playbook` links.
+It sits after Leads and before Team.
+Practise, Library, and My progress use the existing `aria-pressed` segmented
+control. Library retains skills, approved facts, documents, team answers, and
+manager review. Short document and objection exercises save separately from
+call drills; feedback labels its provenance and limits. Drafts stay in browser
+storage per viewer and pack. Existing call-moment practice remains `#practice`.
+Practice attempts never close a focus or count as real-call improvement.
+
+Playground's page header pairs the title with a compact, labelled business-pack
+selector. Its Practise view places conversation practice beside reading, then
+objection drills beside call-moment practice in an asymmetric two-column layout.
+At narrow widths these stack in the same reading order. Page-specific layout
+classes reuse the shared card, section, button, pill, and field primitives.

@@ -7,11 +7,12 @@
  * approved team answer, else the better line), promises, gaps and the rep's
  * focus; "Rehearse this call" opens a drill on the lead's last weak moment.
  *
- * Team (#team, #team/<person>) is for managers: escalations, a skill matrix,
+ * Team (#team, #team/<person>) is for managers: escalations, the rep roster, a skill matrix,
  * patterns across reps, a review queue (team answers the Librarian proposed),
  * and per rep their skill timelines with the real moments, transfer checks,
  * drills and a 1:1 brief. Settings (#settings) shows `sel doctor`: every model,
- * where it runs and its licence. Server text goes in with textContent (el()).
+ * where it runs and its licence, plus References (the design system and the
+ * icon licence). Server text goes in with textContent (el()).
  */
 (function () {
   "use strict";
@@ -99,6 +100,22 @@
     );
   }
 
+  // Trail back to the list. The last item is the current page.
+  function crumbs(items) {
+    return el(
+      "nav",
+      { class: "crumbs", "aria-label": "Breadcrumb" },
+      el(
+        "ol",
+        {},
+        ...items.map((item, i) => {
+          const current = i === items.length - 1;
+          return el("li", {}, current || !item.href ? el("span", { "aria-current": current ? "page" : null, text: item.text }) : el("a", { href: item.href, text: item.text }));
+        })
+      )
+    );
+  }
+
   function section(cls, title, sub, iconName, tone, ...body) {
     return el(
       "section",
@@ -142,54 +159,290 @@
 
   // ---------- leads ----------
 
-  function renderLeads(main) {
-    const me = S.viewer();
-    const path = `/api/leads${me && me.role === "rep" ? `?rep=${enc(me.id)}` : ""}`;
-    const leads = got(path);
-    if (page.errors.has(path)) return main.replaceChildren(failed("Leads", page.errors.get(path), path));
-    if (!leads) return main.replaceChildren(loading("Leads", "Finding your leads…"));
-    const name = el("input", { id: "lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off" });
-    const phone = el("input", { id: "lead-phone", type: "tel", maxlength: "30", autocomplete: "off" });
+  function leadsUi() {
+    if (!page.leadsUi) {
+      page.leadsUi = {
+        q: "",
+        status: "all",
+        sort: "updated",
+        dir: "desc",
+        layout: S.store("sel.leads.view") === "card" ? "card" : "table",
+      };
+    }
+    return page.leadsUi;
+  }
+
+  function focusMemory() {
+    const a = document.activeElement;
+    if (!a || !a.id || !page.main || !page.main.contains(a)) return null;
+    return { id: a.id, start: a.selectionStart, end: a.selectionEnd };
+  }
+
+  function restoreFocus(mem) {
+    if (!mem || !mem.id) return;
+    const node = document.getElementById(mem.id);
+    if (!node) return;
+    node.focus();
+    if (typeof mem.start === "number" && node.setSelectionRange) {
+      try { node.setSelectionRange(mem.start, mem.end); } catch (_) { /* number and date fields refuse a selection */ }
+    }
+  }
+
+  function ago(iso) {
+    const t = Date.parse(iso || "");
+    if (!Number.isFinite(t)) return "";
+    const mins = Math.floor((Date.now() - t) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return formatStarted(iso);
+  }
+
+  function leadCalls(lead) {
+    return (lead.call_ids || []).length;
+  }
+
+  function leadStatus(lead) {
+    return leadCalls(lead) ? { ok: true, label: "Ready to prep" } : { ok: false, label: "No calls yet" };
+  }
+
+  function statusMark(lead) {
+    const s = leadStatus(lead);
+    return el("span", { class: `lead-status${s.ok ? " is-ok" : ""}` }, icon(s.ok ? "check" : "phone", 16), s.label);
+  }
+
+  function callsCell(lead) {
+    const n = leadCalls(lead);
+    return el(
+      "div",
+      { class: "lead-result" },
+      el("span", { class: n ? "lead-result-count" : "muted", text: plural(n, "call", "calls") }),
+      el("span", { class: `lead-bar${n ? " is-full" : ""}`, "aria-hidden": "true" }, el("span"))
+    );
+  }
+
+  function openAddLead() {
+    page.leadDraft = { name: "", phone: "" };
+    page.addingLead = true;
+    rerender();
+  }
+
+  function addLeadDialog(me) {
+    const draft = page.leadDraft || { name: "", phone: "" };
+    const name = el("input", { id: "lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", autofocus: true, value: draft.name || "" });
+    const phone = el("input", { id: "lead-phone", type: "tel", maxlength: "30", autocomplete: "off", value: draft.phone || "" });
     const err = el("p", { class: "form-error", role: "alert", hidden: true });
-    const form = el("form", { class: "person-form", novalidate: true }, S.formField("lead-name", "Name", name), S.formField("lead-phone", "Phone", phone), err, el("div", { class: "row" }, el("button", { type: "submit", class: "primary", text: "Add lead" })));
+    const submit = el("button", { type: "submit", class: "primary", text: "Add lead" });
+    const form = el(
+      "form",
+      { class: "dialog-form", novalidate: true },
+      el("p", { class: "muted", id: "add-lead-desc", text: "A name is enough. Link calls to this lead from the call page." }),
+      S.formField("lead-name", "Name", name),
+      S.formField("lead-phone", "Phone", phone, "Optional."),
+      err,
+      el("div", { class: "row dialog-actions" }, el("button", { type: "button", text: "Cancel", on: { click: () => dialog.close() } }), submit)
+    );
+    name.addEventListener("input", () => { page.leadDraft = { ...page.leadDraft, name: name.value }; });
+    phone.addEventListener("input", () => { page.leadDraft = { ...page.leadDraft, phone: phone.value }; });
+    const dialog = el(
+      "dialog",
+      { class: "dialog", "aria-labelledby": "add-lead-title", "aria-describedby": "add-lead-desc" },
+      el("div", { class: "dialog-head" }, el("h2", { id: "add-lead-title", text: "Add a lead" }), el("button", { type: "button", class: "ghost small", "aria-label": "Close", on: { click: () => dialog.close() } }, icon("x", 18))),
+      form
+    );
+    dialog.addEventListener("close", () => {
+      const wasOpen = page.addingLead;
+      page.addingLead = false;
+      if (!wasOpen) return;
+      const add = document.getElementById("add-lead");
+      if (add) add.focus();
+    });
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!name.value.trim()) {
         err.textContent = "Enter a name.";
         err.hidden = false;
+        name.setAttribute("aria-invalid", "true");
+        name.focus();
         return;
       }
+      name.removeAttribute("aria-invalid");
+      err.hidden = true;
+      submit.disabled = true;
       try {
         const lead = await api("/api/leads", { method: "POST", json: { name: name.value.trim(), phone: phone.value.trim(), rep_id: me && me.role === "rep" ? me.id : null } });
+        page.addingLead = false;
         invalidate("/api/leads");
         navigate(`#lead/${enc(lead.id)}`);
       } catch (ex) {
+        submit.disabled = false;
         err.textContent = ex.message;
         err.hidden = false;
       }
     });
-    const rows = leads.map((l) =>
-      el(
-        "li",
-        { class: "page-row" },
-        icon("user", 18),
-        el("a", { class: "page-row-link", href: `#lead/${enc(l.id)}` }, el("span", { class: "strong", text: l.name }), el("span", { class: "muted small", text: compact([l.rep_name, plural((l.call_ids || []).length, "call", "calls"), l.phone]).join(" · ") })),
-        (l.call_ids || []).length ? el("a", { class: "button small", href: `#prep/${enc(l.id)}`, text: "Prep" }) : null
-      )
+    return dialog;
+  }
+
+  function renderLeads(main) {
+    const me = S.viewer();
+    const ui = leadsUi();
+    const path = `/api/leads${me && me.role === "rep" ? `?rep=${enc(me.id)}` : ""}`;
+    const leads = got(path);
+    if (page.errors.has(path)) return main.replaceChildren(failed("Leads", page.errors.get(path), path));
+    if (!leads) return main.replaceChildren(loading("Leads", "Finding your leads…"));
+    const q = ui.q.trim().toLowerCase();
+    const shown = leads.filter((l) => {
+      const n = leadCalls(l);
+      if (ui.status === "ready" && !n) return false;
+      if (ui.status === "empty" && n) return false;
+      if (!q) return true;
+      return [l.name, l.phone, l.rep_name].some((v) => String(v || "").toLowerCase().includes(q));
+    });
+    const dir = ui.dir === "asc" ? 1 : -1;
+    shown.sort((a, b) => (ui.sort === "name" ? a.name.localeCompare(b.name) : String(a.updated_at || "").localeCompare(String(b.updated_at || ""))) * dir);
+    const add = el("button", { type: "button", class: "primary", id: "add-lead", on: { click: openAddLead } }, icon("add", 16), "Add a lead");
+    const search = el("input", { id: "lead-search", type: "search", placeholder: "Search…", "aria-label": "Search leads", autocomplete: "off", value: ui.q });
+    search.addEventListener("input", () => { ui.q = search.value; rerender(); });
+    const filter = el("select", { id: "lead-status", "aria-label": "Filter leads" },
+      el("option", { value: "all", text: "All" }),
+      el("option", { value: "ready", text: "Ready to prep" }),
+      el("option", { value: "empty", text: "No calls yet" }));
+    filter.value = ui.status;
+    filter.addEventListener("change", () => { ui.status = filter.value; rerender(); });
+    const toggle = el("div", { class: "segmented", role: "group", "aria-label": "Leads view" });
+    for (const [value, label] of [["table", "Table"], ["card", "Card"]]) {
+      toggle.append(
+        el("input", { type: "radio", id: `lead-view-${value}`, name: "lead-view", value, checked: ui.layout === value, on: { change: () => { ui.layout = value; S.store("sel.leads.view", value); rerender(); } } }),
+        el("label", { for: `lead-view-${value}`, text: label })
+      );
+    }
+    const toolbar = el("div", { class: "leads-toolbar" }, el("div", { class: "leads-search" }, search), el("div", { class: "leads-filter" }, filter), toggle);
+    let body;
+    if (!leads.length) {
+      body = el("div", { class: "leads-empty" }, el("p", { class: "strong", text: "No leads yet" }), muted("Add a lead, then choose it when you add a call."));
+    } else if (!shown.length) {
+      body = el("div", { class: "leads-empty" }, el("p", { class: "strong", text: "No leads match" }), muted("Try another name, or set the filter back to All."), el("button", { type: "button", text: "Show all", on: { click: () => { ui.q = ""; ui.status = "all"; rerender(); } } }));
+    } else if (ui.layout === "card") {
+      body = el("ul", { class: "lead-cards", "aria-label": "Leads" }, ...shown.map((l) => el("li", {},
+        el("article", { class: "card lead-card" },
+          el("a", { class: "lead-card-name", href: `#lead/${enc(l.id)}`, text: l.name }),
+          l.phone ? el("span", { class: "muted small", text: l.phone }) : null,
+          statusMark(l),
+          callsCell(l),
+          el("span", { class: "muted small", text: compact([l.rep_name || "Unassigned", ago(l.updated_at)]).filter(Boolean).join(" · ") }),
+          leadCalls(l) ? el("a", { class: "button small", href: `#prep/${enc(l.id)}`, text: "Prep" }) : null))));
+    } else {
+      const sortBtn = (key, label) => el("th", { scope: "col", "aria-sort": ui.sort === key ? (ui.dir === "asc" ? "ascending" : "descending") : "none" },
+        el("button", { type: "button", class: "sort", id: `sort-${key}`, on: { click: () => {
+          if (ui.sort === key) ui.dir = ui.dir === "asc" ? "desc" : "asc";
+          else { ui.sort = key; ui.dir = key === "name" ? "asc" : "desc"; }
+          rerender();
+        } } }, label));
+      const rows = shown.map((l) => el("tr", { on: { click: (e) => {
+        if (e.target.closest("a, button, input, select, textarea") || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || window.getSelection()?.toString()) return;
+        navigate(`#lead/${enc(l.id)}`);
+      } } },
+        el("th", { scope: "row" }, el("a", { class: "leads-name", href: `#lead/${enc(l.id)}` }, el("span", { class: "lead-name", text: l.name }), l.phone ? el("span", { class: "muted small", text: l.phone }) : null)),
+        el("td", {}, statusMark(l)),
+        el("td", {}, callsCell(l)),
+        el("td", { text: l.rep_name || "Unassigned" }),
+        el("td", {}, l.updated_at ? el("time", { datetime: l.updated_at, title: formatStarted(l.updated_at), text: ago(l.updated_at) }) : el("span", { class: "muted", text: "Unknown" })),
+        el("td", {}, leadCalls(l) ? el("a", { class: "button small", href: `#prep/${enc(l.id)}`, text: "Prep" }) : null)));
+      body = el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Leads table" },
+        el("table", { class: "team-table leads-table", "aria-label": "Leads" },
+          el("thead", {}, el("tr", {}, sortBtn("name", "Name"), el("th", { scope: "col", text: "Status" }), el("th", { scope: "col", text: "Calls" }), el("th", { scope: "col", text: "Rep" }), sortBtn("updated", "Updated"), el("th", { scope: "col", text: "Prep" }))),
+          el("tbody", {}, ...rows)));
+    }
+    const dialog = page.addingLead ? addLeadDialog(me) : null;
+    const mem = focusMemory();
+    main.replaceChildren(el("div", { class: "page leads-page" },
+      header(null, "Leads", "Who you are calling, and their earlier calls. Prep reads those calls before the next one.", add),
+      el("section", { class: "list-card leads-panel" }, toolbar, body),
+      dialog));
+    if (dialog) {
+      dialog.showModal();
+      if (mem && (mem.id === "lead-name" || mem.id === "lead-phone")) restoreFocus(mem);
+    } else restoreFocus(mem);
+  }
+
+  function openEditLead(lead) {
+    page.leadEdit = { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
+    page.editingLead = lead.id;
+    rerender();
+  }
+
+  function editLeadDialog(lead, path) {
+    const draft = page.leadEdit && page.leadEdit.id === lead.id ? page.leadEdit : { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
+    page.leadEdit = draft;
+    const name = el("input", { id: "edit-lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", autofocus: true, value: draft.name || "" });
+    const phone = el("input", { id: "edit-lead-phone", type: "tel", maxlength: "30", autocomplete: "off", value: draft.phone || "" });
+    const reps = S.people().filter((p) => p.role === "rep" || p.id === lead.rep_id);
+    const rep = el("select", { id: "edit-lead-rep" }, el("option", { value: "", text: "Unassigned" }), ...reps.map((p) => el("option", { value: p.id, text: p.name })));
+    rep.value = draft.rep_id && [...rep.options].some((o) => o.value === draft.rep_id) ? draft.rep_id : "";
+    const err = el("p", { class: "form-error", role: "alert", hidden: true });
+    const submit = el("button", { type: "submit", class: "primary", text: "Save details" });
+    const remember = () => {
+      page.leadEdit = { id: lead.id, name: name.value, phone: phone.value, rep_id: rep.value };
+    };
+    name.addEventListener("input", remember);
+    phone.addEventListener("input", remember);
+    rep.addEventListener("change", remember);
+    const form = el(
+      "form",
+      { class: "dialog-form", novalidate: true },
+      S.formField("edit-lead-name", "Name", name),
+      S.formField("edit-lead-phone", "Phone", phone, "Optional."),
+      S.formField("edit-lead-rep", "Rep", rep, reps.length ? "Whose lead this is." : "Add a rep under Manage people to assign one."),
+      err,
+      el("div", { class: "row dialog-actions" }, el("button", { type: "button", text: "Cancel", on: { click: () => dialog.close() } }), submit)
     );
-    main.replaceChildren(
-      el(
-        "div",
-        { class: "page" },
-        header("Leads", "Leads", "Who you are calling, and their earlier calls. Prep reads those calls before the next one."),
-        el(
-          "div",
-          { class: "bento" },
-          section("bento-anchor", "Your leads", null, "user", "accent", rows.length ? el("ul", { class: "page-rows" }, ...rows) : muted("No leads yet. Add one, then choose it when you add a call.")),
-          section("", "Add a lead", "A name is enough. Link calls to it from the call page.", "add", "accent", form)
-        )
-      )
+    const dialog = el(
+      "dialog",
+      { class: "dialog", "aria-labelledby": "edit-lead-title" },
+      el("div", { class: "dialog-head" }, el("h2", { id: "edit-lead-title", text: "Edit details" }), el("button", { type: "button", class: "ghost small", "aria-label": "Close", on: { click: () => dialog.close() } }, icon("x", 18))),
+      form
     );
+    const token = {};
+    page.leadDialog = token;
+    dialog.addEventListener("close", () => {
+      if (page.leadDialog !== token) return;
+      page.editingLead = null;
+      const edit = document.getElementById("edit-lead");
+      if (edit) edit.focus();
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!name.value.trim()) {
+        err.textContent = "Enter a name.";
+        err.hidden = false;
+        name.setAttribute("aria-invalid", "true");
+        name.focus();
+        return;
+      }
+      name.removeAttribute("aria-invalid");
+      err.hidden = true;
+      submit.disabled = true;
+      try {
+        const saved = await api(path, { method: "PUT", json: { name: name.value.trim(), phone: phone.value.trim(), rep_id: rep.value || null } });
+        const pending = document.getElementById("lead-notes");
+        if (pending && pending.value !== (saved.notes || "")) saved.notes = pending.value;
+        page.data.set(path, saved);
+        page.editingLead = null;
+        page.leadDialog = null;
+        invalidate("/api/leads");
+        rerender();
+        const edit = document.getElementById("edit-lead");
+        if (edit) edit.focus();
+      } catch (ex) {
+        submit.disabled = false;
+        err.textContent = ex.message;
+        err.hidden = false;
+      }
+    });
+    return dialog;
   }
 
   function renderLead(main, id) {
@@ -197,36 +450,94 @@
     const lead = got(path);
     if (page.errors.has(path)) return main.replaceChildren(failed("Lead", page.errors.get(path), path));
     if (!lead) return main.replaceChildren(loading("Lead"));
-    const notes = el("textarea", { id: "lead-notes", class: "input", rows: "4", maxlength: "2000", value: lead.notes || "" });
+    const notes = el("textarea", { id: "lead-notes", class: "input", rows: "5", maxlength: "2000", value: lead.notes || "" });
     const msg = el("p", { class: "form-status", role: "status" });
-    const save = el("button", { type: "button", class: "small", text: "Save notes" });
+    const save = el("button", { type: "button", text: "Save notes" });
     save.addEventListener("click", async () => {
+      save.disabled = true;
       try {
-        await api(path, { method: "PUT", json: { notes: notes.value } });
+        const saved = await api(path, { method: "PUT", json: { notes: notes.value } });
+        page.data.set(path, saved);
         msg.textContent = "Saved.";
         msg.className = "form-status is-ok";
       } catch (e) {
         msg.textContent = e.message;
         msg.className = "form-status is-error";
       }
+      save.disabled = false;
     });
-    const calls = (lead.calls || []).map((c) =>
-      el("li", { class: "page-row" }, icon("phone", 18), el("a", { class: "page-row-link", href: `#call/${enc(c.id)}` }, el("span", { class: "strong", text: formatStarted(c.started_at) }), el("span", { class: "muted small", text: compact([c.rep_name, S.packName(c.pack_id), c.status]).join(" · ") })))
+    const calls = lead.calls || [];
+    const callRows = calls.map((c) =>
+      el(
+        "li",
+        { class: "page-row" },
+        icon("phone", 18),
+        el(
+          "a",
+          { class: "page-row-link", href: `#call/${enc(c.id)}` },
+          el("span", { class: "strong", text: c.customer_name && c.customer_name !== lead.name ? `${c.customer_name} · ${formatStarted(c.started_at)}` : formatStarted(c.started_at) }),
+          el("span", { class: "muted small", text: compact([c.rep_name, S.packName(c.pack_id), c.kind === "practice" ? "Practice" : null, c.status, c.overall != null ? `Score ${c.overall}` : null]).join(" · ") })
+        )
+      )
     );
+    const phoneText = lead.phone ? el("a", { href: `tel:${String(lead.phone).replace(/[^\d+]/g, "")}`, text: lead.phone }) : "No phone";
+    const fact = (label, value, quiet) => el("div", { class: "stat" }, el("dt", { text: label }), el("dd", { class: quiet ? "is-quiet" : "" }, value));
+    const edit = el("button", { type: "button", id: "edit-lead", on: { click: () => openEditLead(lead) } }, "Edit details");
+    const prep = calls.length ? el("a", { class: "button primary", href: `#prep/${enc(lead.id)}`, text: "Prep for the next call" }) : null;
+    const dialog = page.editingLead === lead.id ? editLeadDialog(lead, path) : null;
+    const mem = focusMemory();
     main.replaceChildren(
       el(
         "div",
-        { class: "page" },
-        header("Lead", lead.name, compact([lead.phone, lead.rep_name ? `Rep: ${lead.rep_name}` : null]).join(" · "), calls.length ? el("a", { class: "button primary", href: `#prep/${enc(lead.id)}`, text: "Prep for the next call" }) : null),
+        { class: "page lead-page" },
+        el(
+          "header",
+          { class: "page-head lead-head" },
+          el(
+            "div",
+            {},
+            crumbs([{ href: "#leads", text: "Leads" }, { text: lead.name }]),
+            el("h1", { text: lead.name }),
+            el("p", { class: "lede", text: calls.length ? `${plural(calls.length, "call", "calls")} on file. Prep reads them before the next one.` : "No calls yet. Link this lead from a call's page, then Prep can read it." })
+          ),
+          el("div", { class: "row lead-actions" }, edit, prep)
+        ),
+        el(
+          "dl",
+          { class: "stat-strip", "aria-label": "About this lead" },
+          fact("Phone", phoneText, !lead.phone),
+          fact("Rep", lead.rep_name || "Unassigned", !lead.rep_name),
+          fact("Status", statusMark(lead), false),
+          fact("Updated", lead.updated_at ? el("time", { datetime: lead.updated_at, title: formatStarted(lead.updated_at), text: ago(lead.updated_at) }) : "Unknown", !lead.updated_at)
+        ),
         el(
           "div",
           { class: "bento" },
-          section("bento-anchor", "Calls", null, "phone", "accent", calls.length ? el("ul", { class: "page-rows" }, ...calls) : muted("No calls yet. On a call's page, choose this lead under Lead.")),
-          section("", "Notes", "Visible to the team; Prep reads the calls, not these notes.", "doc", "accent", S.formField("lead-notes", "Notes", notes), el("div", { class: "row" }, save), msg)
+          section(
+            "bento-anchor",
+            "Calls",
+            calls.length ? "Newest first." : null,
+            "phone",
+            "accent",
+            callRows.length
+              ? el("ul", { class: "page-rows" }, ...callRows)
+              : el(
+                  "div",
+                  { class: "lead-empty" },
+                  el("p", { class: "strong", text: "No calls linked" }),
+                  muted("On a call's page, choose this lead under Lead."),
+                  el("a", { class: "button", href: "#calls", text: "Open calls" })
+                )
+          ),
+          section("", "Notes", "Visible to the team. Prep reads the calls, not these notes.", "doc", "accent", S.formField("lead-notes", "Notes", notes), el("div", { class: "row" }, save, msg))
         ),
-        el("p", {}, el("a", { href: "#leads", text: "All leads" }))
+        dialog
       )
     );
+    if (dialog) {
+      dialog.showModal();
+      if (mem && mem.id && mem.id.startsWith("edit-lead-")) restoreFocus(mem);
+    } else restoreFocus(mem);
   }
 
   // ---------- prep ----------
@@ -267,7 +578,18 @@
       el(
         "div",
         { class: "page" },
-        header("Prep", `Before your call with ${brief.lead.name}`, `${plural(brief.calls.length, "earlier call", "earlier calls")}. Read in about a minute.`, rehearse),
+        el(
+          "header",
+          { class: "page-head" },
+          el(
+            "div",
+            {},
+            crumbs([{ href: "#leads", text: "Leads" }, { href: `#lead/${enc(id)}`, text: brief.lead.name }, { text: "Prep" }]),
+            el("h1", { text: `Before your call with ${brief.lead.name}` }),
+            el("p", { class: "lede", text: `${plural(brief.calls.length, "earlier call", "earlier calls")}. Read in about a minute.` })
+          ),
+          rehearse
+        ),
         rmsg,
         el(
           "div",
@@ -297,16 +619,23 @@
 
   function renderTeam(main) {
     const me = S.viewer();
+    const manage = el("a", { class: "button primary", href: "#people" }, icon("user", 16), "Manage teams");
+    const teamHead = (sub) => {
+      const head = header(null, "Team", sub, manage);
+      head.classList.add("lede-one-line");
+      return head;
+    };
     if (!me || me.role !== "manager") {
-      main.replaceChildren(el("div", { class: "page" }, header("Team", "Team", "For managers. Choose a manager under Viewing as."), el("a", { class: "button", href: "#people", text: "People" })));
+      main.replaceChildren(el("div", { class: "page" }, teamHead("For managers. Choose a manager under Viewing as.")));
       return;
     }
     const path = "/api/team";
     const t = got(path);
     if (page.errors.has(path)) return main.replaceChildren(failed("Team", page.errors.get(path), path));
     if (!t) return main.replaceChildren(loading("Team", "Reading the team's calls…"));
-    const nodes = [header("Team", "Team", "Where each rep stands on each skill, what repeats across the team, and what needs you.")];
+    const nodes = [teamHead("Where each rep stands on each skill, what repeats across the team, and what needs you.")];
     if (t.escalations.length) nodes.push(escalationList(t.escalations, me));
+    nodes.push(roster(t.roster || []));
     nodes.push(el("div", { class: "bento" }, matrix(t), patterns(t.patterns)));
     nodes.push(reviewQueue(t.review, me));
     main.replaceChildren(el("div", { class: "page" }, ...compact(nodes)));
@@ -336,6 +665,52 @@
       );
     });
     return section("", "Needs you", "Sel's coach escalates only these; everything else it handles itself.", "alert", "warn", el("ul", { class: "page-rows" }, ...rows));
+  }
+
+  function roster(rows) {
+    if (!rows.length) return section("", "Reps", null, "user", "accent", muted("Add reps under Manage teams to see each rep here."));
+    const openRep = (id) => S.navigate(`#team/${enc(id)}`);
+    const body = rows.map((r) =>
+      el(
+        "tr",
+        {
+          class: "row-link",
+          tabindex: "0",
+          role: "link",
+          "aria-label": r.name,
+          on: {
+            click: (e) => { if (e.target.closest("button")) return; openRep(r.id); },
+            keydown: (e) => {
+              if (e.target.closest("button")) return;
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRep(r.id); }
+            },
+          },
+        },
+        el("th", { scope: "row" }, el("span", { class: "person-label" }, S.personAvatar(r), el("span", { text: r.name }))),
+        el("td", { text: String(r.calls) }),
+        el("td", { text: r.average === null ? "–" : `${r.average}` }),
+        el("td", { text: r.focus ? r.focus.title : "None yet" }),
+        el("td", { text: String(r.open_follow_ups) }),
+        el("td", {}, el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(r.id) } }))
+      )
+    );
+    return section(
+      "",
+      "Reps",
+      "Average scorecard over each rep's last 10 reviewed calls, and the skill each rep is focusing on.",
+      "user",
+      "accent",
+      el(
+        "div",
+        { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Reps" },
+        el(
+          "table",
+          { class: "team-table" },
+          el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Rep" }), el("th", { scope: "col", text: "Calls" }), el("th", { scope: "col", text: "Average score" }), el("th", { scope: "col", text: "Focus" }), el("th", { scope: "col", text: "Open follow-ups" }), el("th", { scope: "col", text: "" }))),
+          el("tbody", {}, ...body)
+        )
+      )
+    );
   }
 
   function matrix(t) {
@@ -440,7 +815,13 @@
       el(
         "div",
         { class: "page" },
-        header("Team", r.person.name, r.focus ? `Focus: ${r.focus.title}` : "No focus yet", el("a", { class: "button", href: "#team", text: "Team" })),
+        el(
+          "header",
+          { class: "page-head page-head-person" },
+          S.personAvatar(r.person, "call"),
+          el("div", {}, el("p", { class: "eyebrow", text: "Team" }), el("h1", { text: r.person.name }), el("p", { class: "lede", text: r.focus ? `Focus: ${r.focus.title}` : "No focus yet" })),
+          el("a", { class: "button", href: "#team", text: "Team" })
+        ),
         el(
           "div",
           { class: "bento" },
@@ -462,10 +843,33 @@
 
   // ---------- settings ----------
 
+  function referencesSection() {
+    return section(
+      "",
+      "References",
+      "The design system and the licence for the icons.",
+      "link",
+      "neutral",
+      el("p", {}, el("a", { class: "design-system-link", href: "/static/design-system.html", text: "Design system" })),
+      el(
+        "p",
+        { class: "icon-credit" },
+        "Icons by ",
+        el("a", { href: "https://www.figma.com/community/file/1166831539721848736", target: "_blank", rel: "noopener noreferrer", text: "480 Design" }),
+        " · ",
+        el("a", { href: "https://creativecommons.org/licenses/by/4.0/", target: "_blank", rel: "noopener noreferrer", text: "CC BY 4.0" })
+      )
+    );
+  }
+
   function renderSettings(main) {
     const path = "/api/doctor";
     const d = got(path);
-    if (page.errors.has(path)) return main.replaceChildren(failed("Settings", page.errors.get(path), path));
+    if (page.errors.has(path)) {
+      const fail = failed("Settings", page.errors.get(path), path);
+      fail.append(referencesSection());
+      return main.replaceChildren(fail);
+    }
     if (!d) return main.replaceChildren(loading("Settings", "Checking every model Sel uses…"));
     const model = (m, label) => {
       if (!m) return null;
@@ -504,7 +908,8 @@
             ])
           )
         ),
-        el("p", { class: "muted small", text: "Sel itself is Apache-2.0. MODELS.md in the source lists every model and dependency with its licence." })
+        el("p", { class: "muted small", text: "Sel itself is Apache-2.0. MODELS.md in the source lists every model and dependency with its licence." }),
+        referencesSection()
       )
     );
   }

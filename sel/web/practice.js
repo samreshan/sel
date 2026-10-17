@@ -134,16 +134,13 @@
 
   function render(main, arg) {
     page.main = main;
+    if (!S.peopleReady()) {
+      main.replaceChildren(el("div", { class: "page", "aria-busy": "true" }, S.skeleton()));
+      return;
+    }
     const me = S.viewer();
     if (!me || me.role !== "rep") {
-      main.replaceChildren(
-        el(
-          "div",
-          { class: "page" },
-          header("Practice", "Practice", "Drills belong to a rep. Choose who you are under Viewing as, or practise freely with a person in the simulator."),
-          el("div", { class: "row" }, el("a", { class: "button primary", href: "#sim", text: "Free practice with a person" }), el("a", { class: "button", href: "#today", text: "Today" }))
-        )
-      );
+      if (location.hash !== "#sim") location.replace("#sim");
       return;
     }
     if (arg) return renderDrill(main, arg);

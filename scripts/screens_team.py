@@ -103,7 +103,7 @@ def main() -> int:
 
             ok = tab_to("a[data-nav=leads]")
             page.keyboard.press("Enter")
-            page.wait_for_selector("text=Your leads")
+            page.wait_for_selector("text=Add a lead")
             ok = ok and tab_to(f"a[href='#prep/{ids['lead']}']")
             page.keyboard.press("Enter")
             page.wait_for_selector("text=Likely objections")

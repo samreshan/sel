@@ -1081,21 +1081,7 @@ class CallService:
             "transfer": self.coach_store.get(person["id"]).get("transfer", [])[-3:] if person and not manager else [],
         }
         if manager:
-            team = []
-            for p in self.people.list():
-                if p["role"] != "rep":
-                    continue
-                theirs = [c for c in done if c.get("rep_id") == p["id"] and call_kind(c) == "real"]
-                scores = [(self._report(c["id"]) or {}).get("score", {}).get("overall") for c in theirs[:SKILL_WINDOW]]
-                scores = [x for x in scores if x is not None]
-                focus = self.coach_store.get(p["id"]).get("focus")
-                team.append({"id": p["id"], "name": p["name"], "calls": len(theirs),
-                             "average": round(sum(scores) / len(scores)) if scores else None,
-                             "open_follow_ups": sum(f["call"]["rep_id"] == p["id"] for f in follow_ups),
-                             "focus": {"title": focus["title"], "pack_id": focus["pack_id"],
-                                       "criterion": focus["criterion"], "set_by": focus.get("set_by")}
-                             if focus and focus.get("status") == "active" else None})
-            out["team"] = team
+            out["team"] = self._team_roster()
             out["unassigned"] = [ref(c) for c in mine if not c.get("rep_id")][:TODAY_RECENT]
             out["escalations"] = [{**e, "person_id": p["id"], "person_name": p["name"]}
                                   for p in self.people.list() if p["role"] == "rep"
@@ -1227,6 +1213,34 @@ class CallService:
 
     # -- the team (managers) --------------------------------------------------------
 
+    def _team_roster(self) -> list[dict[str, Any]]:
+        """Each rep: real calls, average score over the last 10 reviewed, focus, open follow-ups."""
+        open_by_rep: dict[str, int] = {}
+        for c in self.list():
+            if c.get("status") != "done" or not c.get("rep_id"):
+                continue
+            report = self._report(c["id"])
+            if not report:
+                continue
+            n = sum(1 for d in report.get("drafts", []) if d["status"] in ("needs_input", "ready_for_approval"))
+            if n:
+                open_by_rep[c["rep_id"]] = open_by_rep.get(c["rep_id"], 0) + n
+        rows = []
+        for p in self.people.list():
+            if p["role"] != "rep":
+                continue
+            theirs = self._real_done(p["id"])
+            scores = [(self._report(c["id"]) or {}).get("score", {}).get("overall") for c in theirs[:SKILL_WINDOW]]
+            scores = [x for x in scores if x is not None]
+            focus = self.coach_store.get(p["id"]).get("focus")
+            rows.append({"id": p["id"], "name": p["name"], "calls": len(theirs),
+                         "average": round(sum(scores) / len(scores)) if scores else None,
+                         "open_follow_ups": open_by_rep.get(p["id"], 0),
+                         "focus": {"title": focus["title"], "pack_id": focus["pack_id"],
+                                   "criterion": focus["criterion"], "set_by": focus.get("set_by")}
+                         if focus and focus.get("status") == "active" else None})
+        return rows
+
     def _real_done(self, rep_id: str | None = None) -> list[dict[str, Any]]:
         """Reviewed real calls, newest first; one rep's when ``rep_id`` is given."""
         calls = [c for c in self.list() if c.get("status") == "done" and call_kind(c) == "real"
@@ -1322,6 +1336,7 @@ class CallService:
                        "rep_name": names.get(c.get("rep_id")) or c.get("rep_name"), "started_at": c.get("started_at")}
                       for c in self._real_done() if not c.get("rep_id")][:TODAY_RECENT]
         return {"reps": reps, "criteria": criteria, "patterns": self.team_patterns(reps),
+                "roster": self._team_roster(),
                 "escalations": self._open_escalations(),
                 "review": {"proposals": proposals, "unassigned": unassigned}}
 

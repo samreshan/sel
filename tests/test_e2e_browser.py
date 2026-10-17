@@ -108,7 +108,7 @@ class BrowserE2E(unittest.TestCase):
         page.goto(f"{self.base}/#calls")
         page.wait_for_selector(".calls-table tbody tr")
         self.assertEqual(page.locator(".sidebar #call-list").count(), 0)
-        self.assertTrue(page.locator('.primary-nav [data-nav="practice"] use').get_attribute("href").endswith("#target"))
+        self.assertEqual(page.locator('.primary-nav [data-nav="practice"]').count(), 0)
         expected = len(json.loads(self.get("/api/calls")))
         self.assertEqual(page.locator(".calls-table tbody tr").count(), expected)
         self.assertEqual(page.locator('.primary-nav [data-nav="calls"]').get_attribute("aria-current"), "page")
@@ -163,6 +163,7 @@ class BrowserE2E(unittest.TestCase):
         page.wait_for_selector(".team-table :text('Asha E2E')")
 
         page.goto(f"{self.base}/#playbook/demo-solar")
+        page.get_by_role("button", name="Library", exact=True).click()
         page.wait_for_selector("text=Approved facts")
         page.locator(".doc-row button").first.click()
         page.wait_for_selector(".doc-row .doc-text")
@@ -243,6 +244,7 @@ class BrowserE2E(unittest.TestCase):
         boss = self.page()
         boss.add_init_script(f"localStorage.setItem('sel.viewer', JSON.stringify('{manager}'))")
         boss.goto(f"{self.base}/#playbook/demo-solar")
+        boss.get_by_role("button", name="Library", exact=True).click()
         boss.wait_for_selector("a[data-nav=team]:visible")  # Team is in the navigation for a manager
         item = boss.locator(".skill", has_text=answer).filter(has=boss.locator("text=Approve for the team"))
         item.locator("text=Approve for the team").click()

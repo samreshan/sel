@@ -67,15 +67,16 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 193 tests; the 8 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 212 tests; the 8 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
+python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules    # Judge vs transfer_gold.json (rules|llm)
-python scripts/drill_latency.py                            # AI customer reply times (--model, --rules)
+python scripts/drill_latency.py                            # AI customer reply times (--model, --rules, --format text|json)
 python scripts/screens_team.py --out shots/                # Leads, Prep, Team, Settings, Playbook screenshots (desktop, 390 px) + keyboard pass
 python scripts/perf_ui.py                                 # UI performance on a generated 2-hour call (Playwright)
 python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base   # two browsers, live Whisper
@@ -99,6 +100,7 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/retrieval.py` | BM25 over pack facts/docs; passages are verbatim substrings |
 | `sel/analyzer_llm.py`, `sel/llm.py` | LLM analysis (narrow prompts, schema-constrained); one `/chat/completions` client for local servers or Groq (`SEL_LLM_PROVIDER=groq`), proprietary hosts refused; `chat_client_from_env` (`SEL_CHAT_LLM_*`, inherits `SEL_LLM_*`) for the Coach and AI customer |
 | `sel/doctor.py` | `sel doctor`: model, endpoint, where it runs, licence; exit 1 on a proprietary service |
+| `sel/demo_setup.py` | `sel demo-setup`: checks, then files the demo's team, lead and calls through the running server's API; safe to re-run |
 | `sel/asr.py` | faster-whisper: whole recordings (`transcribe`) and live windows (`transcribe_pcm`) |
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
@@ -418,8 +420,17 @@ check on that call) → the Coach closes the focus or keeps going.
   a model the opening is the anonymised customer line itself.
 - **AI customer** (`sel/ai_customer.py`) in a `SimulatorHub` drill room
   (`create_drill_room`): the rep and an AI participant, ready to start. The
-  persona is a constant system prompt (prompt-cache friendly), the transcript
-  the user message, replies capped (80 tokens) as `{say, end_call, mood}`. A
+  room queues a **warm-up** on the AI worker when it opens (one token over the
+  persona and the opening), so the model is loaded and the persona read before
+  the rep's first line. Two formats (`SEL_CUSTOMER_FORMAT`): **text**
+  (default) sends the drill as chat turns (`turns()`: a constant persona
+  system prompt, a constant "the call connects" turn, the rep as user, the
+  customer as assistant), so each prompt extends the last; the reply is the
+  spoken line only (`complete_chat`, 48 tokens, stop at a newline), cleaned by
+  `clean_line` (labels, quotes, stage directions such as "(pauses)", ids);
+  code decides the ending (a dated next step, or 8 customer lines) and the
+  mood (Sel's rules). **json** is the earlier format: the transcript as one
+  user message, `{say, end_call, mood}` under a schema (80 tokens). A
   rep line queues one reply on the AI worker thread; a reply that arrives
   while the rep spoke again is recomputed; `ai_busy` is cleared under the same
   lock that adds the reply. A model error, an empty line or a line with ids
@@ -741,9 +752,12 @@ Browser (`sel/web/app.js`):
   NEA-timing moment; the line for the inverter moment was a safe "I'll
   confirm", not a corrected fact. Try a criterion-at-a-time prompt.
 - The chat model is qwen2.5:1.5b on the i7-1255U (set as a user environment
-  variable, `SEL_CHAT_LLM_MODEL`): 4.4 s median per AI-customer reply, above
-  the 2 to 3 s target. Try keeping the reply prompt shorter (last N lines) or
-  a GPU/Apple Silicon demo laptop.
+  variable, `SEL_CHAT_LLM_MODEL`): 4.4 s median per AI-customer reply in the
+  json format, above the 2 to 3 s target. The text format and the warm-up
+  (20 Oct) are not yet measured on a real model: run `scripts/drill_latency.py
+  --format text` and `--format json` on the i7 and the M2 and record both here.
+  Windowing to the last N lines was not done: it would change the start of
+  every prompt and stop the server reusing it.
 - The simulator browser test sees a 409 on `POST .../audio` (a PCM chunk
   at about 0.5 s) in roughly one run in three in the cloud sandbox, also before
   Phase 4; it passes on reruns. Likely a chunk posted before the call is live

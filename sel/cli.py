@@ -111,6 +111,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--offline", action="store_true", help="don't contact the model server")
 
+    p = sub.add_parser("demo-setup", help="get a running Sel ready for the coaching-loop demo (docs/scope.md)")
+    p.add_argument("--url", default="http://127.0.0.1:8765", help="the running Sel (python -m sel serve)")
+    p.add_argument("--next", action="store_true",
+                   help="also file the follow-up call (made with Piper) so its transfer check runs")
+    p.add_argument("--next-audio", type=Path, help="a recording of the follow-up call to use instead of Piper")
+    p.add_argument("--minutes", type=float, default=30, help="how long to wait for the first call to be coached")
+    p.add_argument("--allow-rules", action="store_true",
+                   help="carry on when the models don't answer (a dry run on Sel's rules)")
+    p.add_argument("--out-dir", type=Path, default=Path("demo"), help="where the follow-up recording is written")
+
     p = sub.add_parser("serve", help="start the local review app")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
@@ -137,6 +147,15 @@ def main(argv: list[str] | None = None) -> int:
         report = check(probe=not args.offline)
         print(json.dumps(report, indent=2) if args.json else render(report))
         return 0 if report["ok"] else 1
+    if args.cmd == "demo-setup":
+        from .demo_setup import SetupError, run as demo_setup
+        try:
+            demo_setup(args.url, next_call=args.next, next_audio=args.next_audio, minutes=args.minutes,
+                       allow_rules=args.allow_rules, out_dir=args.out_dir)
+        except SetupError as e:
+            print(f"demo-setup stopped: {e}", file=sys.stderr)
+            return 1
+        return 0
     if args.cmd == "serve":
         return _serve(args)
     if args.cmd == "analyze":

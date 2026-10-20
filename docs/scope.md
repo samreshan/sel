@@ -60,39 +60,41 @@ customer), Whisper through faster-whisper.
 
 **Before recording (network on, once).**
 
-1. `scripts/setup_local.sh`, then `ollama pull qwen2.5:1.5b`. Run one upload
-   so Whisper `small` is downloaded and cached.
-2. Make the "next real call": solar-01 with the rep asking before defending
-   the price (the `asks what the other quote includes` case in
-   `examples/calls/solar-01/transfer_gold.json`), read by Piper:
+1. `scripts/setup_local.sh`, then `ollama pull qwen2.5:1.5b` and set
+   `SEL_CHAT_LLM_MODEL=qwen2.5:1.5b`. Run one upload so Whisper `small` is
+   downloaded and cached.
 
-   ```bash
-   python - <<'PY'
-   import json
-   t = json.load(open("examples/calls/solar-01/transcript.json", encoding="utf-8"))
-   for s in t["segments"]:
-       if s["id"] == "s05":
-           s["text"] = "What does the other quote include: which panel brand and inverter, and how many years of warranty?"
-   json.dump(t, open("solar-asks.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-   PY
-   python scripts/synth_call.py solar-asks.json --out solar-asks.wav --stereo \
-       --rep-voice models/piper/en_US-ryan-medium.onnx --customer-voice models/piper/en_US-lessac-medium.onnx
-   ```
+**Getting ready (network off).**
 
-3. Turn the network off. `python -m sel serve`. Under Manage people add
-   **Asha Gurung** (rep) and **Mina Shrestha** (manager). Open solar-01 and set
-   "Whose call" to Asha: the Coach sets her focus (price objections) and makes
-   a drill; Mina's Team page shows one escalation (the 10-year inverter claim).
-4. About 10 minutes before recording on the i7 (analysis then coaching take
-   about 3 + 3 minutes with qwen2.5:7b; not yet measured on the M2): New call →
-   `solar-asks.wav`, pack Ghamghar Solar, Whose call Asha, layout Stereo. Its
-   transfer check runs after its coaching.
+2. `python -m sel serve`, then in a second terminal `python -m sel demo-setup`.
+   It checks that every model is open and answering and that speech
+   recognition is installed (it stops and says what to fix otherwise), adds
+   **Asha Gurung** (rep), **Mina Shrestha** (manager) and the lead **Ramesh
+   Thapa**, uploads the solar-01 recording as an ordinary call for Asha, and
+   waits while the real models transcribe, analyse and coach it (about 6
+   minutes on the i7 with qwen2.5:7b; not yet measured on the M2). The Coach
+   then sets Asha's focus (price objections) and makes a drill; Mina's Team
+   page shows the escalation for the 10-year inverter claim if the model
+   judged it contradicted. Running it again reuses everything already there.
+3. About 10 minutes before recording: `python -m sel demo-setup --next`. It
+   makes the "next real call" with Piper (the rep asks what the other quote
+   includes before defending the price, the `asks what the other quote
+   includes` case in `examples/calls/solar-01/transfer_gold.json`) into
+   `demo/demo-solar-asks.wav` and uploads it for Asha after her focus is set,
+   so its transfer check runs after its coaching. `--next-audio file.wav` uses
+   your own recording instead.
+
+The calls `demo-setup` files are analysed by the models on the laptop. The
+example call `example-solar-01` (loaded at start-up) carries hand-written
+stand-ins labelled "Example line"; use it only if the model's lines on the
+real call include no refused line to show (qwen2.5:7b wrote a safe "I'll
+confirm" line for the inverter moment in our run, so nothing was refused).
 
 **The demo.**
 
 | Time | Screen | What to show |
 |---|---|---|
-| 0:00 | solar-01 → Coaching tab | The price objection: what the customer said, what Asha said, why it fell short, the better line (AI-suggested, "Checked against your pack", with its passage). Open "Sel refused 1 line": the 10-year warranty line and the reason (the pack gives 10 years only with the paid Care Plan). |
+| 0:00 | Calls → Ramesh Thapa (the call `demo-setup` filed) → Coaching tab | The price objection: what the customer said, what Asha said, why it fell short, the better line (AI-suggested, "Checked against your pack", with its passage). Open "Sel refused 1 line": the 10-year warranty line and the reason (the pack gives 10 years only with the paid Care Plan). |
 | 1:00 | Practise this (90 s) | The drill: the real moment, the anonymised AI persona. Start the call; the AI customer opens with the objection (labelled AI). Type "What does the other quote include: which panels and inverter?" The customer warms up. End and get feedback: Passed, judged by AI and Sel's rules, the real answer beside the practice answer and the better line. |
 | 2:30 | Today (Viewing as Asha) | This week's focus, the real moment and the better line, the drill and its attempt. |
 | 3:15 | Calls → the new call (solar-asks) | Reviewed and coached on this laptop. Today: the transfer check passed on the real call, quoting the line; the Coach closed the focus ("Done") and chose the next skill. Switch Viewing as to Mina → Team → Asha: the skill timeline (missed, then met) and the 1:1 brief. |

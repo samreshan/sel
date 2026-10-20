@@ -34,6 +34,8 @@
 | The Coach only proposes; code validates against a whitelist and state; one active focus; it never replaces an active focus (a manager's included) | Agents act through code, so a wrong model answer cannot change a rep's plan |
 | Focus ranking without a model: calls fell short on, then objections, discovery, next step, talk ratio, claims | Practice drills train conversation skills; wrong claims are fixed by the playbook and escalated |
 | Two clients: `SEL_LLM_*` for analysis and coaching, `SEL_CHAT_LLM_*` for the Coach and AI customer | Conversation needs a fast model; analysis can be slower and more accurate |
+| The AI customer replies in plain text over chat turns, warmed up when the drill room opens; code decides when the call ends and the mood (`SEL_CUSTOMER_FORMAT=json` keeps the schema format) | Fewer tokens, no JSON grammar, and each prompt extends the last so the server reuses it; qwen2.5:1.5b set `end_call` and mood unreliably anyway. To be measured on the i7 and M2 |
+| The demo is prepared by `sel demo-setup` against the running server, and its calls go through the real models | The example call carries hand-written stand-ins; a judge should see model output, and setup should not be a page of manual steps |
 | Practice personas are anonymised by code before any prompt and named from a fictional list | Real calls are private; the practice customer must not carry a real customer's name, number or price |
 | Drills are typed first; the AI customer is labelled on every line | Text works on any machine and is easy to test; voice is a stretch |
 | The Judge's pass needs Sel's rules to agree where they measure the skill; disagreement is "unsure" | A false pass would close a focus the rep has not earned |

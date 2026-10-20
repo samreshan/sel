@@ -16,3 +16,6 @@ models/
 /calls/
 # Synthesized (text-to-speech) example recordings are safe to publish.
 !examples/calls/*/audio.ogg
+
+# demo-setup output (the synthesized follow-up call)
+/demo/

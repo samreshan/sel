@@ -42,7 +42,7 @@ scripts/setup_local.sh          # Linux: .venv with faster-whisper, Ollama in .t
 .venv/bin/python -m sel serve   # http://127.0.0.1:8765
 ```
 
-Then choose **New call**, pick a recording and a business pack, and wait for the analysis. Details, configuration (including other local servers and Groq-hosted open-weight models) and the command-line tools are in [docs/running.md](docs/running.md). `python -m sel doctor` shows every model Sel will use, where it runs and its licence; see [MODELS.md](MODELS.md).
+Then choose **New call**, pick a recording and a business pack, and wait for the analysis. To prepare the coaching-loop demo instead, run `python -m sel demo-setup` while Sel is running (see [docs/scope.md](docs/scope.md#coaching-loop-demo-5-minutes-english-network-off)). Details, configuration (including other local servers and Groq-hosted open-weight models) and the command-line tools are in [docs/running.md](docs/running.md). `python -m sel doctor` shows every model Sel will use, where it runs and its licence; see [MODELS.md](MODELS.md).
 
 To try the **call simulator**, open http://127.0.0.1:8765/#sim in two windows: start a call in one, join it from the other, turn on the microphones (or type lines) and talk. Without faster-whisper installed people type their lines; without a language model the filed call is analysed by Sel's rules. Across two computers, serve over https (`--host 0.0.0.0 --tls-cert … --tls-key …`) so browsers allow the microphone. See [docs/running.md](docs/running.md#call-simulator).
 

@@ -90,11 +90,13 @@
     page.todayFor = undefined;
   });
 
+  // `eyebrow` is a line of text, or a breadcrumb trail ({href, text} items) for a page opened from another.
   function header(eyebrow, title, sub, ...extra) {
+    const above = Array.isArray(eyebrow) ? S.crumbs([...eyebrow, { text: title }]) : eyebrow ? el("p", { class: "eyebrow", text: eyebrow }) : null;
     return el(
       "header",
       { class: "page-head" },
-      el("div", {}, eyebrow ? el("p", { class: "eyebrow", text: eyebrow }) : null, el("h1", { text: title }), sub ? el("p", { class: "lede", text: sub }) : null),
+      el("div", {}, above, el("h1", { text: title }), sub ? el("p", { class: "lede", text: sub }) : null),
       ...compact(extra)
     );
   }
@@ -530,7 +532,7 @@
         S.personAvatar(p),
         name,
         role,
-        me && me.id === p.id ? pill("ok", "You") : el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(p.id) } }),
+        el("span", { class: "person-row-action" }, me && me.id === p.id ? pill("neutral", "You") : el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(p.id) } })),
         msg
       );
     });
@@ -538,12 +540,12 @@
       el(
         "div",
         { class: "page" },
-        header("Team", "People", "Reps and managers. Calls belong to a rep; managers see the whole team on Today. There is no login, so anyone on this computer can switch."),
+        header([me && me.role === "manager" ? { href: "#team", text: "Team" } : { href: "#today", text: "Today" }], "People", "Reps and managers. Calls belong to a rep; managers see the whole team on Today. There is no login, so anyone on this computer can switch."),
         el(
           "div",
           { class: "people-grid" },
-          section("Add a person", null, "user", "accent", personForm((p) => (!S.viewer() ? S.setViewer(p.id) : null), "Add")),
-          people.length ? section("The team", null, "user", "accent", el("ul", { class: "page-rows" }, ...rows)) : null
+          people.length ? section("The team", plural(people.length, "person", "people"), "users", "accent", el("ul", { class: "page-rows" }, ...rows)) : null,
+          section("Add a person", "They can choose themselves under Viewing as.", "user", "accent", personForm((p) => (!S.viewer() ? S.setViewer(p.id) : null), "Add"))
         )
       )
     );

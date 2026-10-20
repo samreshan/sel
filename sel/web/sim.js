@@ -239,7 +239,7 @@
     const start = el(
       "form",
       { class: "card sim-start", novalidate: true },
-      el("h2", { class: "section-title", text: "Start a call" }),
+      cardTitle("phone", "Start a call"),
       el("div", { class: "field" }, el("label", { for: "sim-pack", text: "Business pack" }), packSel),
       el("div", { class: "field" }, el("span", { class: "label-like", text: "You play" }), roles),
       startBtn
@@ -287,7 +287,7 @@
       el(
         "header",
         { class: "sim-lobby-head" },
-        el("p", { class: "eyebrow", text: "Practice and live review" }),
+        S.crumbs([{ href: "#playbook", text: "Playground" }, { text: "Call simulator" }]),
         el("h1", { text: "Call simulator" }),
         el("p", {
           class: "lede",
@@ -299,7 +299,7 @@
       el(
         "section",
         { class: "card sim-you" },
-        el("h2", { class: "section-title", text: "You" }),
+        cardTitle("user", "You"),
         el(
           "div",
           { class: "sim-you-grid" },
@@ -314,7 +314,7 @@
         el(
           "section",
           { class: "card sim-open" },
-          el("h2", { class: "section-title", text: "Join a call" }),
+          cardTitle("users", "Join a call"),
           rooms,
           el("p", { class: "card-sub", text: "Or type the code someone gave you:" }),
           joinCode
@@ -340,6 +340,11 @@
     );
     if (window.MediaRecorder === undefined) chips.push(capChip(false, "This browser cannot record; the transcript is still filed"));
     node.replaceChildren(...chips);
+  }
+
+  // A lobby card's title with its icon tile, as on Today's cards.
+  function cardTitle(iconName, text) {
+    return el("div", { class: "section-head-main" }, S.iconTile("accent", iconName), el("h2", { class: "section-title", text }));
   }
 
   function capChip(ok, text) {

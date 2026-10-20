@@ -18,7 +18,7 @@
   "use strict";
 
   const S = window.Sel;
-  const { el, icon, iconTile, pill, muted, compact, plural, api, navigate, formatStarted, quoted } = S;
+  const { el, icon, iconTile, crumbs, pill, muted, compact, plural, api, navigate, formatStarted, formatDay, quoted } = S;
   const enc = encodeURIComponent;
   const STATUS = { met: ["ok", "Met"], partial: ["warn", "Partly"], missed: ["bad", "Missed"] };
   const VERDICT = { pass: ["ok", "Passed"], fail: ["bad", "Not yet"], not_applicable: ["neutral", "Did not come up"], unsure: ["warn", "Unclear"] };
@@ -95,24 +95,8 @@
     return el(
       "header",
       { class: "page-head" },
-      el("div", {}, eyebrow ? el("p", { class: "eyebrow", text: eyebrow }) : null, el("h1", { text: title }), sub ? el("p", { class: "lede", text: sub }) : null),
+      el("div", {}, eyebrow ? el("p", { class: "eyebrow", text: eyebrow }) : null, el("h1", { text: title }), sub ? el("p", { class: "lede" }, sub) : null),
       ...compact(extra)
-    );
-  }
-
-  // Trail back to the list. The last item is the current page.
-  function crumbs(items) {
-    return el(
-      "nav",
-      { class: "crumbs", "aria-label": "Breadcrumb" },
-      el(
-        "ol",
-        {},
-        ...items.map((item, i) => {
-          const current = i === items.length - 1;
-          return el("li", {}, current || !item.href ? el("span", { "aria-current": current ? "page" : null, text: item.text }) : el("a", { href: item.href, text: item.text }));
-        })
-      )
     );
   }
 
@@ -573,7 +557,7 @@
       )
     );
     const gaps = brief.gaps.map((g) => el("li", { class: "page-row" }, icon(g.criterion ? "target" : "question", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: g.title || g.text }), el("span", { class: "muted small", text: g.criterion ? g.suggestion || g.detail || "" : "They asked this; check it was answered." }))));
-    const promises = brief.promises.map((p) => el("li", { class: "page-row" }, icon(p.owner === "rep" ? "mail" : "user", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: `${p.owner === "rep" ? "You" : "They"}: ${p.action}` }), el("span", { class: "muted small", text: p.due && p.due.status === "exact" ? `Due ${p.due.date}` : p.due_text ? `${quoted(p.due_text)}: no fixed day` : "No day said" }))));
+    const promises = brief.promises.map((p) => el("li", { class: "page-row" }, icon(p.owner === "rep" ? "mail" : "user", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: `${p.owner === "rep" ? "You" : "They"}: ${p.action}` }), el("span", { class: "muted small", text: p.due && p.due.status === "exact" ? `Due ${formatDay(p.due.date)}` : p.due_text ? `${quoted(p.due_text)}: no fixed day` : "No day said" }))));
     main.replaceChildren(
       el(
         "div",
@@ -619,7 +603,7 @@
 
   function renderTeam(main) {
     const me = S.viewer();
-    const manage = el("a", { class: "button primary", href: "#people" }, icon("user", 16), "Manage teams");
+    const manage = el("a", { class: "button", href: "#people" }, icon("users", 16), "Manage people");
     const teamHead = (sub) => {
       const head = header(null, "Team", sub, manage);
       head.classList.add("lede-one-line");
@@ -668,7 +652,7 @@
   }
 
   function roster(rows) {
-    if (!rows.length) return section("", "Reps", null, "user", "accent", muted("Add reps under Manage teams to see each rep here."));
+    if (!rows.length) return section("", "Reps", null, "user", "accent", muted("Add reps under Manage people to see each rep here."));
     const openRep = (id) => S.navigate(`#team/${enc(id)}`);
     const body = rows.map((r) =>
       el(
@@ -819,8 +803,7 @@
           "header",
           { class: "page-head page-head-person" },
           S.personAvatar(r.person, "call"),
-          el("div", {}, el("p", { class: "eyebrow", text: "Team" }), el("h1", { text: r.person.name }), el("p", { class: "lede", text: r.focus ? `Focus: ${r.focus.title}` : "No focus yet" })),
-          el("a", { class: "button", href: "#team", text: "Team" })
+          el("div", {}, crumbs([{ href: "#team", text: "Team" }, { text: r.person.name }]), el("h1", { text: r.person.name }), el("p", { class: "lede", text: r.focus ? `Focus: ${r.focus.title}` : "No focus yet" }))
         ),
         el(
           "div",
@@ -850,14 +833,35 @@
       "The design system and the licence for the icons.",
       "link",
       "neutral",
-      el("p", {}, el("a", { class: "design-system-link", href: "/static/design-system.html", text: "Design system" })),
       el(
-        "p",
-        { class: "icon-credit" },
-        "Icons by ",
-        el("a", { href: "https://www.figma.com/community/file/1166831539721848736", target: "_blank", rel: "noopener noreferrer", text: "480 Design" }),
-        " · ",
-        el("a", { href: "https://creativecommons.org/licenses/by/4.0/", target: "_blank", rel: "noopener noreferrer", text: "CC BY 4.0" })
+        "ul",
+        { class: "page-rows" },
+        el(
+          "li",
+          { class: "page-row" },
+          icon("doc", 18),
+          el("div", { class: "page-row-main" }, el("span", { class: "strong", text: "Design system" }), el("span", { class: "muted small", text: "Sel's cards, buttons and states, with working examples. Opens on this computer." })),
+          el("a", { class: "button small", href: "/static/design-system.html", text: "Open" })
+        ),
+        el(
+          "li",
+          { class: "page-row" },
+          icon("settings", 18),
+          el(
+            "div",
+            { class: "page-row-main" },
+            el("span", { class: "strong", text: "Solar icons" }),
+            el(
+              "span",
+              { class: "muted small icon-credit" },
+              "Icons by ",
+              el("a", { href: "https://www.figma.com/community/file/1166831539721848736", target: "_blank", rel: "noopener noreferrer", text: "480 Design" }),
+              " · ",
+              el("a", { href: "https://creativecommons.org/licenses/by/4.0/", target: "_blank", rel: "noopener noreferrer", text: "CC BY 4.0" }),
+              ". Bundled with Sel; nothing is fetched."
+            )
+          )
+        )
       )
     );
   }
@@ -889,7 +893,7 @@
       el(
         "div",
         { class: "page" },
-        header("Settings", "Models on this computer", "Every model Sel uses, what for, where it runs and its licence. The same check as `python -m sel doctor`."),
+        header("Settings", "Models on this computer", ["Every model Sel uses, what for, where it runs and its licence. The same check as ", el("code", { text: "python -m sel doctor" }), "."]),
         el("section", { class: `card ${d.ok ? "is-success" : "is-error"}`, role: "status" }, el("p", { class: "strong", text: d.ok ? "Open models only: no proprietary model service is configured." : `Not allowed: ${d.problems.join("; ")}` })),
         section(
           "",

@@ -75,7 +75,9 @@
     refs: null,
     lobby: null,
     report: null, // the filed call's report, for next actions
-    reportFor: null,
+    reportFor: null, // the call id whose finished report is loaded
+    reportLoading: null, // the call id whose report is being fetched
+    reportAgain: false, // the call finished while that fetch was in flight: fetch once more
     dirty: new Set(),
     frame: 0,
   };
@@ -920,24 +922,37 @@
 
   // ---------- after the call: next actions from the filed report ----------
 
+  // The analysis can finish while a fetch is in flight (with Sel's rules it takes milliseconds):
+  // that fetch then answers "running" and the "done" event has already come and gone. So a "done"
+  // that arrives mid-fetch asks for one more fetch, and reportFor is only set once a finished
+  // report is on screen. Fetches are fresh: never reuse a request that started before the change.
   async function loadReport() {
     const id = sim.room && sim.room.call_id;
-    if (!id) return;
+    if (!id || sim.reportFor === id) return;
     const call = S.calls().find((c) => c.id === id);
     if (call && call.status !== "done") return; // the "call" event brings us back when it is
-    sim.reportFor = id;
+    if (sim.reportLoading === id) {
+      sim.reportAgain = true;
+      return;
+    }
+    sim.reportLoading = id;
+    sim.reportAgain = false;
     try {
-      const view = await api(`/api/calls/${enc(id)}`);
-      if (view.status !== "done") {
-        sim.reportFor = null;
-        return;
+      const view = await api(`/api/calls/${enc(id)}`, { fresh: true });
+      if (sim.room && sim.room.call_id === id && view.status === "done") {
+        sim.reportFor = id;
+        sim.report = view.report;
+        sim.reportCall = view;
+        dirty("after", "flow");
       }
-      sim.report = view.report;
-      sim.reportCall = view;
-      dirty("after", "flow");
     } catch (e) {
-      sim.reportFor = null;
       setError(e.message);
+    } finally {
+      sim.reportLoading = null;
+    }
+    if (sim.reportAgain && sim.reportFor !== id) {
+      sim.reportAgain = false;
+      loadReport();
     }
   }
 
@@ -1420,7 +1435,8 @@
   async function pumpPcm() {
     if (sim.pcmBusy) return;
     sim.pcmBusy = true;
-    while (sim.pcmQueue.length && sim.session) {
+    // Only while the call runs (or has just ended and the last chunk is flushing).
+    while (sim.pcmQueue.length && sim.session && sim.room && ["live", "ended"].includes(sim.room.state)) {
       const { pcm, t } = sim.pcmQueue.shift();
       try {
         const res = await fetch(`/api/sim/rooms/${enc(sim.session.code)}/audio?client=${enc(sim.session.client)}&t=${t.toFixed(3)}`, {
@@ -1470,6 +1486,8 @@
     sim.live = null;
     sim.report = null;
     sim.reportFor = null;
+    sim.reportLoading = null;
+    sim.reportAgain = false;
     sim.reportCall = null;
     sim.uploadFrac = null;
     sim.finishing = false;
@@ -1514,7 +1532,7 @@
   });
   S.on("call", (summary) => {
     if (!sim.room || summary.id !== sim.room.call_id) return;
-    if (summary.status === "done" && sim.reportFor !== summary.id) loadReport();
+    if (summary.status === "done" && sim.reportFor !== summary.id) loadReport(); // mid-fetch: marks reportAgain
     dirty("after", "flow");
   });
 

@@ -124,6 +124,23 @@
     page.lines.sort((a, b) => a.start - b.start);
     paintLines();
   });
+  // The tab's event stream reconnects when the drill starts (to add the room) and after a network
+  // blip; a line published meanwhile (often the AI customer's reply) would be lost. The first event
+  // on every stream is a snapshot with the room and its lines: take the lines it has that we don't.
+  S.on("hello", (data) => {
+    const v = data && data.room;
+    if (!page.session || !v || v.code !== page.session.code) return;
+    const known = new Set(page.lines.map((l) => l.id));
+    const missing = (v.lines || []).filter((l) => !known.has(l.id));
+    page.room = { ...page.room, ...v };
+    delete page.room.lines;
+    if (v.live) page.live = v.live;
+    if (missing.length) {
+      page.lines = page.lines.concat(missing).sort((a, b) => a.start - b.start);
+      paintLines();
+    }
+    paintRoom();
+  });
   S.on("live", (snap) => {
     if (!page.session || !page.room) return;
     page.live = snap;

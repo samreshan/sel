@@ -228,6 +228,39 @@ class BrowserE2E(unittest.TestCase):
         self.assertIn("What does the other quote include", page.locator(".debrief .compare").inner_text())
         self.assertEqual(page.errors, [])
 
+    def test_drill_recovers_a_line_missed_while_the_stream_reconnects(self):
+        """A line published while the tab's event stream is down comes back with the reconnect snapshot."""
+        from sel.events import _end
+
+        person = json.loads(self.post("/api/people", {"name": "Reconnect E2E", "role": "rep"}))
+        self.post(f"/api/calls/example-solar-01/rep", {"rep_id": person["id"]}, method="PUT")
+        for _ in range(200):
+            drills = json.loads(self.get(f"/api/drills?person={person['id']}"))
+            if drills and drills[0]["status"] == "ready":
+                break
+            time.sleep(0.05)
+        page = self.page()
+        page.add_init_script(f"localStorage.setItem('sel.viewer', JSON.stringify('{person['id']}'))")
+        page.goto(f"{self.base}/#practice")
+        page.locator(".page-row-link").first.click()
+        page.click("text=Start the drill")
+        page.click("text=Start the call")
+        page.wait_for_selector(".sim-line.role-customer .lang:text('AI')")
+        room = [r for r in self.hub.rooms.values() if r.drill_id and r.state == "live"][-1]
+        bus = self.service.bus
+        with bus._lock:  # end this tab's stream, as the bus does to a subscriber that falls behind
+            subs = [x for x in bus._subs if f"room:{room.code}" in x.topics]
+            for x in subs:
+                bus._subs.discard(x)
+        for x in subs:
+            _end(x)
+        with room.lock:  # published while the browser waits to reconnect (about 1.5 s)
+            now = self.hub._elapsed(room)
+            self.hub._add(room, "customer", now, now + 1, "Said while your connection was down.", "ai")
+            self.hub._broadcast(room)
+        page.wait_for_selector(".sim-line .text:has-text('while your connection was down')", timeout=15000)
+        self.assertEqual(page.errors, [])
+
     def test_flywheel_approve_then_prep_then_rehearse(self):
         """A manager approves a proposed team answer; the lead's Prep shows it; Rehearse opens a drill."""
         svc = self.service

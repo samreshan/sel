@@ -235,3 +235,16 @@ class ConcurrencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LateAudioTests(unittest.TestCase):
+    def test_the_last_chunk_after_hang_up_is_dropped_not_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = CallService(tmp, ROOT / "packs")
+            hub = SimulatorHub(service, speech_factory=lambda: None, speech_status=lambda: (True, None))
+            room, rep = hub.create("demo-solar", "rep", "Asha", None, "+05:45")
+            with self.assertRaises(RoomStateError):  # before the call starts: refused
+                hub.add_audio(room.code, rep, b"\0\0" * 800, 0.0)
+            room.state = "saving"  # hang-up happened; the flushed chunk arrives late
+            self.assertEqual(hub.add_audio(room.code, rep, b"\0\0" * 800, 9.0), 0)
+            hub.close()

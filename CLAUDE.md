@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 212 tests; the 8 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 214 tests; the 9 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
@@ -525,6 +525,26 @@ one ended with the stage direction "End call.", now stripped.
 - The drill page rendered before the team list arrived and showed "choose who
   you are"; it re-renders on `people-changed`.
 - Today's skills counted practice calls; they count real calls only.
+- **The simulator's "After the call" panel could stay on "Analysing… 100%"**
+  (the simulator browser test failed about 1 run in 4). With Sel's rules the
+  analysis finishes in milliseconds: the "done" event arrived while the rep's
+  tab was still fetching the call, the handler skipped because a load was
+  marked under way, and the fetch answered "running". `loadReport` now keeps
+  "loaded" (`reportFor`) apart from "loading" (`reportLoading`), fetches again
+  when "done" arrives mid-fetch, and fetches fresh. 0 failures in 20 runs.
+- **The last microphone chunk got a 409.** Hang-up flushes the worklet; its
+  chunk can reach the server after the room is saving. Chrome logs every 4xx
+  to the console, which the browser tests treat as a page error. The server
+  now drops audio for a saving, saved or failed room (`queued: 0`, as when
+  Whisper is behind); audio before the call is live is still a 409, and the
+  client stops sending once the call is over.
+- **A drill line published while the tab's event stream reconnected was lost**
+  (the drill test's "AI customer's second line" timeout). Starting a drill
+  reconnects the stream to add the room, and the bus ends a slow subscriber's
+  stream; the reconnect's first event is a snapshot with the room's lines, but
+  the drill page ignored it. It now adds the snapshot's missing lines
+  (`practice.js`, `hello`). A browser test ends the stream on the server,
+  publishes a line, and waits for it.
 
 ## Prepare, team and the flywheel (Phase 4)
 
@@ -758,12 +778,6 @@ Browser (`sel/web/app.js`):
   --format text` and `--format json` on the i7 and the M2 and record both here.
   Windowing to the last N lines was not done: it would change the start of
   every prompt and stop the server reusing it.
-- The simulator browser test sees a 409 on `POST .../audio` (a PCM chunk
-  at about 0.5 s) in roughly one run in three in the cloud sandbox, also before
-  Phase 4; it passes on reruns. Likely a chunk posted before the call is live
-  or after hang-up: the client should not post outside a live call.
-- The drill browser test timed out once in a full-suite run (waiting for the
-  AI customer's second line) and passed alone; watch it.
 - Phase 4's model passes (Prep writer, Librarian, 1:1 summary) are tested only
   with scripted models; measure them on the demo machines.
 - Model briefs (Prep, 1:1) are cached in memory: a restart rebuilds them on

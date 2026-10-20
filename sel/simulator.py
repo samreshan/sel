@@ -536,6 +536,10 @@ class SimulatorHub:
         room = self._room(code)
         with room.lock:
             me = self._who(room, client)
+            if room.state in ("saving", "saved", "failed"):
+                # The microphone's last chunk (flushed at hang-up) can arrive after the call is being
+                # saved. That is normal, not an error: drop it, as audio is dropped when Whisper is behind.
+                return 0
             if room.state not in ("live", "ended"):
                 raise RoomStateError("audio is accepted only during the call")
             seg = room.segmenters.setdefault(me.role, PcmSegmenter())

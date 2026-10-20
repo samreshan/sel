@@ -160,6 +160,8 @@ class BrowserE2E(unittest.TestCase):
         sita = next(p for p in json.loads(self.get("/api/people")) if p["name"] == "Sita E2E")
         page.select_option("#viewer", sita["id"])
         page.wait_for_selector("text=Your team today")
+        # The per-rep table lives on the Team page (managers only), not on Today.
+        page.click("a[data-nav=team]")
         page.wait_for_selector(".team-table :text('Asha E2E')")
 
         page.goto(f"{self.base}/#playbook/demo-solar")

@@ -549,8 +549,7 @@
     );
   }
 
-  const playground = { tab: "practise", data: new Map(), pending: new Set(), exercise: null, busy: false, error: null, result: null };
-  const objectionPrompts = { pricing: "That is too expensive. Why should I pay that much?", timing: "This is not a priority right now.", competitor: "We already use another provider.", details: "Just send me some details." };
+  const playground = { tab: "practise", data: new Map(), pending: new Set(), objections: new Map(), exercise: null, busy: false, starting: null, error: null, result: null };
   const playgroundKey = (id) => `${S.viewer()?.id || "none"}|${id}`;
   const draftKey = (id) => `sel.playground.${playgroundKey(id)}`;
   function saveExercise(id) {
@@ -578,7 +577,60 @@
     } catch (e) { playground.data.set(key, { error: e.message }); }
     finally { playground.pending.delete(key); rerender(); }
   }
-  S.on("drill", () => { playground.data.clear(); if (S.coachRoute().page === "playbook") rerender(); });
+  S.on("drill", () => { playground.data.clear(); playground.objections.clear(); if (S.coachRoute().page === "playbook") rerender(); });
+
+  // Objections to practise with the AI customer: the pack's own and those heard on the team's calls.
+  async function loadObjections(id) {
+    const me = S.viewer();
+    const key = `objections|${playgroundKey(id)}`;
+    if (playground.pending.has(key)) return;
+    playground.pending.add(key);
+    try {
+      playground.objections.set(playgroundKey(id), await api(`/api/playground/objections?pack=${enc(id)}${me ? `&person=${enc(me.id)}` : ""}`, { fresh: true }));
+    } catch (e) { playground.objections.set(playgroundKey(id), { error: e.message }); }
+    finally { playground.pending.delete(key); rerender(); }
+  }
+  async function practiseObjection(id, item, heard) {
+    const me = S.viewer();
+    if (!me || me.role !== "rep" || playground.starting) return;
+    playground.starting = item.id; playground.error = null; rerender();
+    try {
+      const d = await api("/api/playground/objections", { method: "POST", json: { person_id: me.id, pack_id: id, [heard ? "heard_id" : "objection_id"]: item.id } });
+      playground.objections.delete(playgroundKey(id));
+      navigate(`#practice/${enc(d.id)}`);
+    } catch (e) { playground.error = e.message; }
+    finally { playground.starting = null; if (S.coachRoute().page === "playbook") rerender(); }
+  }
+  function objectionRow(id, item, heard, canPractise) {
+    const d = item.drill;
+    const tried = d && d.attempts ? `${plural(d.attempts, "attempt", "attempts")}, ${d.passes} passed` : null;
+    return el("li", { class: "page-row objection-row" },
+      el("div", { class: "page-row-main" },
+        el("span", { class: "muted small", text: compact([item.topic, heard ? "Heard on a call · anonymised" : null]).join(" · ") }),
+        el("span", { class: "objection-says", text: S.quoted(item.says) }),
+        el("span", { class: "muted small", text: compact([`Judged on: ${item.criterion_title}`, tried]).join(" · ") })),
+      canPractise ? el("button", { type: "button", class: "small", text: playground.starting === item.id ? "Opening…" : d ? "Practise again" : "Practise",
+        disabled: !!playground.starting, "aria-label": `${d ? "Practise again" : "Practise"} with the AI customer: ${item.says}`,
+        on: { click: () => practiseObjection(id, item, heard) } }) : null);
+  }
+  function objectionSection(id) {
+    const me = S.viewer();
+    const canPractise = !!me && me.role === "rep";
+    const data = playground.objections.get(playgroundKey(id));
+    if (!data) loadObjections(id);
+    const body = !data ? [el("p", { class: "muted", "aria-busy": "true", text: "Loading objections…" })]
+      : data.error ? [el("div", { class: "card is-error", role: "alert" }, muted(data.error), el("button", { type: "button", text: "Try again", on: { click: () => loadObjections(id) } }))]
+      : [
+          data.pack.length ? el("ul", { class: "page-rows" }, ...data.pack.map((o) => objectionRow(id, o, false, canPractise)))
+            : muted("This pack lists no objections yet. Add [[objections]] to its pack.toml (docs/business-pack.md)."),
+          data.heard.length ? el("h3", { class: "group-title", text: "Heard on your team's calls" }) : null,
+          data.heard.length ? el("ul", { class: "page-rows" }, ...data.heard.map((o) => objectionRow(id, o, true, canPractise))) : null,
+          canPractise ? null : muted("Choose a rep using Viewing as to practise."),
+        ];
+    return sectionOf("list-card page-section playground-objections", "Practise an objection",
+      "A short typed call with the AI customer, then a debrief. Practice only: it never changes a focus or a score.",
+      "lines", "accent", ...compact(body));
+  }
   function playgroundTabs() {
     return el("div", { class: "scope-toggle", "aria-label": "Playground sections" }, ...[["practise", "Practise"], ["library", "Library"], ["progress", "My progress"]].map(([id, label]) =>
       el("button", { type: "button", class: `scope-btn${playground.tab === id ? " is-on" : ""}`, text: label, "aria-pressed": String(playground.tab === id), on: { click: () => { playground.tab = id; rerender(); page.main.querySelector(`[aria-label="Playground sections"] button[aria-pressed="true"]`)?.focus(); } } })));
@@ -610,8 +662,8 @@
     });
     const source = ex.ref ? el("ul", { class: "page-rows" }, docRow(id, ex.ref, false)) : muted("This is a generic buyer scenario. Do not invent product details.");
     return section("Practice response", "A short exercise. This does not change your real-call focus.", "target", "violet",
-      pill("neutral", ex.mode === "document" ? "Document practice" : "Example objection"),
-      el("p", { class: "focus-title", text: ex.mode === "document" ? "Explain the main point to a buyer, including relevant conditions." : objectionPrompts[ex.topic] }), source, form,
+      pill("neutral", "Document practice"),
+      el("p", { class: "focus-title", text: "Explain the main point to a buyer, including relevant conditions." }), source, form,
       playground.error ? el("p", { class: "form-error", role: "alert", text: playground.error }) : null,
       feedback ? el("section", { class: "card debrief", "aria-label": "Exercise feedback", role: "status" },
         pill("info", feedback.feedback.by), el("h3", { text: "One thing to work on" }), el("p", { text: feedback.feedback.tip }),
@@ -623,7 +675,7 @@
     const key = playgroundKey(id);
     if (playground.exercise?.key !== key) {
       playground.exercise = null; playground.result = null;
-      try { const saved = JSON.parse(localStorage.getItem(draftKey(id)) || "null"); if (saved?.key === key && ["document", "objection"].includes(saved.mode) && typeof saved.response === "string" && objectionPrompts[saved.topic]) playground.exercise = saved; } catch (_) {}
+      try { const saved = JSON.parse(localStorage.getItem(draftKey(id)) || "null"); if (saved?.key === key && saved.mode === "document" && typeof saved.response === "string") playground.exercise = saved; } catch (_) {}
     }
     const data = playground.data.get(key);
     if (me?.role === "rep" && !data) loadPlayground(id);
@@ -639,12 +691,13 @@
             el("p", { class: "muted small", text: formatStarted(a.created_at) }),
             el("details", { class: "disclosure" }, el("summary", { text: "Review response and feedback" }), el("p", { text: a.prompt }), el("blockquote", { text: a.response }), pill("info", a.feedback.by), el("p", { text: a.feedback.tip }), muted(a.feedback.limitation), a.source_text ? el("pre", { class: "doc-text", text: a.source_text }) : null),
             el("button", { type: "button", class: "small", text: "Practise again", on: { click: () => openExercise(id, a.mode, a.ref, a.topic) } })))) : muted("No submitted exercises yet. Start in Practise.")),
-        section("Call-moment drills", "Results from the existing practice room, separate from real-call transfer checks.", "lines", "accent", drillLinks(data.drills)),
+        section("Objection drills", "Practice with the AI customer on your pack's objections. Separate from real-call transfer checks.", "lines", "accent", drillLinks(data.drills.filter((d) => d.origin === "playground"), "No objection drills yet. Start one in Practise.")),
+        section("Call-moment drills", "Results from the existing practice room, separate from real-call transfer checks.", "lines", "accent", drillLinks(data.drills.filter((d) => d.origin !== "playground"))),
         el("a", { class: "button", href: "#today", text: "Review real-call coaching" }));
     }
     if (playground.exercise) return exerciseForm(id, detail);
-    const drills = data?.drills || [];
-    return el("div", { class: "playground-home" }, retry,
+    const drills = (data?.drills || []).filter((d) => d.origin !== "playground");
+    return el("div", { class: "playground-home" }, retry, playground.error ? el("p", { class: "form-error", role: "alert", text: playground.error }) : null,
       !me || me.role !== "rep" ? el("p", { class: "muted small playground-notice", text: "Choose a rep using Viewing as to save exercises and see personal progress." }) : !data ? el("p", { class: "muted small playground-notice", text: "Loading your call drills…" }) : null,
       el("div", { class: "playground-grid" },
         el("section", { class: "card playground-conversation" },
@@ -653,18 +706,15 @@
         sectionOf("list-card page-section playground-reading", "Read & practise", "Build confidence in your product knowledge.", "doc", "accent",
           el("p", { class: "muted", text: "Explore your business documents, then practise explaining them to a buyer." }),
           el("button", { type: "button", text: "Open Library", on: { click: () => { playground.tab = "library"; rerender(); } } })),
-        sectionOf("list-card page-section playground-objections", "Objection drills", "Pick one concern. Practise a clear, helpful response.", "lines", "accent",
-          el("ul", { class: "page-rows" }, ...Object.entries(objectionPrompts).map(([topic, prompt]) => el("li", { class: "page-row" },
-            el("div", { class: "page-row-main" }, el("span", { class: "muted small", text: { pricing: "Pricing", timing: "Timing", competitor: "Competition", details: "Follow-up" }[topic] }), el("span", { text: prompt })),
-            el("button", { type: "button", class: "small", text: "Practise", "aria-label": `Practise: ${prompt}`, on: { click: () => openExercise(id, "objection", "", topic) } }))))),
+        objectionSection(id),
         sectionOf("list-card page-section playground-moments", "Retry a call moment", "Build on a conversation you have already had.", "target", "violet",
           drillLinks(drills), el("a", { class: "button", href: "#calls", text: "Find a moment in Calls" }))));
   }
 
-  function drillLinks(drills) {
+  function drillLinks(drills, empty) {
     return drills.length ? el("ul", { class: "page-rows" }, ...drills.map((d) => el("li", { class: "page-row" },
       el("a", { class: "page-row-link", href: `#practice/${enc(d.id)}`, text: d.title }),
-      el("span", { class: "muted small", text: `${d.attempts || 0} attempts · ${d.passes || 0} passed${d.status === "preparing" ? " · Preparing" : ""}` })))) : muted("No call-moment drills in this pack yet. Open a call's Coaching tab and choose Practise this.");
+      el("span", { class: "muted small", text: `${d.attempts || 0} attempts · ${d.passes || 0} passed${d.status === "preparing" ? " · Preparing" : ""}` })))) : muted(empty || "No call-moment drills in this pack yet. Open a call's Coaching tab and choose Practise this.");
   }
 
   // ---------- Playbook ----------

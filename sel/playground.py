@@ -1,4 +1,9 @@
-"""Short Playground exercises, isolated from real-call drills and transfer metrics."""
+"""Short Playground exercises, isolated from real-call drills and transfer metrics.
+
+The written exercise here is "explain a document to a buyer". Objection practice is a conversation with
+the AI customer instead: a Playground drill (``CallService.create_playground_drill``) on an objection from
+the pack (``[[objections]]``) or one heard on the team's calls.
+"""
 from __future__ import annotations
 
 import copy
@@ -7,12 +12,6 @@ from datetime import datetime, timezone
 
 from .drills import DrillStore
 
-PROMPTS = {
-    "pricing": "That is too expensive. Why should I pay that much?",
-    "timing": "This is not a priority right now.",
-    "competitor": "We already use another provider.",
-    "details": "Just send me some details.",
-}
 TIPS = {
     "question": "Ask one open question about the buyer's concern before offering a solution.",
     "concise": "Keep one main point and remove details the buyer has not asked for yet.",
@@ -42,10 +41,10 @@ class Playground:
         person = self.person(body.get("person_id"))
         pack = self.service.pack(body.get("pack_id"))
         mode = body.get("mode")
-        topic = body.get("topic", "pricing")
+        topic = "document"
         response = body.get("response")
-        if not isinstance(mode, str) or not isinstance(topic, str) or mode not in ("document", "objection") or topic not in PROMPTS:
-            raise ValueError("Choose a supported exercise.")
+        if mode != "document":
+            raise ValueError("Choose a supported exercise. Objections are practised with the AI customer.")
         if not isinstance(response, str) or not response.strip() or len(response) > 4000:
             raise ValueError("Write a response between 1 and 4,000 characters.")
         response = response.strip()
@@ -55,10 +54,10 @@ class Playground:
         source = pack.source_text(ref) if ref else None
         if ref and source is None:
             raise ValueError("This source is no longer in the selected pack.")
-        if mode == "document" and not source:
+        if not source:
             raise ValueError("Choose a document to practise from.")
-        prompt = "Explain the main point of this document to a buyer. Include any relevant conditions." if mode == "document" else PROMPTS[topic]
-        tip = "source" if mode == "document" else "question" if "?" not in response else "concise" if len(response.split()) > 90 else "next"
+        prompt = "Explain the main point of this document to a buyer. Include any relevant conditions."
+        tip = "source"
         feedback = {"by": "Sel's rules", "tip": TIPS[tip], "response_quote": response,
                     "observation": f"Your response contains {len(response.split())} words" + (" and a question." if "?" in response else " and no question mark."),
                     "limitation": "This is a structure check, not a factual verdict or a real-call score."}

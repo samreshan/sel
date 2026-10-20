@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 214 tests; the 9 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 224 tests; the 9 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
@@ -105,7 +105,7 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/live.py` | Code-only rules: per-line detection, signals over a transcript, `LiveScorer` (score + next actions), `RuleAnalyzer` |
 | `sel/scoring.py` | Scorecard grading from signals (live or from a reviewed report) |
 | `sel/persona.py`, `sel/ai_customer.py` | Anonymised practice personas; the AI customer (`{say, end_call, mood}`, rules fallback) |
-| `sel/drills.py`, `sel/transfer.py` | Drill store, Judge, debrief; transfer checks on real calls |
+| `sel/drills.py`, `sel/transfer.py` | Drill store, Judge, debrief; transfer checks on real calls. Playground drills (`origin: playground`) practise a pack or heard objection |
 | `sel/files.py` | JSON reads and atomic replaces that retry Windows sharing violations |
 | `sel/web/practice.js` | Practice (`#practice`, `#practice/<id>`): drills, the AI customer room, debrief; lazy-loaded |
 | `scripts/drill_latency.py` | AI customer reply times on this machine |
@@ -166,6 +166,38 @@ login, so this is a convenience, not access control. UI follows DESIGN.md
   re-reads after its own writes (`Sel.refreshPeople()`; Today re-checks each
   time it is opened). A first load of Today that fails shows the reason and
   "Try again" instead of loading forever.
+
+## Playground objections (P1, 20 Oct)
+
+- **Where they come from.** The pack's `[[objections]]` (`sel/pack.py`
+  `Objection`: id, topic, says, optional context, criterion, hint; validated)
+  and `CallService.heard_objections`: objection findings on the pack's
+  reviewed real calls, the customer's words anonymised (`persona.anonymise`
+  with the call's and the team's names; the finding's summary is never shown,
+  it can name a price), the same words once, newest first.
+- **A Playground drill** (`create_playground_drill`): `origin: "playground"`,
+  `source` `{pack_id, objection_id}` or `{pack_id, heard_id, call_id,
+  finding_id}`, one per rep and objection (practising again adds attempts).
+  Judged on `Pack.objection_criterion` (the objection's own, else the
+  objection-handling criterion, else discovery, else the first). The persona is
+  `persona.objection_persona`: the pack's words as written, heard words
+  anonymised, the model's output always cleaned. The better line is the best
+  approved team answer for the criterion, if any; the debrief adds the pack's
+  `hint` ("Your playbook suggests").
+- **Practice only.** `coach_state` leaves Playground drills out (no
+  escalation, difficulty or focus change) and their debrief starts no Coach
+  turn. The single typed reply for objections is retired (`POST
+  /api/playground` takes `mode: document` only).
+- **The opening is the objection.** A drill room's `LiveScorer` takes
+  `opening_objection` (Playground drills, and call drills whose skill is
+  objection handling): the customer's first line counts as an objection for
+  the rules (`transcript_signals(known_objections=)`), cue words or not.
+  Found when the warranty objection ("Inverters break all the time…", no cue
+  word) debriefed as "Did not come up".
+- **API**: `GET /api/playground/objections?pack=&person=` (`pack`, `heard`,
+  each with this rep's drill), `POST /api/playground/objections {person_id,
+  pack_id, objection_id | heard_id}` → the drill (201); the UI opens
+  `#practice/<id>`.
 
 ## The call simulator
 

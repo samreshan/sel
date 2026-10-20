@@ -279,7 +279,9 @@ def check_claim(claim: str, index: PassageIndex, cache: _Cache | None = None) ->
 
 
 def transcript_signals(transcript: Transcript, pack: Pack, index: PassageIndex | None = None,
-                       cache: _Cache | None = None) -> dict[str, Any]:
+                       cache: _Cache | None = None, known_objections: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+    """Signals over a transcript. ``known_objections``: customer segment ids known to be objections even
+    without a cue word (a drill's opening is the objection being practised)."""
     cache = cache or _Cache()
     index = index or pack_index(pack)
     roles = {s.id: s.role for s in transcript.speakers}
@@ -304,7 +306,8 @@ def transcript_signals(transcript: Transcript, pack: Pack, index: PassageIndex |
                 answered = any(roles.get(s.speaker) == "rep" for s in segs[i + 1:])
                 sig["customer_questions"].append({"segment": seg.id, "start": seg.start, "text": info.question_text,
                                                   "answered": answered})
-            if info.objection:
+            cue = info.objection or ("the concern" if seg.id in known_objections else None)
+            if cue:
                 last = sig["objections"][-1] if sig["objections"] else None
                 if last and i > 0 and segs[i - 1].id == last["segments"][-1]:
                     # One objection spoken over two lines (speech recognition splits at pauses).
@@ -312,7 +315,7 @@ def transcript_signals(transcript: Transcript, pack: Pack, index: PassageIndex |
                     last.update(objection_reply(transcript, seg.id, roles))
                 else:
                     sig["objections"].append({"segment": seg.id, "segments": [seg.id], "start": seg.start, "text": seg.text,
-                                              "cue": info.objection, **objection_reply(transcript, seg.id, roles)})
+                                              "cue": cue, **objection_reply(transcript, seg.id, roles)})
         for c in info.commitments:
             commitments.append({**c, "segment": seg.id, "start": seg.start, "owner": seg.speaker, "owner_role": role})
     if sig["price"] is None:
@@ -374,13 +377,20 @@ def pack_index(pack: Pack) -> PassageIndex:
 class LiveScorer:
     """Scores a call as it happens. ``snapshot`` is cheap to call after every new line."""
 
-    def __init__(self, pack: Pack):
+    def __init__(self, pack: Pack, opening_objection: bool = False):
         self.pack = pack
         self.index = pack_index(pack)
         self.cache = _Cache()
+        # In a drill on an objection, the customer's first line is that objection, cue words or not.
+        self.opening_objection = opening_objection
 
     def snapshot(self, transcript: Transcript, now: float | None = None, final: bool = False) -> dict[str, Any]:
-        sig = transcript_signals(transcript, self.pack, self.index, self.cache)
+        known: frozenset[str] = frozenset()
+        if self.opening_objection:
+            roles = {sp.id: sp.role for sp in transcript.speakers}
+            first = next((seg for seg in transcript.segments if roles.get(seg.speaker) == "customer"), None)
+            known = frozenset([first.id]) if first else frozenset()
+        sig = transcript_signals(transcript, self.pack, self.index, self.cache, known)
         now = max(now or 0.0, sig["duration"])
         score = grade(sig, self.pack, final=final)
         return {"score": score, "events": events(sig), "actions": [] if final else next_actions(sig, score, self.pack, now)}

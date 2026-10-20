@@ -53,6 +53,22 @@ signal = "discovery"   # discovery | objections | claims | next_step | talk_rati
 
 Without `signal`, Sel infers it from the title, then the description ("Discovery before price" → discovery, "Book a demo with a time" → next_step). A criterion that matches none is left to the coaching review.
 
+### Objections (optional)
+
+The concerns your customers raise, for the Playground. Each becomes a short typed practice call with the AI customer, who opens with these words, followed by a debrief:
+
+```toml
+[[objections]]
+id = "competitor-cheaper"          # lower-case letters, digits and hyphens; unique
+topic = "Price"                    # a short label
+says = "Another company quoted me much less for the same size. Why are you so expensive?"
+context = "A homeowner with two quotes who wants to compare like for like."   # optional: shapes the AI customer
+criterion = "objection-handling"   # optional: the skill the drill is judged on
+hint = "Ask what the other quote includes before defending the price."        # optional: shown after the drill
+```
+
+Without `criterion`, a drill is judged on the scorecard's objection-handling criterion (`signal = "objections"`), else its discovery criterion, else the first one. Write `says` the way a customer would say it, in the language your customers use; these are your words, not a customer's, so nothing in them is anonymised. The Playground also lists the objections customers raised on your team's reviewed calls, anonymised. Practice never changes a rep's focus, skills or score.
+
 ## `facts.toml`
 
 These are short approved statements that a claim check can cite as `fact:<id>`:

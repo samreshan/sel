@@ -195,7 +195,8 @@
       return;
     }
     const focus = page.coach && page.coach.focus;
-    const forFocus = focus ? page.list.filter((d) => d.pack_id === focus.pack_id && d.criterion === focus.criterion) : [];
+    // Playground drills are practice only, so they never sit under the focus.
+    const forFocus = focus ? page.list.filter((d) => d.origin !== "playground" && d.pack_id === focus.pack_id && d.criterion === focus.criterion) : [];
     const others = page.list.filter((d) => !forFocus.includes(d));
     const row = (d) => {
       const v = d.last_verdict ? VERDICT[d.last_verdict] : null;
@@ -207,7 +208,7 @@
           "a",
           { class: "page-row-link", href: `#practice/${enc(d.id)}` },
           el("span", { class: "strong", text: d.title }),
-          el("span", { class: "muted small", text: compact([d.customer ? `AI customer: ${d.customer}` : null, level(d), d.attempts ? `${plural(d.attempts, "attempt", "attempts")}, ${d.passes} passed` : "Not tried yet"]).join(" · ") })
+          el("span", { class: "muted small", text: compact([d.origin === "playground" ? "Playground" : null, d.customer ? `AI customer: ${d.customer}` : null, level(d), d.attempts ? `${plural(d.attempts, "attempt", "attempts")}, ${d.passes} passed` : "Not tried yet"]).join(" · ") })
         ),
         d.status === "preparing" ? pill("info", "Preparing") : v ? pill(v[0], v[1]) : pill("neutral", "New")
       );
@@ -273,7 +274,7 @@
     const last = attempts[attempts.length - 1];
     const judging = page.session && page.session.drillId === id && page.room && page.room.state === "saved" && (!last || last.status !== "done");
     const nodes = [
-      header("Practice", d.title, compact([d.persona ? `AI customer: ${d.persona.name}` : null, level(d), d.moment && d.moment.customer_name ? `From your call with ${d.moment.customer_name}` : null]).join(" · "), el("a", { class: "button", href: "#practice", text: "All drills" })),
+      header("Practice", d.title, compact([d.persona ? `AI customer: ${d.persona.name}` : null, level(d), d.origin === "playground" ? "Playground: practice only" : d.moment && d.moment.customer_name ? `From your call with ${d.moment.customer_name}` : null]).join(" · "), el("a", { class: "button", href: d.origin === "playground" ? `#playbook/${enc(d.pack_id)}` : "#practice", text: d.origin === "playground" ? "Back to Playground" : "All drills" })),
       page.error ? el("p", { class: "form-error", role: "alert", text: page.error }) : null,
     ];
     if (inRoom) nodes.push(roomView(d));
@@ -299,7 +300,14 @@
     );
   }
 
+  // Where a suggested line came from, in the words the Coaching tab uses.
+  function lineTag(by) {
+    const b = String(by || "");
+    return b.startsWith("playbook") ? ["info", "Team answer"] : b.startsWith("fixture") ? ["neutral", "Example line"] : ["violet", "AI-suggested"];
+  }
+
   function scenario(d, again) {
+    if (d.origin === "playground") return objectionScenario(d, again);
     const m = d.moment || {};
     const p = d.persona;
     const start = el("button", { type: "button", class: "primary", text: again ? "Try again" : "Start the drill (about 90 s)", disabled: d.status !== "ready" || page.busy, on: { click: () => start_(d) } });
@@ -331,6 +339,37 @@
     );
   }
 
+  function objectionScenario(d, again) {
+    const m = d.moment || {};
+    const p = d.persona;
+    const heard = !!(d.source && d.source.heard_id);
+    const start = el("button", { type: "button", class: "primary", text: again ? "Try again" : "Start the drill (about 90 s)", disabled: d.status !== "ready" || page.busy, on: { click: () => start_(d) } });
+    return section(
+      "bento-anchor",
+      "The objection you are practising",
+      heard ? "Heard on one of your team's calls, anonymised" : "From your business pack",
+      "target",
+      "violet",
+      el(
+        "div",
+        { class: "focus-body" },
+        said(m.customer_said, null),
+        m.context ? el("p", { class: "labelled" }, el("span", { class: "label", text: "Who raises it: " }), m.context) : null,
+        p
+          ? el(
+              "div",
+              { class: "drill-persona" },
+              el("p", { class: "strong" }, `${p.name}, the AI customer `, pill("violet", String(p.by || "").startsWith("model") ? "AI persona" : "Built by Sel's rules")),
+              el("p", { class: "muted small", text: compact([p.about, p.wants]).join(" ") }),
+              el("p", { class: "small", text: heard ? "Anonymised from a real call: no names, numbers or prices from it reach the model." : "Built from your pack's objection; nothing from a real call." })
+            )
+          : el("p", { class: "muted", role: "status", text: "Preparing the AI customer…" }),
+        el("p", { class: "muted small", text: "Practice only: this drill never changes your focus, your skills or your score." }),
+        el("div", { class: "row" }, start)
+      )
+    );
+  }
+
   function history(attempts) {
     return section(
       "",
@@ -356,10 +395,12 @@
     const b = a.debrief;
     const v = VERDICT[b.verdict] || ["neutral", b.verdict];
     const practice = b.practice_answer && b.practice_answer.text;
+    const lineBy = b.better_line_by || (d.moment && d.moment.better_line && d.moment.better_line.by);
     const compare = [
       ["On the real call you said", b.real_answer, null],
       ["In practice you said", practice, null],
-      ["Better line", b.better_line, (d.moment && d.moment.better_line && String(d.moment.better_line.by || "").startsWith("fixture")) ? "Example line" : "AI-suggested"],
+      [lineTag(lineBy)[1] === "Team answer" ? "What the team says" : "Better line", b.better_line, lineTag(lineBy)],
+      ["Your playbook suggests", b.hint || (d.moment && d.moment.hint), ["neutral", "From your pack"]],
     ].filter(([, text]) => text);
     return el(
       "section",
@@ -367,7 +408,7 @@
       el("div", { class: "card-tags" }, pill(v[0], v[1]), b.by && b.by.startsWith("model") ? pill("violet", "Judged by AI and Sel's rules") : pill("neutral", "Judged by Sel's rules")),
       el("h2", { id: "debrief-title", class: "section-title", text: b.verdict === "pass" ? "You handled it." : b.verdict === "fail" ? "Not yet: try it once more." : "Debrief" }),
       b.why ? el("p", { text: b.why }) : null,
-      el("ul", { class: "compare" }, ...compare.map(([label, text, tag]) => el("li", {}, el("div", { class: "better-line-head" }, el("span", { class: "label", text: label }), tag ? pill("violet", tag) : null), el("p", { class: "compare-text", text: quoted(text) })))),
+      el("ul", { class: "compare" }, ...compare.map(([label, text, tag]) => el("li", {}, el("div", { class: "better-line-head" }, el("span", { class: "label", text: label }), tag ? pill(tag[0], tag[1]) : null), el("p", { class: "compare-text", text: quoted(text) })))),
       el("p", { class: "muted small", text: compact([b.overall !== null && b.overall !== undefined ? `Practice score ${b.overall}/100` : null, b.criterion_detail, `${plural(b.lines || 0, "line", "lines")}`]).join(" · ") }),
       el("div", { class: "row" }, a.sim_call_id ? el("a", { class: "button small", href: `#call/${enc(a.sim_call_id)}`, text: "Open the practice call" }) : null)
     );

@@ -38,6 +38,7 @@ from typing import Any
 
 from .service import CallService
 from .playground import Playground
+from .drills import summary as drills_summary
 from .simulator import RoomStateError, SimulatorHub
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -577,6 +578,17 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         def playground_submit(self, q):
             self._json(playground.submit(self._json_body()), 201)
 
+        def playground_objections(self, q):
+            if "pack" not in q:
+                raise ApiError(400, "pack is a required query parameter")
+            self._json(service.playground_objections(q["pack"], q.get("person") or None))
+
+        def playground_drill(self, q):
+            b = self._json_body()
+            drill = service.create_playground_drill(str(b.get("person_id") or ""), str(b.get("pack_id") or ""),
+                                                    b.get("objection_id") or None, b.get("heard_id") or None, self._tab())
+            self._json(drills_summary(drill), 201)
+
         def drills(self, q):
             self._json(service.list_drills(q.get("person") or None))
 
@@ -722,6 +734,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         ("POST", rf"/api/calls/{C}/moments/{D}/drill", Handler.moment_drill),
         ("GET", r"/api/playground", Handler.playground_list),
         ("POST", r"/api/playground", Handler.playground_submit),
+        ("GET", r"/api/playground/objections", Handler.playground_objections),
+        ("POST", r"/api/playground/objections", Handler.playground_drill),
         ("GET", r"/api/drills", Handler.drills),
         ("GET", rf"/api/drills/{C}", Handler.drill),
         ("POST", rf"/api/drills/{C}/start", Handler.drill_start),

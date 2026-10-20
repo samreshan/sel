@@ -6,6 +6,12 @@ A drill lives in ``drills/<id>.json`` next to the call folders::
      moment {customer_said, quote, why, better_line}, persona, difficulty,
      status: preparing | ready, created_by, attempts: [...]}
 
+A Playground drill (``origin: "playground"``) practises one objection instead
+of a call moment: ``source`` is ``{pack_id, objection_id}`` (the pack's own) or
+``{pack_id, heard_id, call_id, finding_id}`` (heard on a real call),
+``moment.quote`` is empty (there is no real answer to compare) and
+``moment.hint`` is the pack's advice. The Coach never sees these drills.
+
 An attempt is one practice call in a simulator room with the AI customer. When
 it ends, the Judge grades the drill's criterion on the practice transcript and
 the debrief puts three answers side by side: what the rep said on the real
@@ -99,6 +105,7 @@ def summary(drill: dict[str, Any]) -> dict[str, Any]:
     verdicts = [a.get("verdict") for a in attempts if a.get("verdict")]
     return {k: drill.get(k) for k in ("id", "person_id", "pack_id", "criterion", "title", "status", "difficulty",
                                       "created_at", "created_by", "source")} | {
+        "origin": drill.get("origin") or "call",
         "attempts": len(attempts), "passes": verdicts.count("pass"), "fails": verdicts.count("fail"),
         "last_verdict": verdicts[-1] if verdicts else None,
         "customer": (drill.get("persona") or {}).get("name")}
@@ -204,5 +211,7 @@ def debrief(drill: dict[str, Any], transcript: Transcript, score: dict[str, Any]
         "overall": score.get("overall"), "criterion_status": crit.get("status"), "criterion_detail": crit.get("detail"),
         "real_answer": moment.get("quote"), "practice_answer": practice_answer(transcript, v),
         "better_line": (moment.get("better_line") or {}).get("text"),
+        "better_line_by": (moment.get("better_line") or {}).get("by"),
+        "hint": moment.get("hint"),
         "lines": len(transcript.segments),
     }

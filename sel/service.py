@@ -37,6 +37,7 @@ their files change.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -52,6 +53,7 @@ from typing import Any
 
 from . import coach as coaching_mod
 from . import drills as drills_mod
+from . import persona as persona_mod
 from . import playbook as playbook_mod
 from . import prep as prep_mod
 from . import transfer as transfer_mod
@@ -599,7 +601,8 @@ class CallService:
         return {"person_id": person_id, "name": person["name"], "focus": data.get("focus"),
                 "skills": coaching_mod.skill_candidates(coached, packs.get), "calls_seen": len(coached),
                 "transfer": data.get("transfer", []), "escalations": data.get("escalations", []),
-                "drills": [self._drill_state(d) for d in self.drills.list(person_id)],
+                # Playground drills are practice only: they never escalate, change difficulty or a focus.
+                "drills": [self._drill_state(d) for d in self.drills.list(person_id) if d.get("origin") != "playground"],
                 "contradicted": contradicted, "closed": closed}
 
     @staticmethod
@@ -685,6 +688,8 @@ class CallService:
         from .persona import build_persona
 
         drill = self.drills.get(drill_id)
+        if drill.get("origin") == "playground":
+            return self._prepare_objection_drill(drill)
         call = self._read(drill["source"]["call_id"], "call.json") or {"id": drill["source"]["call_id"]}
         pack = self.pack(drill["pack_id"])
         moment = {"criterion": drill["criterion"], "why": drill["moment"].get("why"),
@@ -732,8 +737,12 @@ class CallService:
         person = self.people.get(drill["person_id"])
         persona = {**drill["persona"], "difficulty": drill.get("difficulty") or 1}
         agent = AICustomer(persona, self._chat_factory())
+        # The AI customer opens with the objection being practised, whatever words it uses: a Playground
+        # objection drill always, a call-moment drill when its skill is objection handling.
+        crit = self.pack(drill["pack_id"]).criterion(drill["criterion"])
+        opening_objection = drill.get("origin") == "playground" or bool(crit and criterion_signal(crit) == "objections")
         return hub.create_drill_room(drill["pack_id"], agent, drill_id, person["name"] if person else None,
-                                     drill["person_id"], persona.get("name"), offset)
+                                     drill["person_id"], persona.get("name"), offset, opening_objection)
 
     def drill_finished(self, room, transcript: Transcript, score: dict[str, Any], call_id: str) -> None:
         """A drill room was filed (the hub calls this): record the attempt and queue its debrief."""
@@ -767,7 +776,8 @@ class CallService:
             drill["attempts"][-1].update(status="done", verdict=result["verdict"], debrief=result)
             self.drills.save(drill)
         self.bus.publish("calls", "drill", drills_mod.summary(drill))
-        self.run_coach(drill["person_id"])
+        if drill.get("origin") != "playground":
+            self.run_coach(drill["person_id"])
         return drill
 
     def request_debrief(self, drill_id: str) -> dict[str, Any]:
@@ -775,6 +785,126 @@ class CallService:
         if not drill["attempts"]:
             raise ValueError("no attempt to debrief yet")
         self._agents.put(("debrief", drill_id))
+        return drill
+
+    # -- Playground objection drills -------------------------------------------------
+
+    def heard_objections(self, pack_id: str, limit: int = 6) -> list[dict[str, Any]]:
+        """Objections customers raised on the team's reviewed real calls of this pack, newest first.
+
+        The customer's words are anonymised (the call's and the team's names, numbers, amounts); the same
+        words are listed once. Each has a stable id for its drill.
+        """
+        out, seen = [], set()
+        for c in self._real_done():
+            if c.get("pack_id") != pack_id:
+                continue
+            report = self._report(c["id"]) or {}
+            dismissed = set(((self._read(c["id"], "review.json") or {}).get("dismissed")) or [])
+            segs = {x["id"]: x["text"] for x in (report.get("transcript") or {}).get("segments", [])}
+            names = None
+            for f in report.get("findings", []):
+                if f.get("kind") != "objection" or f["id"] in dismissed:
+                    continue
+                if names is None:
+                    names = self._real_names(c)
+                quote = f["evidence"].get("quote") or " ".join(segs.get(x, "") for x in f["evidence"].get("segment_ids", []))
+                says = persona_mod.anonymise(" ".join(quote.split()), names)[:240]
+                key = " ".join(re.findall(r"\w+", says.casefold()))
+                if not says or key in seen:
+                    continue
+                seen.add(key)
+                out.append({"id": "h" + hashlib.sha256(f"{c['id']}|{f['id']}".encode()).hexdigest()[:12],
+                            # Only the anonymised words: the finding's summary may name a price or a person.
+                            "topic": (objection_cue(says) or "Concern").capitalize(), "says": says,
+                            "call_id": c["id"], "finding_id": f["id"],
+                            "started_at": c.get("started_at")})
+                if len(out) >= limit:
+                    return out
+        return out
+
+    def playground_objections(self, pack_id: str, person_id: str | None = None) -> dict[str, Any]:
+        """The pack's objections and the ones heard on the team's calls, each with this rep's drill if any."""
+        pack = self.pack(pack_id)
+        drills = {}
+        if person_id:
+            for d in self.drills.list(person_id):
+                if d.get("origin") == "playground" and d.get("pack_id") == pack.id:
+                    drills[(d["source"].get("objection_id") or d["source"].get("heard_id"))] = drills_mod.summary(d)
+
+        def item(base: dict[str, Any], criterion) -> dict[str, Any]:
+            return {**base, "criterion": criterion.id, "criterion_title": criterion.title, "drill": drills.get(base["id"])}
+
+        return {
+            "pack": [item({"id": o.id, "topic": o.topic, "says": o.says, "context": o.context, "hint": o.hint},
+                          pack.objection_criterion(o)) for o in pack.objections],
+            "heard": [item(h, pack.objection_criterion()) for h in self.heard_objections(pack.id)],
+        }
+
+    def create_playground_drill(self, person_id: str, pack_id: str, objection_id: str | None = None,
+                                heard_id: str | None = None, origin: str | None = None) -> dict[str, Any]:
+        """A Playground drill on one objection (the pack's, or one heard on a real call), for a rep.
+
+        One per rep and objection: practising again adds attempts to it. It never counts towards skills,
+        focus or transfer, and the Coach does not see it.
+        """
+        person = self.people.get(person_id)
+        if person is None or person["role"] != "rep":
+            raise ValueError("Choose a rep to practise: a drill belongs to a rep")
+        pack = self.pack(pack_id)
+        if bool(objection_id) == bool(heard_id):
+            raise ValueError("give one of objection_id or heard_id")
+        if objection_id:
+            obj = pack.objection(objection_id)
+            if obj is None:
+                raise KeyError(f"no objection {objection_id!r} in {pack.name}")
+            source = {"pack_id": pack.id, "objection_id": obj.id}
+            says, context, hint, topic = obj.says, obj.context, obj.hint, obj.topic
+            criterion = pack.objection_criterion(obj)
+        else:
+            heard = next((h for h in self.heard_objections(pack.id, limit=50) if h["id"] == heard_id), None)
+            if heard is None:
+                raise KeyError(f"no objection {heard_id!r} heard on {pack.name} calls")
+            source = {"pack_id": pack.id, "heard_id": heard["id"], "call_id": heard["call_id"],
+                      "finding_id": heard["finding_id"]}
+            says, context, hint, topic = heard["says"], None, None, heard["topic"]
+            criterion = pack.objection_criterion()
+        for d in self.drills.list(person_id):
+            if d.get("origin") == "playground" and d.get("source") == source:
+                return d
+        team = self.playbook.approved(pack.id, criterion.id)
+        best = (playbook_mod.match(team, says, k=1) or [None])[0]
+        drill = {
+            "id": self.drills.new_id(), "person_id": person_id, "pack_id": pack.id, "origin": "playground",
+            "criterion": criterion.id, "title": f"{topic}: {says}"[:120], "source": source,
+            "moment": {"customer_said": says, "quote": None, "why": None, "context": context, "hint": hint,
+                       "better_line": {"text": best["answer"], "by": f"playbook:{best['id']}"} if best else None},
+            "persona": None, "difficulty": 1, "status": "preparing", "created_at": _now(),
+            "created_by": "person", "attempts": [],
+        }
+        self.drills.save(drill)
+        self._agents.put(("persona", drill["id"]))
+        self.bus.publish("calls", "drill", drills_mod.summary(drill), origin=origin)
+        return drill
+
+    def _prepare_objection_drill(self, drill: dict[str, Any]) -> dict[str, Any]:
+        pack = self.pack(drill["pack_id"])
+        heard = "heard_id" in drill["source"]
+        call = (self._read(drill["source"]["call_id"], "call.json") or {}) if heard else {}
+        names = self._real_names(call) if call.get("id") else [p["name"] for p in self.people.list()]
+        m = drill["moment"]
+        llm = self._chat_factory()
+        args = (m["customer_said"], m.get("context"), pack, drill["criterion"], names, drill["id"])
+        try:
+            persona = persona_mod.objection_persona(*args, llm=llm, difficulty=drill["difficulty"], anonymised=heard)
+        except Exception as e:  # noqa: BLE001 - a model error leaves the rules persona; the drill still works
+            persona = persona_mod.objection_persona(*args, llm=None, difficulty=drill["difficulty"], anonymised=heard)
+            persona["model_error"] = f"{type(e).__name__}: {e}"
+        with self.drills.lock:
+            drill = self.drills.get(drill["id"])
+            drill.update(persona=persona, status="ready")
+            self.drills.save(drill)
+        self.bus.publish("calls", "drill", drills_mod.summary(drill))
         return drill
 
     def set_focus(self, person_id: str, pack_id: str | None, criterion: str | None, by: str | None,

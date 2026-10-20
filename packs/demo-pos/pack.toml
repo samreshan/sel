@@ -32,3 +32,27 @@ title = "Book a demo with a time"
 description = "End the call with a demo or callback booked for a specific day and time."
 weight = 2
 signal = "next_step"
+
+# Concerns customers raise, for Playground drills with the AI customer. A drill is judged on
+# `criterion` (default: this pack has no objection criterion, so the discovery skill). `hint` is shown after the drill.
+[[objections]]
+id = "too-expensive"
+topic = "Price"
+says = "NPR 2,500 a month is a lot for a small café like mine."
+context = "Owner of one small café with a single billing counter who uses a paper bill book today."
+hint = "Ask how many counters and orders they handle, and what billing costs them now, before recommending a plan."
+
+[[objections]]
+id = "already-have-software"
+topic = "Competitor"
+says = "We already use billing software. Why would we switch?"
+context = "A restaurant with two outlets on another system that mostly works."
+hint = "Ask what does not work well today before comparing features."
+
+[[objections]]
+id = "send-details"
+topic = "Follow-up"
+says = "Just send me the details on Viber, I'll look later."
+context = "A busy owner trying to end the call politely."
+criterion = "book-demo"
+hint = "Agree to send the details and book a short demo with a day and time."

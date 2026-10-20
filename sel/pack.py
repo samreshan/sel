@@ -2,7 +2,7 @@
 
 A pack is a directory::
 
-    pack.toml            identity, languages, scorecard, template paths
+    pack.toml            identity, languages, scorecard, objections, template paths
     facts.toml           short approved statements, each with an id
     docs/*.md|*.txt      product/service documents claims are checked against
     templates/*.md       follow-up templates (optional)
@@ -12,6 +12,7 @@ The engine never imports anything business-specific; it only reads a pack.
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,18 @@ class Fact:
 
 
 @dataclass
+class Objection:
+    """A concern customers of this business raise, for Playground drills with the AI customer."""
+
+    id: str
+    topic: str  # a short label: "Price", "Timing"
+    says: str  # the customer's words, as they would say them
+    context: str | None = None  # who says it and why (shapes the AI customer)
+    criterion: str | None = None  # the scorecard skill a drill on it is judged on; see Pack.objection_criterion
+    hint: str | None = None  # how the business wants it handled, shown after the drill
+
+
+@dataclass
 class Pack:
     root: Path
     id: str
@@ -51,6 +64,7 @@ class Pack:
     docs: dict[str, str]  # path relative to root -> text
     templates: dict[str, str]  # template name -> text
     template_paths: dict[str, str] = field(default_factory=dict)
+    objections: list[Objection] = field(default_factory=list)
 
     def source_text(self, source: str) -> str | None:
         """Text for a SourceRef.source: ``docs/<file>`` or ``fact:<id>``."""
@@ -61,6 +75,24 @@ class Pack:
 
     def criterion(self, criterion_id: str) -> Criterion | None:
         return next((c for c in self.scorecard if c.id == criterion_id), None)
+
+    def objection(self, objection_id: str) -> Objection | None:
+        return next((o for o in self.objections if o.id == objection_id), None)
+
+    def objection_criterion(self, objection: Objection | None = None) -> Criterion:
+        """The skill an objection drill is judged on: the objection's own, else the pack's
+        objection-handling criterion, else its discovery criterion, else its first."""
+        from .scoring import criterion_signal  # noqa: PLC0415 - scoring imports this module
+
+        if objection is not None and objection.criterion:
+            found = self.criterion(objection.criterion)
+            if found is not None:
+                return found
+        for signal in ("objections", "discovery"):
+            found = next((c for c in self.scorecard if criterion_signal(c) == signal), None)
+            if found is not None:
+                return found
+        return self.scorecard[0]
 
 
 class PackError(ValueError):
@@ -109,6 +141,7 @@ def load_pack(path: str | Path) -> Pack:
         docs=docs,
         templates=templates,
         template_paths=template_paths,
+        objections=[Objection(**o) for o in data.get("objections", [])],
     )
     problems = validate_pack(pack)
     if problems:
@@ -137,6 +170,16 @@ def validate_pack(pack: Pack) -> list[str]:
     for fact in pack.facts.values():
         if fact.source_doc and fact.source_doc not in pack.docs:
             problems.append(f"fact {fact.id!r} cites missing document {fact.source_doc!r}")
+    oids = [o.id for o in pack.objections]
+    if len(oids) != len(set(oids)):
+        problems.append("objection ids must be unique")
+    for o in pack.objections:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", o.id or ""):
+            problems.append(f"objection id {o.id!r}: use lower-case letters, digits and hyphens")
+        if not (o.topic or "").strip() or not (o.says or "").strip():
+            problems.append(f"objection {o.id!r}: topic and says are required")
+        if o.criterion and pack.criterion(o.criterion) is None:
+            problems.append(f"objection {o.id!r}: criterion {o.criterion!r} is not in the scorecard")
     for name, rel in pack.template_paths.items():
         if name not in pack.templates:
             problems.append(f"template {name!r} points to missing file {rel!r}")

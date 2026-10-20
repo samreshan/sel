@@ -157,5 +157,28 @@ class Packs(unittest.TestCase):
         self.assertIn("scorecard", msg)
 
 
+    def test_objections_and_the_skill_they_are_judged_on(self):
+        solar, pos = load_pack(ROOT / "packs/demo-solar"), load_pack(ROOT / "packs/demo-pos")
+        self.assertTrue(solar.objections and pos.objections)
+        price = solar.objection("competitor-cheaper")
+        self.assertEqual(solar.objection_criterion(price).id, "objection-handling")  # the pack's objection skill
+        self.assertEqual(solar.objection_criterion(solar.objection("wait-for-subsidy")).id, "discovery")  # its own
+        self.assertEqual(pos.objection_criterion(pos.objection("too-expensive")).id, "qualify")  # no objection skill: discovery
+        self.assertIsNone(solar.objection("nope"))
+
+    def test_invalid_objections_are_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = Path(tmp) / "p"
+            shutil.copytree(ROOT / "packs/demo-pos", dst)
+            with (dst / "pack.toml").open("a", encoding="utf-8") as f:
+                f.write('\n[[objections]]\nid = "Bad Id"\ntopic = ""\nsays = "x"\ncriterion = "missing"\n'
+                        '\n[[objections]]\nid = "too-expensive"\ntopic = "Price"\nsays = "Again"\n')
+            with self.assertRaises(PackError) as ctx:
+                load_pack(dst)
+        msg = str(ctx.exception)
+        for words in ("objection ids must be unique", "lower-case", "topic and says are required", "not in the scorecard"):
+            self.assertIn(words, msg)
+
+
 if __name__ == "__main__":
     unittest.main()

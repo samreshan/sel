@@ -39,3 +39,27 @@ title = "Next step with a date"
 description = "Every promised follow-up (quotation, site visit, callback) is agreed with a specific day."
 weight = 2
 signal = "next_step"
+
+# Concerns customers raise, for Playground drills with the AI customer. A drill is judged on
+# `criterion` (default: the scorecard's objection-handling skill). `hint` is shown after the drill.
+[[objections]]
+id = "competitor-cheaper"
+topic = "Price"
+says = "Another company quoted me much less for the same size. Why are you so expensive?"
+context = "A homeowner with a high monthly bill who has two quotes and wants to compare like for like."
+hint = "Ask what the other quote includes (panel brand, inverter, warranty, installation) before defending the price."
+
+[[objections]]
+id = "inverter-worry"
+topic = "Warranty"
+says = "Inverters break all the time. What happens to me after the warranty runs out?"
+context = "A careful buyer whose neighbour's inverter failed after a few years."
+hint = "Give the warranty exactly as the pack states it, conditions included, then ask what worries them most."
+
+[[objections]]
+id = "wait-for-subsidy"
+topic = "Timing"
+says = "Ma ali parkhanchu. Maybe the government will give a subsidy next year."
+context = "Interested, but in no hurry, and unsure whether to wait."
+criterion = "discovery"
+hint = "Find out what their bill is now and what waiting a year would cost them before talking about the offer."

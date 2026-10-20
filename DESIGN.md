@@ -413,13 +413,17 @@ Playground replaces the Playbook label while preserving `#playbook` links.
 It sits after Leads and before Team.
 Practise, Library, and My progress use the existing `aria-pressed` segmented
 control. Library retains skills, approved facts, documents, team answers, and
-manager review. Short document and objection exercises save separately from
-call drills; feedback labels its provenance and limits. Drafts stay in browser
+manager review. Short document exercises save separately from call drills;
+feedback labels its provenance and limits. Objections (the pack's
+`[[objections]]` and those heard on the team's calls, marked "Heard on a call ·
+anonymised") open a typed drill with the AI customer on the shared drill page,
+which says "Playground: practice only" and offers "Back to Playground". Drafts stay in browser
 storage per viewer and pack. Existing call-moment practice remains `#practice`.
 Practice attempts never close a focus or count as real-call improvement.
 
 Playground's page header pairs the title with a compact, labelled business-pack
 selector. Its Practise view places conversation practice beside reading, then
-objection drills beside call-moment practice in an asymmetric two-column layout.
+objection drills ("Practise an objection", one `.page-row` per objection with the
+skill it is judged on) beside call-moment practice in an asymmetric two-column layout.
 At narrow widths these stack in the same reading order. Page-specific layout
 classes reuse the shared card, section, button, pill, and field primitives.

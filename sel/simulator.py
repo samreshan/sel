@@ -359,7 +359,7 @@ class SimulatorHub:
         return room, client
 
     def create_drill_room(self, pack_id: str, agent: Any, drill_id: str, rep_name: str | None, person_id: str | None,
-                          customer_name: str | None, offset: str | None) -> tuple[Room, str]:
+                          customer_name: str | None, offset: str | None, opening_objection: bool = False) -> tuple[Room, str]:
         """A practice room: the rep (this browser) and an AI customer, ready to start."""
         pack = self.service.pack(pack_id)
         person_id = self._person(person_id)
@@ -370,7 +370,8 @@ class SimulatorHub:
             code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
             while code in self.rooms:
                 code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
-            room = Room(code=code, pack_id=pack.id, pack_name=pack.name, offset=_offset(offset), scorer=LiveScorer(pack),
+            room = Room(code=code, pack_id=pack.id, pack_name=pack.name, offset=_offset(offset),
+                        scorer=LiveScorer(pack, opening_objection=opening_objection),
                         state="ready", drill_id=drill_id, agent=agent)
             client = secrets.token_hex(16)
             room.participants["rep"] = Participant("rep", client, _clean(rep_name, 80), None, _iso_now(), person_id=person_id)

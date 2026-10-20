@@ -4672,6 +4672,9 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
 .playground-moments .page-section-body > p { margin: 0; }
 .playground-objections .page-row-main { flex-basis: 180px; gap: var(--space-1); }
 .playground-objections .page-row { padding-block: var(--space-4); }
+.playground-objections .objection-says { color: var(--text); font-weight: 500; }
+.playground-objections .group-title { margin: var(--space-4) 0 0; font-size: var(--text-small); color: var(--muted); font-weight: 500; }
+.playground-objections .page-section-body > .muted { margin: var(--space-3) 0 0; }
 @media (max-width: 1100px) {
   .playground-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .playground-conversation { height: auto; }

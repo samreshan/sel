@@ -124,3 +124,48 @@ def build_persona(moment: dict[str, Any], pack: Pack, names: list[str], seed: st
             persona[key] = value
     persona["by"] = f"model:{llm.name}"
     return persona
+
+
+OBJECTION_SYSTEM = """You write a short role for an AI that will play a customer on a practice sales call.
+The rep is practising how to handle one concern customers of this business raise. The customer must raise it.
+Use only what is given. Never add names, phone numbers or prices.
+- about: who the customer is and their situation, one sentence.
+- wants: what they care about most, one sentence.
+- opening: the customer's first words on the practice call, raising the concern (under 25 words, spoken).
+- if_good: how they react when the rep handles it well (one sentence).
+- if_poor: how they push back when the rep does not (one sentence).
+Return only JSON."""
+
+
+def objection_persona(says: str, context: str | None, pack: Pack, criterion: str, names: list[str], seed: str,
+                      llm: LLMClient | None = None, difficulty: int = 1, anonymised: bool = True) -> dict[str, Any]:
+    """The persona for a Playground drill on one objection.
+
+    ``anonymised`` is False for the pack's own objections (the business wrote them; nothing in them is a
+    customer's), True for objections heard on real calls, which are cleaned like any call moment.
+    """
+    clean = (lambda text, limit=240: _clean(text, names, limit)) if anonymised else \
+        (lambda text, limit=240: " ".join(str(text or "").split())[:limit])
+    crit = pack.criterion(criterion)
+    base = {
+        "name": fictional_name(seed, names), "about": clean(context) or f"A prospective customer of {pack.name}.",
+        "wants": "A fair deal they understand before deciding.",
+        "opening": clean(says) or "I'm not sure about this. Can you tell me more?",
+        "if_good": "Answers the rep's questions and warms up.",
+        "if_poor": "Repeats the concern and stays unconvinced.",
+        "practise": crit.title if crit else criterion, "difficulty": difficulty, "by": "rules (no language model)",
+    }
+    if llm is None:
+        return base
+    user = (f"Business: {pack.description or pack.name}\n"
+            f"Skill the rep is practising: {crit.title if crit else criterion}. {crit.description if crit else ''}\n"
+            f"The concern, in the customer's words: \"{clean(says, 300)}\"\n"
+            f"Who raises it: {clean(context, 300) or '(not given)'}")
+    out = llm.complete_json(OBJECTION_SYSTEM, user, PERSONA_SCHEMA, "persona", max_tokens=300)
+    persona = dict(base)
+    for key in ("about", "wants", "opening", "if_good", "if_poor"):
+        value = _clean(out.get(key), names)  # the model's words are always cleaned
+        if value:
+            persona[key] = value
+    persona["by"] = f"model:{llm.name}"
+    return persona

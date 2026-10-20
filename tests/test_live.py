@@ -165,5 +165,19 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("at odds with the pack", claims["detail"])  # the contradicted inverter warranty
 
 
+class OpeningObjectionTests(unittest.TestCase):
+    def test_a_drill_opening_counts_as_the_objection_without_cue_words(self):
+        pack = load_pack(Path(__file__).resolve().parent.parent / "packs/demo-solar")
+        t = Transcript(call_id="d", audio=None, started_at="2026-10-20T10:00:00+05:45",
+                       speakers=[Speaker("s1", "rep", "Rep"), Speaker("s2", "customer", "Kamala")],
+                       segments=[Segment("s01", 0.0, 3.0, "s2", "Inverters break all the time. What happens after the warranty?"),
+                                 Segment("s02", 3.5, 6.0, "s1", "What worries you most about it?")])
+        plain = LiveScorer(pack).snapshot(t, final=True)["score"]
+        drill = LiveScorer(pack, opening_objection=True).snapshot(t, final=True)["score"]
+        status = lambda score: next(c["status"] for c in score["criteria"] if c["id"] == "objection-handling")
+        self.assertEqual(status(plain), "na")  # no cue word: the rules see no objection
+        self.assertEqual(status(drill), "met")  # in a drill the opening is the objection, answered with a question
+
+
 if __name__ == "__main__":
     unittest.main()

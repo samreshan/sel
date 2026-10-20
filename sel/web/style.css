@@ -4685,3 +4685,93 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
   .playground-grid .section-head { padding: var(--space-4); }
   .playground-grid .page-section-body { padding-inline: var(--space-4); }
 }
+
+/* ---------- Page polish · 20 October 2026 ----------
+   Pages follow Today: one link style, header actions on the title line,
+   breadcrumbs for pages opened from another, steady card insets. */
+
+/* Text links read as text with a quiet underline, never the browser's blue. */
+a {
+  color: var(--text);
+  text-decoration-color: var(--border-2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--motion) var(--ease), color var(--motion);
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Header actions sit level with the title, whatever element carries them. */
+.page-head {
+  align-items: flex-start;
+}
+
+/* A card body that opens with text or controls gets the same inset as one that opens with rows. */
+.page-section-body > :where(p, .row, .group-title):first-child {
+  margin-top: var(--space-3);
+}
+
+.page-section-body > :where(.group-title):not(:first-child) {
+  margin-top: var(--space-4);
+}
+
+/* The call page: whose call and which lead on one line under the title. */
+.call-assign {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-6);
+  margin-top: var(--space-2);
+}
+
+.head-main .crumbs {
+  margin-bottom: var(--space-1);
+}
+
+/* People: the team is the anchor; adding someone supports it. */
+@media (min-width: 1280px) {
+  .people-grid:has(> :nth-child(2)) {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
+}
+
+.person-row-action {
+  flex: none;
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 88px;
+}
+
+/* Playground's sections are page navigation: the full-size segmented rail, as on Calls and Leads. */
+.playground-page .scope-toggle {
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.playground-page button.scope-btn {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-body);
+  letter-spacing: -0.02em;
+}
+
+/* Lobby cards carry an icon tile beside their title, as on Today. */
+.sim-lobby .card > .section-head-main {
+  margin-bottom: var(--space-2);
+}
+
+/* Settings: the icon credit is a row's description, not a sidebar footnote. */
+.page-row-main .icon-credit {
+  padding: 0;
+  font-size: var(--text-small);
+}
+
+@media (max-width: 600px) {
+  .person-row-action {
+    min-width: 0;
+  }
+}

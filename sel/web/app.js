@@ -25,7 +25,7 @@
   const STREAM_EVENTS = ["hello", "call", "call-deleted", "call-changed", "coaching", "coach", "drill", "lead", "playbook", "people", "rooms", "room", "line", "live", "signal"];
   const COACH_PAGES = new Set(["today", "playbook", "people", "practice", "leads", "lead", "prep", "team", "settings"]);
   const TEAM_PAGES = new Set(["leads", "lead", "prep", "team", "settings"]); // team.js
-  const NAV_OF = { practice: "playbook", lead: "leads", prep: "leads" };
+  const NAV_OF = { practice: "playbook", lead: "leads", prep: "leads", people: "team" };
 
   const KIND_LABEL = { question: "Customer questions", objection: "Objections", coaching: "Coaching" };
   const KIND_TAG = {
@@ -192,6 +192,22 @@
   }
 
   const iconTile = (tone, name) => el("span", { class: `icon-tile tone-${tone}` }, icon(name));
+
+  // Trail back to where a page was opened from ({href, text} items). The last item is the current page.
+  function crumbs(items) {
+    return el(
+      "nav",
+      { class: "crumbs", "aria-label": "Breadcrumb" },
+      el(
+        "ol",
+        {},
+        ...items.map((item, i) => {
+          const current = i === items.length - 1;
+          return el("li", {}, current || !item.href ? el("span", { "aria-current": current ? "page" : null, text: item.text }) : el("a", { href: item.href, text: item.text }));
+        })
+      )
+    );
+  }
   const cardTag = (cls, label) => el("span", { class: `pill pill-${cls} card-tag`, text: label });
 
   function cardHead(tone, iconName, summary, sub) {
@@ -220,6 +236,12 @@
     const [, y, mo, d, hh, mi, off] = m;
     const zone = !off || off === "Z" ? "UTC" : `UTC${off}`;
     return `${Number(d)} ${MONTHS[Number(mo) - 1]} ${y}, ${hh}:${mi} (${zone})`;
+  }
+
+  // A computed due day ("2026-10-08") as people read it ("8 Oct 2026"); the string itself, no time zone maths.
+  function formatDay(ymd) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || "");
+    return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : ymd || "";
   }
 
   function ago(iso) {
@@ -897,7 +919,7 @@
   function renderNav() {
     const team = document.querySelector(".primary-nav a[data-nav=team]");
     if (team) team.hidden = !(viewer() && viewer().role === "manager");
-    const active = state.view === "coach" ? NAV_OF[state.coachPage] || state.coachPage : state.view === "sim" ? "practice" : state.view === "calls" || state.view === "call" ? "calls" : null;
+    const active = state.view === "coach" ? NAV_OF[state.coachPage] || state.coachPage : state.view === "sim" ? "playbook" : state.view === "calls" || state.view === "call" || state.view === "new" ? "calls" : null;
     for (const a of document.querySelectorAll(".primary-nav a[data-nav]")) {
       const on_ = a.dataset.nav === active;
       a.classList.toggle("is-active", on_);
@@ -1481,7 +1503,7 @@
     const timings = Object.entries(meta.timings || {})
       .map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? `${v.toFixed(1)} s` : v}`)
       .join(" · ");
-    const when = [formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
+    const when = [packName(call.pack_id), formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
     const owner = state.people.length ? repPicker(call) : null;
     const lead = call.kind !== "practice" ? leadPicker(call) : null;
     const rules = String(meta.analyzer || "").startsWith("rules");
@@ -1491,11 +1513,10 @@
         el(
           "div",
           { class: "head-main" },
-          el("p", { class: "eyebrow", text: packName(call.pack_id) }),
+          crumbs([{ href: "#calls", text: "Calls" }, { text: title }]),
           el("h1", { text: title }),
           el("p", { class: "meta", text: when }),
-          owner,
-          lead,
+          owner || lead ? el("div", { class: "call-assign" }, ...compact([owner, lead])) : null,
           el("p", { class: "meta small", text: `Transcribed by ${meta.transcriber || "unknown"} · analysed by ${meta.analyzer || "unknown"}` }),
           timings ? el("p", { class: "meta small", text: `Timings: ${timings}` }) : null
         ),
@@ -1580,7 +1601,7 @@
     fillLeadSelect(sel, call.lead_id || "");
     if (state.leads === null) loadLeads();
     const msg = el("span", { class: "muted small", role: "status" });
-    const prep = el("a", { class: "small", href: call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads", text: call.lead_id ? "Prep" : "Leads" });
+    const prep = el("a", { class: "button small", href:call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads", text: call.lead_id ? "Prep" : "Leads" });
     sel.addEventListener("change", async () => {
       sel.disabled = true;
       try {
@@ -3249,6 +3270,7 @@
     el,
     icon,
     iconTile,
+    crumbs,
     pill,
     muted,
     compact,
@@ -3256,6 +3278,7 @@
     mmss,
     quoted,
     formatStarted,
+    formatDay,
     stageText,
     isActive,
     localOffset,

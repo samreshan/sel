@@ -427,3 +427,32 @@ objection drills ("Practise an objection", one `.page-row` per objection with th
 skill it is judged on) beside call-moment practice in an asymmetric two-column layout.
 At narrow widths these stack in the same reading order. Page-specific layout
 classes reuse the shared card, section, button, pill, and field primitives.
+
+## Page polish · 20 October 2026
+
+Every page now follows the Today dashboard's language.
+
+- Text links use the foreground colour with a quiet `--border-2` underline that
+  darkens on hover. No link shows the browser's default blue.
+- A page opened from another page starts with `.crumbs` (the shared
+  `Sel.crumbs()`), as Leads and Prep already did: Calls / call,
+  Playground / Practice / drill, Playground / Call simulator, Team / rep,
+  Team / People (Today / People for a rep). Top-level pages keep a plain
+  title. The sidebar highlights the section a page belongs to: New call →
+  Calls, the simulator → Playground, People → Team.
+- Header actions sit level with the title (`.page-head` aligns to the top).
+  A page's header has at most one primary action. Team's **Manage people** is
+  secondary.
+- The call page puts the pack in the meta line. **Whose call** and **Lead** sit
+  on one `.call-assign` row, and Prep is a small button.
+- A card body that opens with text or controls gets the same top inset as one
+  that opens with rows. Group titles inside a card body have 16 px above them.
+- People: **The team** is the anchor and **Add a person** supports it.
+  Row actions share one column, so View as and You line up.
+- Playground's Practise / Library / My progress rail uses the full-size
+  segmented metrics (28 px items, 14 px labels).
+- Simulator lobby cards carry an icon tile beside their title.
+- Settings → References lists the design system and the icon credit as rows.
+  Command names are set in `code`.
+- Customer promise days display as "8 Oct 2026" (`Sel.formatDay`, string
+  formatting only). The computed date itself is unchanged.

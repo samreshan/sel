@@ -164,14 +164,19 @@
     renderList(main, me);
   }
 
-  function header(eyebrow, title, sub, ...extra) {
+  // `trail` is the breadcrumb back to Playground; the page's own title closes it.
+  function header(trail, title, sub, ...extra) {
     return el(
       "header",
       { class: "page-head" },
-      el("div", {}, eyebrow ? el("p", { class: "eyebrow", text: eyebrow }) : null, el("h1", { text: title }), sub ? el("p", { class: "lede", text: sub }) : null),
+      el("div", {}, S.crumbs([...trail, { text: title }]), el("h1", { text: title }), sub ? el("p", { class: "lede", text: sub }) : null),
       ...compact(extra)
     );
   }
+
+  const PLAYGROUND = { href: "#playbook", text: "Playground" };
+  const TO_PRACTICE = [PLAYGROUND, { href: "#practice", text: "Practice" }];
+  const drillTrail = (d) => (d.origin === "playground" ? [{ href: `#playbook/${enc(d.pack_id)}`, text: "Playground" }] : TO_PRACTICE);
 
   function section(cls, title, sub, iconName, tone, ...body) {
     return el(
@@ -190,7 +195,7 @@
 
   function renderList(main, me) {
     if (page.listFor !== me.id || !page.list) {
-      main.replaceChildren(el("div", { class: "page" }, header("Practice", "Practice", null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Finding your drills…"))));
+      main.replaceChildren(el("div", { class: "page" }, header([PLAYGROUND], "Practice", null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Finding your drills…"))));
       loadList();
       return;
     }
@@ -214,7 +219,7 @@
       );
     };
     const nodes = [
-      header("Practice", "Practice", "Short practice calls with an AI customer built from your own calls. Each takes about 90 seconds.", el("a", { class: "button", href: "#sim", text: "Free practice with a person" })),
+      header([PLAYGROUND], "Practice", "Short practice calls with an AI customer built from your own calls. Each takes about 90 seconds.", el("a", { class: "button", href: "#sim", text: "Free practice with a person" })),
       page.error ? el("p", { class: "form-error", role: "alert", text: page.error }) : null,
       el(
         "div",
@@ -261,12 +266,12 @@
     if (page.session && page.session.drillId === id && !page.room) resume();
     const d = page.drills.get(id);
     if (!d) {
-      main.replaceChildren(el("div", { class: "page" }, header("Practice", "Drill", null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Loading the drill…"))));
+      main.replaceChildren(el("div", { class: "page" }, header(TO_PRACTICE, "Drill", null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Loading the drill…"))));
       loadDrill(id);
       return;
     }
     if (d.error) {
-      main.replaceChildren(el("div", { class: "page" }, header("Practice", "Drill", null), el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: "This drill could not be loaded." }), muted(d.error), el("div", { class: "row" }, el("a", { class: "button", href: "#practice", text: "Back to Practice" })))));
+      main.replaceChildren(el("div", { class: "page" }, header(TO_PRACTICE, "Drill", null), el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: "This drill could not be loaded." }), muted(d.error), el("div", { class: "row" }, el("a", { class: "button", href: "#practice", text: "Back to Practice" })))));
       return;
     }
     const inRoom = page.session && page.session.drillId === id && page.room && !["saved", "failed"].includes(page.room.state);
@@ -274,7 +279,7 @@
     const last = attempts[attempts.length - 1];
     const judging = page.session && page.session.drillId === id && page.room && page.room.state === "saved" && (!last || last.status !== "done");
     const nodes = [
-      header("Practice", d.title, compact([d.persona ? `AI customer: ${d.persona.name}` : null, level(d), d.origin === "playground" ? "Playground: practice only" : d.moment && d.moment.customer_name ? `From your call with ${d.moment.customer_name}` : null]).join(" · "), el("a", { class: "button", href: d.origin === "playground" ? `#playbook/${enc(d.pack_id)}` : "#practice", text: d.origin === "playground" ? "Back to Playground" : "All drills" })),
+      header(drillTrail(d), d.title, compact([d.persona ? `AI customer: ${d.persona.name}` : null, level(d), d.origin === "playground" ? "Playground: practice only" : d.moment && d.moment.customer_name ? `From your call with ${d.moment.customer_name}` : null]).join(" · "), el("a", { class: "button", href: d.origin === "playground" ? `#playbook/${enc(d.pack_id)}` : "#practice", text: d.origin === "playground" ? "Back to Playground" : "All drills" })),
       page.error ? el("p", { class: "form-error", role: "alert", text: page.error }) : null,
     ];
     if (inRoom) nodes.push(roomView(d));

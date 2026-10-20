@@ -200,3 +200,22 @@ class ProviderFromEnvTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompleteChatTests(unittest.TestCase):
+    def test_plain_text_turns_without_a_response_format(self):
+        server = FakeServer([ok("Okay, what does it include?")])
+        self.addCleanup(server.close)
+        client = ChatCompletionsClient(base_url=server.url, model="m")
+        msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
+        self.assertEqual(client.complete_chat(msgs, max_tokens=40, stop=["\n"]), "Okay, what does it include?")
+        body = server.requests[0]["body"]
+        self.assertNotIn("response_format", body)
+        self.assertEqual((body["messages"], body["max_tokens"], body["stop"]), (msgs, 40, ["\n"]))
+        self.assertEqual(client.stats.calls, 1)
+
+    def test_errors_are_llm_errors(self):
+        server = FakeServer([(500, {"error": {"message": "boom"}}, {})])
+        self.addCleanup(server.close)
+        with self.assertRaisesRegex(LLMError, "HTTP 500"):
+            ChatCompletionsClient(base_url=server.url, model="m").complete_chat([{"role": "user", "content": "x"}])

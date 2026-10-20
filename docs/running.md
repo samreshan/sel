@@ -77,6 +77,7 @@ Sel never sends anything: the drafts wait for approval as with any other call.
 | `SEL_CALLS_DIR` | `calls` | where calls are stored |
 | `SEL_LIVE_WHISPER_MODEL` | `base` | Whisper model for the simulator's live transcription; faster than `small` for the same accuracy on English (below) |
 | `SEL_CHAT_LLM_PROVIDER`, `SEL_CHAT_LLM_BASE_URL`, `SEL_CHAT_LLM_MODEL`, `SEL_CHAT_LLM_API_KEY`, `SEL_CHAT_LLM_EFFORT` | the `SEL_LLM_*` values | the fast model for the Coach (and the AI customer): unset values are taken from `SEL_LLM_*` while the provider is the same |
+| `SEL_CUSTOMER_FORMAT` | `text` | how the AI customer replies: `text` (chat turns, the spoken line only; code decides the ending and mood) or `json` (`{say, end_call, mood}` under a schema). Compare with `scripts/drill_latency.py --format` |
 | `SEL_ICE_SERVERS` | `[]` | JSON list of WebRTC ICE servers for simulator calls across networks, e.g. `[{"urls":"stun:stun.example.org"}]` |
 
 ## Command line

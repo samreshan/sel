@@ -1,12 +1,24 @@
 """The AI customer: plays the customer in a practice drill, one short line at a time.
 
-It runs on the fast chat client (``SEL_CHAT_LLM_*``). The system prompt holds
-the persona and never changes during a drill, and the transcript is appended
-to the user message, so a server that caches prompt prefixes reuses its work
-between turns. Replies are capped at about 40 tokens and returned as
-``{say, end_call, mood}``; code checks them (length, no ids or brackets, not
-empty) and falls back to the rules customer when the model fails, so a drill
-never stalls.
+It runs on the fast chat client (``SEL_CHAT_LLM_*``) in one of two formats
+(``SEL_CUSTOMER_FORMAT``):
+
+* ``text`` (default): the drill is sent as chat turns (the rep as the user,
+  the customer as the assistant) and the model writes only the spoken line.
+  Each request's prompt is the previous one plus two turns, so a local server
+  that caches prompt prefixes (llama.cpp, Ollama) reads only the new words;
+  the reply is a sentence, not a JSON object, so there is no grammar to
+  follow and fewer tokens to write. Code decides when the call ends (a dated
+  next step agreed, or enough turns) and the mood (from Sel's rules), which
+  small models got wrong anyway.
+* ``json``: one user message holding the transcript, a ``{say, end_call,
+  mood}`` reply under a JSON schema. Kept to compare (scripts/drill_latency.py
+  ``--format``) and for clients without plain-text chat.
+
+Both are checked by code (length, no ids or brackets, not empty) and fall back
+to the rules customer when the model fails, so a drill never stalls. A
+warm-up request when the room opens loads the model and reads the persona
+before the rep's first line.
 
 The rules customer opens with the persona's opening (the real customer line,
 anonymised), softens after the rep asks questions about what the customer
@@ -16,6 +28,7 @@ the call once a next step is agreed or after a few turns.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Any
@@ -41,17 +54,40 @@ agreed or you are saying goodbye. mood is how you feel now. Return only JSON."""
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["say", "end_call", "mood"],
           "properties": {"say": {"type": "string", "maxLength": 200}, "end_call": {"type": "boolean"},
                          "mood": {"type": "string", "enum": list(MOODS)}}}
+# The plain-text format: the same persona, and the line itself as the whole reply.
+TEXT_SYSTEM = """You play a customer on a practice sales call. Stay in character; you are not an assistant.
+Who you are: {about}
+What you care about: {wants}
+Your concern on this call: {opening}
+If the salesperson handles it well: {if_good}
+If they do not: {if_poor}
+Difficulty: {difficulty}
+Reply with only what you say out loud: one or two short sentences, under 25 words. No names, labels, quotes or
+stage directions. Do not invent prices or product facts; react to what the salesperson says."""
+CONNECTS = "(The salesperson calls you. You answer.)"  # a constant first turn, so every prompt shares one prefix
+TEXT_MAX_TOKENS = 48
+FORMATS = ("text", "json")
+_LABEL = re.compile(r"^\s*(?:you\s*\(customer\)|customer|me|you|[A-Z][a-z]+)\s*:\s*", re.I)
+_ASIDE = re.compile(r"(?:\s*(?:\([^()]{1,40}\)|\*[^*]{1,40}\*))+\s*$")  # trailing "(pauses)", "*sighs*"
+_ASIDE_LEAD = re.compile(r"^(?:\s*(?:\([^()]{1,40}\)|\*[^*]{1,40}\*))+\s*")
 _IDS = re.compile(r"\[[^\]]*\]|\b(?:REP|CUSTOMER)\s*:", re.I)
 _STAGE = re.compile(r"\s*[(*]?\b(?:end(?:s|ing)? (?:the )?call|hangs? up)\b[.)*]*\s*$", re.I)
 
 
 class AICustomer:
-    def __init__(self, persona: dict[str, Any], llm: LLMClient | None = None):
+    def __init__(self, persona: dict[str, Any], llm: LLMClient | None = None, fmt: str | None = None):
         self.persona = persona
         self.llm = llm
         self.difficulty = int(persona.get("difficulty") or 2)
-        self.system = CUSTOMER_SYSTEM.format(difficulty=DIFFICULTY.get(self.difficulty, DIFFICULTY[2]),
-                                             **{k: persona.get(k, "") for k in ("about", "wants", "opening", "if_good", "if_poor")})
+        fields = {k: persona.get(k, "") for k in ("about", "wants", "opening", "if_good", "if_poor")}
+        level = DIFFICULTY.get(self.difficulty, DIFFICULTY[2])
+        self.system = CUSTOMER_SYSTEM.format(difficulty=level, **fields)
+        self.text_system = TEXT_SYSTEM.format(difficulty=level, **fields)
+        fmt = (fmt or os.environ.get("SEL_CUSTOMER_FORMAT") or "text").lower()
+        if fmt not in FORMATS:
+            fmt = "text"
+        # A client without plain-text chat (scripted test models) uses the JSON format.
+        self.format = fmt if fmt == "json" or hasattr(llm, "complete_chat") else "json"
         self.timings: list[float] = []  # seconds per model reply, for scripts/drill_latency.py
 
     @property
@@ -61,8 +97,23 @@ class AICustomer:
     def opening(self) -> dict[str, Any]:
         return {"say": self.persona.get("opening") or "Hello?", "end_call": False, "mood": "doubtful", "by": "persona"}
 
+    def warm(self) -> None:
+        """Load the model and read the persona before the rep speaks (one token, result ignored)."""
+        if self.llm is None:
+            return
+        try:
+            if self.format == "text":
+                self.llm.complete_chat(turns(self.text_system, [{"role": "customer", "text": self.opening()["say"]}],
+                                             open_turn=False), max_tokens=1)
+            else:
+                self.llm.complete_json(self.system, render([]), SCHEMA, "customer-warm-up", max_tokens=1)
+        except LLMError:
+            pass  # a cold first reply is slower, nothing more
+
     def reply(self, lines: list[dict[str, Any]]) -> dict[str, Any]:
         """The customer's next line, given the drill so far (``[{role, text}]``, oldest first)."""
+        if self.llm is not None and self.format == "text":
+            return self._reply_text(lines)
         if self.llm is not None:
             t = time.perf_counter()
             try:
@@ -77,6 +128,76 @@ class AICustomer:
             except LLMError:
                 self.timings.append(time.perf_counter() - t)
         return {**rules_reply(lines, self.difficulty), "by": "rules (no language model)"}
+
+    def _reply_text(self, lines: list[dict[str, Any]]) -> dict[str, Any]:
+        rules = rules_reply(lines, self.difficulty)
+        if rules["end_call"]:
+            # A dated next step was agreed, or the call has run its course: code ends it, as before.
+            return {**rules, "by": "rules (no language model)"} if sum(
+                1 for x in lines if x["role"] == "customer") >= MAX_TURNS else self._model_goodbye(lines, rules)
+        t = time.perf_counter()
+        try:
+            out = self.llm.complete_chat(turns(self.text_system, lines), max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
+            self.timings.append(time.perf_counter() - t)
+        except LLMError:
+            self.timings.append(time.perf_counter() - t)
+            return {**rules, "by": "rules (no language model)"}
+        say = clean_line(out)
+        if not say:
+            return {**rules, "by": "rules (no language model)"}
+        # Mood comes from Sel's rules (how the rep has done so far), not from the model.
+        return {"say": say, "end_call": False, "mood": rules["mood"], "by": self.name,
+                "seconds": round(self.timings[-1], 2)}
+
+    def _model_goodbye(self, lines: list[dict[str, Any]], rules: dict[str, Any]) -> dict[str, Any]:
+        """The model's own words for agreeing to the next step; the rules decided the call ends."""
+        t = time.perf_counter()
+        try:
+            out = self.llm.complete_chat(turns(self.text_system, lines), max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
+            self.timings.append(time.perf_counter() - t)
+            say = clean_line(out)
+        except LLMError:
+            self.timings.append(time.perf_counter() - t)
+            say = ""
+        if not say:
+            return {**rules, "by": "rules (no language model)"}
+        return {"say": say, "end_call": True, "mood": rules["mood"], "by": self.name,
+                "seconds": round(self.timings[-1], 2)}
+
+
+def turns(system: str, lines: list[dict[str, Any]], open_turn: bool = True) -> list[dict[str, str]]:
+    """The drill as chat turns: the rep is the user, the customer the assistant.
+
+    Starts with the same two messages every time (the persona and a constant
+    "the call connects" turn), and consecutive lines by one side are joined, so
+    each request is the previous one with the newest turns appended.
+    """
+    msgs: list[dict[str, str]] = [{"role": "system", "content": system}, {"role": "user", "content": CONNECTS}]
+    for x in lines:
+        role = "user" if x["role"] == "rep" else "assistant"
+        text = " ".join(str(x.get("text") or "").split())
+        if not text:
+            continue
+        if msgs[-1]["role"] == role:
+            msgs[-1] = {"role": role, "content": msgs[-1]["content"] + " " + text}
+        else:
+            msgs.append({"role": role, "content": text})
+    if open_turn and msgs[-1]["role"] == "assistant":
+        msgs.append({"role": "user", "content": "(silence)"})
+    return msgs
+
+
+def clean_line(text: str) -> str:
+    """What the customer says: one line, no speaker label, quotes or stage directions; empty if unusable."""
+    line = " ".join(str(text or "").split())
+    line = _LABEL.sub("", line).strip()
+    line = _ASIDE.sub("", _ASIDE_LEAD.sub("", line)).strip()
+    line = _STAGE.sub("", line).strip().strip('"\u201c\u201d\'').strip()
+    if not line or _IDS.search(line):
+        return ""
+    # Keep at most two sentences, as the prompt asks.
+    parts = re.split(r"(?<=[.!?])\s+", line)
+    return " ".join(parts[:2])[:MAX_SAY]
 
 
 def render(lines: list[dict[str, Any]]) -> str:

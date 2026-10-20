@@ -377,6 +377,11 @@ class SimulatorHub:
             room.participants["customer"] = Participant("customer", secrets.token_hex(16), _clean(customer_name, 80), None,
                                                         _iso_now(), streams=1, ai=True)
             self.rooms[code] = room
+        if hasattr(agent, "warm"):
+            # Load the model and read the persona now, on the AI worker, so the rep's first line
+            # doesn't wait for it (the worker answers in order, so a real reply never overtakes it).
+            self._ensure_ai()
+            self._ai.put((room, None))
         return room, client
 
     def join(self, code: str, role: str | None, name: str | None, email: str | None,
@@ -662,6 +667,12 @@ class SimulatorHub:
             if item is None:
                 return
             room, asked = item
+            if asked is None:
+                try:
+                    room.agent.warm()
+                except Exception:  # noqa: BLE001 - a warm-up only saves time; the drill works without it
+                    pass
+                continue
             try:
                 while True:
                     with room.lock:

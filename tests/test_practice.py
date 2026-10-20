@@ -347,3 +347,100 @@ class PracticeLoopTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TextCustomerTests(unittest.TestCase):
+    """The default plain-text format: chat turns, a spoken line, code-decided ending and mood."""
+
+    PERSONA = AICustomerTests.PERSONA
+
+    class Chat:
+        name = "chat"
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+            self.calls = []
+            self.stats = LLMStats()
+
+        def complete_chat(self, messages, max_tokens=256, stop=None):
+            self.calls.append({"messages": [dict(m) for m in messages], "max_tokens": max_tokens, "stop": stop})
+            reply = self.replies.pop(0) if self.replies else "Okay."
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+    def lines(self, *rep):
+        out = [{"role": "customer", "text": "It is a little expensive."}]
+        for i, text in enumerate(rep):
+            out.append({"role": "rep", "text": text})
+            if i < len(rep) - 1:
+                out.append({"role": "customer", "text": f"Reply {i}."})
+        return out
+
+    def test_text_is_the_default_and_each_prompt_extends_the_last(self):
+        chat = self.Chat(["Customer: \"What does it include?\" (pauses)", "Hmm, and the warranty? (pauses)"])
+        ai = AICustomer(self.PERSONA, chat)
+        self.assertEqual(ai.format, "text")
+        first = ai.reply(self.lines("Hello."))
+        self.assertEqual(first["say"], "What does it include?")  # label and quotes removed
+        self.assertFalse(first["end_call"])
+        second = ai.reply(self.lines("Hello.", "Ours is a 5-year warranty."))
+        self.assertEqual(second["say"], "Hmm, and the warranty?")  # the stage direction is dropped
+        a, b = chat.calls[0]["messages"], chat.calls[1]["messages"]
+        self.assertEqual(b[:len(a)], a)  # the second prompt starts with the whole first one
+        self.assertEqual([m["role"] for m in a], ["system", "user", "assistant", "user"])
+        self.assertIn("It is a little expensive.", a[0]["content"])
+        self.assertEqual(chat.calls[0]["stop"], ["\n"])
+        self.assertLessEqual(chat.calls[0]["max_tokens"], 60)
+
+    def test_code_decides_the_mood_and_the_ending(self):
+        chat = self.Chat(["Sounds good, thanks. End call.", "Great, talk then."])
+        ai = AICustomer(self.PERSONA, chat)
+        plain = ai.reply(self.lines("It has a warranty."))
+        self.assertFalse(plain["end_call"])  # the model's "End call." does not hang up
+        self.assertEqual(plain["say"], "Sounds good, thanks.")
+        self.assertEqual(plain["mood"], rules_reply(self.lines("It has a warranty."), 1)["mood"])
+        done = ai.reply(self.lines("It has a warranty.", "I'll email you the quote by tomorrow evening."))
+        self.assertTrue(done["end_call"])  # a dated next step: code ends the call, in the model's words
+        self.assertEqual(done["say"], "Great, talk then.")
+
+    def test_unusable_lines_and_errors_fall_back_to_rules(self):
+        chat = self.Chat(["[s02] ok", "", LLMError("timeout")])
+        ai = AICustomer(self.PERSONA, chat)
+        for _ in range(3):
+            self.assertEqual(ai.reply(self.lines("Hello."))["by"], "rules (no language model)")
+        self.assertEqual(len(ai.timings), 3)
+
+    def test_json_format_can_be_chosen(self):
+        from unittest import mock
+        with mock.patch.dict("os.environ", {"SEL_CUSTOMER_FORMAT": "json"}):
+            self.assertEqual(AICustomer(self.PERSONA, self.Chat([])).format, "json")
+        self.assertEqual(AICustomer(self.PERSONA, self.Chat([]), fmt="json").format, "json")
+
+    def test_warm_up_reads_the_prompt_the_first_reply_starts_with(self):
+        chat = self.Chat(["", "Fine, go on."])
+        ai = AICustomer(self.PERSONA, chat)
+        ai.warm()
+        ai.reply(self.lines("Hello."))
+        warm, first = chat.calls[0], chat.calls[1]
+        self.assertEqual(warm["max_tokens"], 1)
+        self.assertEqual(first["messages"][:len(warm["messages"])], warm["messages"])
+
+    def test_drill_room_warms_up_before_the_first_reply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = CallService(tmp, ROOT / "packs")
+            hub = SimulatorHub(service, speech_status=lambda: (False, "off"))
+            chat = self.Chat(["", "What does the other quote include?"])
+            room, client = hub.create_drill_room("demo-solar", AICustomer(self.PERSONA, chat), "d1", "Asha", None,
+                                                 "Sita", "+05:45")
+            deadline = time.monotonic() + 5
+            while not chat.calls and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(chat.calls[0]["max_tokens"], 1)  # warmed before anyone spoke
+            hub.start(room.code, client)
+            hub.add_line(room.code, client, "Hello, what does the other quote include?")
+            while len(room.lines) < 3 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(room.lines[-1]["text"], "What does the other quote include?")
+            hub.close()
+            service.wait_idle()

@@ -204,6 +204,36 @@ class ChatCompletionsClient:
                 ]
         raise LLMError(f"model did not return valid JSON for {name}: {last_error}")
 
+    def complete_chat(self, messages: list[dict[str, str]], max_tokens: int = 256,
+                      stop: list[str] | None = None) -> str:
+        """Plain text for a multi-turn conversation (the AI customer).
+
+        No response format: a short spoken line needs no JSON grammar, and sending
+        the conversation as turns keeps each request's prompt a prefix of the next
+        one, which local servers reuse instead of reading it again.
+        """
+        payload: dict[str, Any] = {"model": self.model, "messages": messages,
+                                   "temperature": self.temperature, "max_tokens": max_tokens}
+        if stop:
+            payload["stop"] = stop
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
+        t = time.perf_counter()
+        try:
+            body = self._post(payload)
+        except urllib.error.HTTPError as e:
+            raise LLMError(f"{self.base_url} returned HTTP {e.code}: {e.read()[:500]!r}") from e
+        finally:
+            self.stats.seconds += time.perf_counter() - t
+        self.stats.calls += 1
+        usage = body.get("usage") or {}
+        self.stats.prompt_tokens += usage.get("prompt_tokens", 0)
+        self.stats.completion_tokens += usage.get("completion_tokens", 0)
+        try:
+            return body["choices"][0]["message"].get("content") or ""
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMError(f"unexpected reply from {self.base_url}: {str(body)[:200]}") from e
+
     def health(self) -> dict[str, Any]:
         req = urllib.request.Request(self.base_url.rstrip("/") + "/models",
                                      headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})

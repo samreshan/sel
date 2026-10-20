@@ -38,6 +38,7 @@ what good looks like instead of inventing a line.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -48,7 +49,7 @@ from typing import Any
 
 from .files import read_json, write_json
 from .grounding import normalize, numbers
-from .llm import LLMClient
+from .llm import LLMClient, LLMError
 from .models import Transcript
 from .pack import Pack
 from .retrieval import Passage, tokenize
@@ -487,6 +488,20 @@ For each scorecard criterion that came up in the call, find:
 segment is the id of a REP line, like "s07". why: what happened in that line, under 20 words, specific.
 Skip criteria that never came up. Do not repeat a line for the same criterion. Return only JSON."""
 
+# One skill per request (MomentFinder's default): a smaller task a 7B model follows better than the whole
+# scorecard at once. The system prompt and the start of the user message (the transcript and Sel's checks)
+# are the same in every request of a call, so a server that caches prompt prefixes reads them once.
+MOMENT_ONE_SYSTEM = """You coach a salesperson (REP) on one skill at a time, using a recorded sales call.
+Lines may mix English, romanized Nepali and Devanagari Nepali. Each line looks like: [s07] REP: words spoken
+The skill to check is given after the transcript. Decide whether it came up in the call (came_up). Then find REP lines:
+- weak: lines where the rep fell short of this skill, at most 2, clearest first;
+- strong: lines where the rep did it well, at most 2.
+segment is the id of a REP line, like "s07". why: what happened in that line, under 20 words, specific.
+Sel's rules may list lines they noticed for this skill. They can be wrong: keep the ones the transcript bears out,
+leave out the ones it does not, and add lines they missed. If the skill never came up, came_up is false and both
+lists are empty. Return only JSON."""
+MOMENT_PROMPTS = ("per-criterion", "single")
+
 LINE_SYSTEM = """You coach a salesperson. Write what the REP could have said instead, at one moment of a recorded call.
 - line: only the words the rep would say. One or two short spoken sentences, under 40 words, in the same language
   mix the rep used (English, romanized Nepali, or both). No ids, no brackets, no notes in the line.
@@ -522,16 +537,26 @@ def _checked_summary(report: dict[str, Any]) -> str:
 
 
 class MomentFinder:
-    """The model points at weak and strong moments; ``gate_moments`` checks them."""
+    """The model points at weak and strong moments; ``gate_moments`` checks them.
 
-    def __init__(self, llm: LLMClient):
+    ``prompt`` (``SEL_MOMENTS_PROMPT``): ``per-criterion`` (default) asks about one scorecard skill per
+    request, with the lines Sel's rules noticed for it as hints to keep, drop or add to; ``single`` asks
+    for every skill in one request (the earlier prompt, kept to compare with ``sel eval --moments``).
+    """
+
+    def __init__(self, llm: LLMClient, prompt: str | None = None):
         self.llm = llm
+        prompt = (prompt or os.environ.get("SEL_MOMENTS_PROMPT") or "per-criterion").lower()
+        self.prompt = prompt if prompt in MOMENT_PROMPTS else "per-criterion"
+        self.errors: list[str] = []  # skills whose request failed (per-criterion); the others still count
 
     @property
     def name(self) -> str:
         return f"model:{self.llm.name}"
 
     def find(self, report: dict[str, Any], pack: Pack) -> list[dict[str, Any]]:
+        if self.prompt == "per-criterion":
+            return self._per_criterion(report, pack)
         transcript = Transcript.from_dict(report["transcript"])
         ids = [c.id for c in pack.scorecard]
         schema = _obj({"moments": {"type": "array", "maxItems": 2 * len(ids) + 2, "items": _obj({
@@ -544,6 +569,44 @@ class MomentFinder:
         from .analyzer_llm import seg_id
 
         return [{**m, "segment": seg_id(m.get("segment", "")), "by": self.name} for m in out.get("moments", [])]
+
+    def _per_criterion(self, report: dict[str, Any], pack: Pack) -> list[dict[str, Any]]:
+        from .analyzer_llm import seg_id
+
+        transcript = Transcript.from_dict(report["transcript"])
+        shared = (f"Business: {pack.name}\n\nTranscript:\n{_render(transcript)}\n\n{_checked_summary(report)}\n\n")
+        hints: dict[str, list[tuple[str, str, str]]] = {}
+        seen = set()
+        for m in rules_moments(report, pack):
+            if (m["criterion"], m["kind"], m["segment"]) not in seen:  # the first (most specific) reason per line
+                seen.add((m["criterion"], m["kind"], m["segment"]))
+                hints.setdefault(m["criterion"], []).append((m["kind"], m["segment"], m.get("why") or ""))
+        grades = {c["id"]: c for c in (report.get("score") or {}).get("criteria", [])}
+        item = _obj({"segment": SEG, "why": _text(160)})
+        schema = _obj({"came_up": {"type": "boolean"}, "weak": {"type": "array", "maxItems": 2, "items": item},
+                       "strong": {"type": "array", "maxItems": 2, "items": item}})
+        out: list[dict[str, Any]] = []
+        self.errors = []
+        for c in pack.scorecard:
+            grade = grades.get(c.id) or {}
+            noticed = "\n".join(f"- {kind} {seg}: {why}" for kind, seg, why in hints.get(c.id, [])) or "- nothing"
+            user = (shared + f"Skill: {c.title}. {c.description}\n"
+                    f"Sel's scorecard for this skill: {grade.get('status', 'not graded')} ({grade.get('detail') or 'no detail'})\n"
+                    f"Sel's rules noticed:\n{noticed}")
+            try:
+                reply = self.llm.complete_json(MOMENT_ONE_SYSTEM, user, schema, "moments-one", max_tokens=300)
+            except LLMError as e:
+                self.errors.append(f"{c.id}: {e}")
+                continue
+            if reply.get("came_up") is False:
+                continue
+            for kind in KINDS:
+                for m in (reply.get(kind) or [])[:2]:
+                    out.append({"criterion": c.id, "kind": kind, "segment": seg_id(str(m.get("segment", ""))),
+                                "why": m.get("why"), "by": self.name})
+        if self.errors and len(self.errors) == len(pack.scorecard):
+            raise LLMError("every skill's request failed: " + "; ".join(self.errors))
+        return out
 
 
 class LineWriter:
@@ -732,7 +795,9 @@ def diagnose(report: dict[str, Any], pack: Pack, index, finder: MomentFinder | N
         "moments": moments, "rejected": refused,
         "counts": {"weak": len(weak), "strong": len(moments) - len(weak), "lines": len(lines),
                    "lines_rejected": sum(len(m["rejected_lines"]) for m in moments), "moments_refused": len(refused)},
-        "meta": {"timings": {k: round(v, 3) for k, v in timings.items()}},
+        "meta": {"timings": {k: round(v, 3) for k, v in timings.items()},
+                 **({"moments_prompt": finder.prompt} if finder is not None and fixture is None else {}),
+                 **({"moment_errors": finder.errors} if finder is not None and getattr(finder, "errors", None) else {})},
     }
 
 

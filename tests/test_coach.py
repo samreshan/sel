@@ -141,6 +141,20 @@ class LineGateTests(unittest.TestCase):
         self.assertEqual(r["check"], "rejected")
 
 
+def per_skill(moments, pack):
+    """The per-criterion prompt's replies from a list of moments: each request names one skill by its title."""
+    titles = {c.title: c.id for c in pack.scorecard}
+
+    def reply(user):
+        skill = user.rsplit("Skill: ", 1)[1]
+        cid = next(i for t, i in titles.items() if skill.startswith(t + "."))
+        mine = [m for m in moments if m["criterion"] == cid]
+        return {"came_up": bool(mine), "weak": [{"segment": m["segment"], "why": m["why"]} for m in mine if m["kind"] == "weak"],
+                "strong": [{"segment": m["segment"], "why": m["why"]} for m in mine if m["kind"] == "strong"]}
+
+    return reply
+
+
 def scripted_coaching_llm(first_inverter_line="Hamro inverter ma pani 10 years warranty cha."):
     """Moment finder + line writer + judge. The first line for the inverter moment claims 10 years."""
     moments = {"moments": [
@@ -162,7 +176,8 @@ def scripted_coaching_llm(first_inverter_line="Hamro inverter ma pani 10 years w
             return {"line": "Engineer ko visit ko lagi Sunday ki Monday, kun din milcha?", "passages": []}
         return {"line": "Arko quote ma kun inverter ra warranty cha?", "passages": ["P9"]}
 
-    return ScriptedLLM({"moments": moments, "line": line,
+    return ScriptedLLM({"moments": moments, "moments-one": per_skill(moments["moments"], load_pack(ROOT / "packs/demo-solar")),
+                        "line": line,
                         "verify-lines": {"checks": [{"claim_index": 0, "verdict": "supported", "passage_id": "",
                                                      "explanation": "ok"}]}})
 
@@ -289,6 +304,83 @@ class DiagnoseTests(unittest.TestCase):
         again = carry_over(diagnose(self.report, self.pack, self.index, fixture=fixture), c)
         kept = next(m for m in again["moments"] if m["id"] == inverter["id"])
         self.assertEqual((kept["state"], kept["note"], kept["better_line"]["by"]), ("edited", inverter["note"], "person:asha"))
+
+
+class MomentPromptTests(unittest.TestCase):
+    """The per-criterion moment prompt: one request per skill, Sel's rules as hints, a shared prefix."""
+
+    def setUp(self):
+        self.report, self.pack = solar_report()
+        self.index = pack_index(self.pack)
+
+    def requests(self, reply):
+        llm = ScriptedLLM({"moments-one": reply})
+        finder = MomentFinder(llm)
+        return finder, finder.find(self.report, self.pack), [u for n, u in llm.prompts if n == "moments-one"]
+
+    def test_one_request_per_skill_with_the_same_start(self):
+        finder, _, prompts = self.requests({"came_up": False, "weak": [], "strong": []})
+        self.assertEqual(finder.prompt, "per-criterion")
+        self.assertEqual(len(prompts), len(self.pack.scorecard))
+        # Everything before the skill is identical, so a local server reuses it across the requests.
+        shared = {u.split("Skill: ")[0] for u in prompts}
+        self.assertEqual(len(shared), 1)
+        self.assertIn("Transcript:", shared.pop())
+
+    def test_the_rules_hints_go_to_their_own_skill(self):
+        _, _, prompts = self.requests({"came_up": False, "weak": [], "strong": []})
+        by_skill = {u.split("Skill: ")[1].split(".")[0]: u.split("Skill: ")[1] for u in prompts}
+        claims = by_skill["Only approved product claims"]
+        self.assertIn("weak s09", claims)  # the NEA timing the 7B model missed under the single prompt
+        self.assertIn("strong s03", claims)
+        self.assertNotIn("s09", by_skill["Next step with a date"])
+        self.assertIn("strong s11", by_skill["Next step with a date"])
+        # One reason per line: the second rule on the same line is left out.
+        self.assertEqual(claims.count("weak s05"), 1)
+
+    def test_a_skill_that_never_came_up_gives_nothing(self):
+        def reply(user):
+            came = "Skill: Next step with a date." in user
+            return {"came_up": came, "weak": [{"segment": "s13", "why": "No day."}],
+                    "strong": [{"segment": "[s11]", "why": "A day."}]}
+
+        _, found, _ = self.requests(reply)
+        self.assertEqual({(m["criterion"], m["kind"], m["segment"]) for m in found},
+                         {("clear-next-step", "weak", "s13"), ("clear-next-step", "strong", "s11")})
+
+    def test_a_failed_skill_is_recorded_and_the_others_count(self):
+        from sel.llm import LLMError
+
+        def reply(user):
+            if "Skill: Discovery before price." in user:
+                raise LLMError("model hit max_tokens on moments-one")
+            return per_skill([{"criterion": "objection-handling", "kind": "weak", "segment": "s05", "why": "Defended."}],
+                             self.pack)(user)
+
+        llm = ScriptedLLM({"moments-one": reply})
+        c = diagnose(self.report, self.pack, self.index, MomentFinder(llm))
+        self.assertEqual(c["meta"]["moments_prompt"], "per-criterion")
+        self.assertEqual(len(c["meta"]["moment_errors"]), 1)
+        self.assertTrue(c["meta"]["moment_errors"][0].startswith("discovery:"))
+        self.assertEqual([(m["criterion"], m["kind"]) for m in c["moments"]], [("objection-handling", "weak")])
+
+    def test_every_skill_failing_is_an_error(self):
+        """So the service falls back to Sel's rules moments instead of filing a call with none."""
+        from sel.llm import LLMError
+
+        def reply(user):
+            raise LLMError("connection refused")
+
+        with self.assertRaisesRegex(LLMError, "every skill's request failed"):
+            MomentFinder(ScriptedLLM({"moments-one": reply})).find(self.report, self.pack)
+
+    def test_the_single_prompt_is_kept_for_comparison(self):
+        llm = scripted_coaching_llm()
+        finder = MomentFinder(llm, "single")
+        c = diagnose(self.report, self.pack, self.index, finder, LineWriter(llm, self.index))
+        self.assertEqual(c["meta"]["moments_prompt"], "single")
+        self.assertEqual([n for n, _ in llm.prompts if n.startswith("moments")], ["moments"])
+        self.assertEqual(MomentFinder(llm, "nonsense").prompt, "per-criterion")
 
 
 class CoachAgentTests(unittest.TestCase):

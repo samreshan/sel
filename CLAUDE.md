@@ -67,14 +67,14 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 224 tests; the 9 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 230 tests; the 9 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
 python -m sel serve --host 0.0.0.0 --tls-cert c.pem --tls-key k.pem   # simulator across computers (mic needs https)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer rules   # rules vs gold
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
-python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm)
+python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm; --moments per-criterion|single)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules    # Judge vs transfer_gold.json (rules|llm)
 python scripts/drill_latency.py                            # AI customer reply times (--model, --rules, --format text|json)
 python scripts/screens_team.py --out shots/                # Leads, Prep, Team, Settings, Playbook screenshots (desktop, 390 px) + keyboard pass
@@ -359,8 +359,15 @@ skill the demo follows.
   the stage meanwhile. A model failure falls back to rules moments and keeps
   the error. Re-analysing keeps a person's endorsements, edits, dismissals and
   notes (`carry_over`); a transcript correction refreshes moment quotes.
-- **Moments.** With a model: `MomentFinder` (one request, criterion enum,
-  segment ids). Without: rules from the coaching findings, contradicted or
+- **Moments.** With a model: `MomentFinder`, one request per scorecard skill
+  (`SEL_MOMENTS_PROMPT=per-criterion`, the default): the transcript and
+  checked claims first (the same text in every request, so the server reuses
+  it), then the skill, Sel's grade for it and the lines Sel's rules noticed as
+  hints to keep, drop or add to; the reply is `{came_up, weak[≤2],
+  strong[≤2]}`. A failed skill is kept in `meta.moment_errors` and the others
+  count; every skill failing is an error (rules moments). `single` is the
+  earlier one-request prompt (criterion enum, segment ids), kept to compare
+  (`sel eval --coaching llm --moments single`). Without: rules from the coaching findings, contradicted or
   uncovered claims, the scorecard grade and dated promises. `gate_moments`
   refuses unknown segments and criteria, moves a moment cited on the
   customer's line to the rep's reply, refuses praise for a line the pack
@@ -802,7 +809,11 @@ Browser (`sel/web/app.js`):
 
 - Coaching with qwen2.5:7b found no strong moments on solar-01 and missed the
   NEA-timing moment; the line for the inverter moment was a safe "I'll
-  confirm", not a corrected fact. Try a criterion-at-a-time prompt.
+  confirm", not a corrected fact. The per-criterion prompt (20 Oct) is the
+  attempt at both: not yet measured on a model. Run `python -m sel eval
+  examples/calls/solar-01 --pack packs/demo-solar --coaching llm --moments
+  per-criterion` and `--moments single` on the i7 and the M2 and record both
+  in the coaching table (moments found, time, `moment_errors`).
 - The chat model is qwen2.5:1.5b on the i7-1255U (set as a user environment
   variable, `SEL_CHAT_LLM_MODEL`): 4.4 s median per AI-customer reply in the
   json format, above the 2 to 3 s target. The text format and the warm-up

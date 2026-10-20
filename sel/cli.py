@@ -90,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--coaching", choices=["fixture", "rules", "llm"],
                    help="score coaching moments and better lines against coaching_gold.json instead: the example's "
                         "hand-written coaching.json, Sel's rules, or the configured language model (SEL_LLM_*)")
+    p.add_argument("--moments", choices=["per-criterion", "single"],
+                   help="with --coaching llm: one skill per request (default) or the whole scorecard in one")
     p.add_argument("--transfer", choices=["rules", "llm"],
                    help="score the Judge's transfer verdicts against transfer_gold.json: Sel's rules, or the "
                         "configured language model (SEL_LLM_*) checked by the rules")
@@ -216,13 +218,16 @@ def _eval_coaching(args, report) -> dict:
         from .llm import client_from_env
 
         llm = client_from_env()
-        coaching = diagnose(data, pack, index, finder=MomentFinder(llm), writer=LineWriter(llm, index), judge=llm,
+        finder = MomentFinder(llm, getattr(args, "moments", None))
+        coaching = diagnose(data, pack, index, finder=finder, writer=LineWriter(llm, index), judge=llm,
                             progress=lambda s, f: print(f"  [{f:4.0%}] {s}", file=sys.stderr))
         coaching["meta"]["llm_usage"] = llm.stats.to_dict()
     out = score_coaching(coaching, gold)
     out["analysis"] = str(report.meta.get("analyzer"))
     if args.coaching == "llm":
         out["llm_usage"] = coaching["meta"]["llm_usage"]
+        out["moments_prompt"] = coaching["meta"].get("moments_prompt")
+        out["moment_errors"] = coaching["meta"].get("moment_errors", [])
         out["lines_shown"] = [{"moment": f"{m['kind']} {m['criterion']} {m['evidence']['segment_ids']}",
                                "line": (m.get("better_line") or {}).get("text"),
                                "refused": [{"text": x["text"], "reasons": x["reasons"]} for x in m["rejected_lines"]]}

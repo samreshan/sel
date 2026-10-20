@@ -343,8 +343,10 @@ class DoneCriteriaTests(TeamApi):
                     "answer": "What does the other quote include?", "check": {"sources": []}},
                    {"id": "a2", "criterion": "discovery", "objection": "Wants a price first",
                     "answer": "How big is your monthly bill?", "check": {"sources": []}}]
-        llm = ScriptedLLM({"moments": {"moments": [{"criterion": "objection-handling", "kind": "weak", "segment": "s05",
-                                                    "why": "Defended the price."}]},
+        found = [{"criterion": "objection-handling", "kind": "weak", "segment": "s05", "why": "Defended the price."}]
+        from tests.test_coach import per_skill
+
+        llm = ScriptedLLM({"moments": {"moments": found}, "moments-one": per_skill(found, pack),
                            "line": [{"line": "Our inverter has a 10-year warranty.", "passages": []}] * 2,
                            "verify-lines": {"checks": []}})
         from sel.coach import MomentFinder

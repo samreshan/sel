@@ -114,7 +114,12 @@
   --motion: 180ms;
   --motion-fast: 120ms;
   --motion-slow: 280ms;
+  --motion-glide: 320ms;
+  --motion-loop: 1.4s;
+  --motion-spin: 800ms;
   --ease: cubic-bezier(.22, 1, .36, 1);
+  /* Critically damped spring, sampled: fast start, long soft settle, no overshoot. For movement. */
+  --ease-spring: linear(0, .08, .238, .406, .554, .674, .767, .835, .885, .921, .946, .963, .975, .983, .989, .992, 1);
   --press-scale: .98;
   --action-top: #484c54;
   --action-bottom: #25282e;
@@ -141,6 +146,13 @@
   --font-ui: "Switzer", system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", sans-serif;
   --font: "Switzer", system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Browsers without linear() easing settle with --ease instead of the spring. */
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: var(--ease);
+  }
 }
 
 *,
@@ -386,7 +398,8 @@ a.button.small {
   font-size: var(--text-body);
 }
 
-button.ghost {
+button.ghost,
+a.button.ghost {
   background: transparent;
   border-color: transparent;
   color: var(--muted);
@@ -394,7 +407,8 @@ button.ghost {
   box-shadow: none;
 }
 
-button.ghost:hover:not(:disabled) {
+button.ghost:hover:not(:disabled),
+a.button.ghost:hover {
   color: var(--text);
   border-color: transparent;
   background: var(--surface-2);
@@ -856,10 +870,6 @@ progress {
   background-color: var(--bg);
 }
 
-.main.is-call {
-  padding: 0;
-}
-
 .welcome,
 .progress-card {
   max-width: 640px;
@@ -916,37 +926,43 @@ progress {
 
 /* ---------- call view layout ---------- */
 
+/* The recording and transcript beside the review (the header, toolbar and
+   summary strip are under "The call page" near the end of this file). */
 .call-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  gap: var(--space-6);
   align-items: start;
 }
 
 .col-left {
   min-width: 0;
-  padding: var(--space-6);
   display: grid;
   gap: var(--space-4);
-  background: var(--bg);
 }
 
+/* The review scrolls on its own beside the transcript, its tabs held at the
+   top while it does. The small inline inset keeps focus rings unclipped. */
 .col-right {
   min-width: 0;
   position: sticky;
-  top: 0;
-  max-height: 100vh;
+  top: var(--space-6);
+  max-height: calc(100vh - var(--space-6));
   overflow-y: auto;
-  padding: var(--space-6) var(--space-6) var(--space-8);
-  background: var(--bg);
-  border-left: 1px solid var(--border);
+  scrollbar-width: thin;
+  margin-inline: calc(-1 * var(--space-1));
+  padding: 0 var(--space-1) var(--space-8);
   display: grid;
   gap: var(--space-4);
   align-content: start;
 }
 
-.call-head {
-  display: grid;
-  gap: 2px;
+/* The canvas-coloured ring hides cards scrolling past the held tabs. */
+.col-right > .tabs {
+  position: sticky;
+  top: var(--space-3);
+  z-index: 3;
+  box-shadow: 0 0 0 var(--space-4) var(--bg);
 }
 
 .inspector-head h2 {
@@ -956,110 +972,11 @@ progress {
   letter-spacing: -0.01em;
 }
 
-.talk {
-  display: grid;
-  gap: var(--space-3);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
-}
+/* player: a lane per speaker on the call's time axis, then play, time and speed */
 
-.talk h3 {
-  font-size: var(--text-body);
-  font-weight: 600;
-}
-
-.talk-figures {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-6);
-}
-
-.talk-figure {
-  display: grid;
-}
-
-.talk-figure .k {
-  font-size: var(--text-caption);
-  color: var(--muted);
-}
-
-.talk-figure .v {
-  font-size: 17px;
-  font-weight: 600;
-}
-
-.talk-figure .v small {
-  font-size: var(--text-small);
-  font-weight: 500;
-  color: var(--muted);
-  margin-left: 4px;
-}
-
-.talk-bar {
-  display: flex;
-  gap: 3px;
-  height: 8px;
-}
-
-.talk-bar span {
-  border-radius: var(--radius-2xs);
-  min-width: 2px;
-}
-
-/* summary tiles */
-
-.tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.tile {
-  flex: 1 1 200px;
-  display: grid;
-  justify-items: start;
-  justify-content: start;
-  gap: 2px;
-  text-align: left;
-  padding: var(--space-4);
-  min-height: 0;
-  border-radius: var(--radius);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: none;
-  font-weight: 400;
-}
-
-.tile:hover:not(:disabled) {
-  border-color: var(--border-2);
-}
-
-.tile[aria-pressed="true"] {
-  background: var(--surface-2);
-  border-color: var(--border-2);
-  box-shadow: none;
-}
-
-.tile-q {
-  font-size: var(--text-caption);
-  font-weight: 500;
-  color: var(--muted);
-}
-
-.tile-a {
-  font-size: var(--text-section);
-  line-height: 24px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.tile .pill {
-  margin-top: 6px;
-}
-
-/* player */
-
+/* --lane-h is one lane: a label row and a block row; blocks are --space-3 tall, --space-2 from its top. */
 .player {
+  --lane-h: 28px;
   position: sticky;
   top: var(--space-3);
   z-index: 2;
@@ -1078,27 +995,71 @@ audio {
   height: 40px;
 }
 
-.callmap {
+.lanes {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.lane-labels {
+  display: grid;
+  grid-auto-rows: var(--lane-h);
+}
+
+.lane-label {
   display: flex;
-  gap: 2px;
-  height: 26px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  white-space: nowrap;
+}
+
+.lane-name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.lane-label.role-customer .lane-name {
+  color: var(--ok-ink);
+}
+
+.lane-label.role-other .lane-name,
+.lane-meta {
+  color: var(--muted);
+}
+
+.track {
+  position: relative;
+  min-width: 0;
+}
+
+/* One grid row per lane; renderCallMap sets the rows, and each block's row, left and width. */
+.callmap {
+  position: relative;
+  display: grid;
+  grid-template-rows: repeat(2, var(--lane-h));
+}
+
+.lane-rail,
+.callmap-block {
+  position: absolute;
+  top: var(--space-2);
+  height: var(--space-3);
+}
+
+.lane-rail {
+  left: 0;
+  right: 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
 }
 
 .callmap-block {
   --block: var(--accent);
   min-width: 2px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
   border-radius: var(--radius-2xs);
   background: var(--block);
-  box-shadow: none;
-}
-
-.callmap-block:hover:not(:disabled) {
-  border: 0;
-  background: var(--block);
-  opacity: 0.8;
 }
 
 .callmap-block.role-customer {
@@ -1124,33 +1085,100 @@ audio {
   box-shadow: 0 0 0 1px var(--surface), 0 0 0 3px var(--text-2);
 }
 
-.legend {
+.playhead {
+  position: absolute;
+  top: calc(-1 * var(--space-1));
+  bottom: calc(-1 * var(--space-1));
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  box-shadow: 0 0 0 1px var(--surface);
+  pointer-events: none;
+}
+
+/* The seek bar lies over the lanes: a click or a drag plays from there. */
+.seek {
+  position: absolute;
+  top: calc(-1 * var(--space-1));
+  left: 0;
+  width: 100%;
+  height: calc(100% + 2 * var(--space-1));
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 2px;
+  height: 2px;
+}
+
+.seek::-moz-range-thumb {
+  width: 2px;
+  height: 2px;
+  border: 0;
+}
+
+.track:has(.seek:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
+.transport {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.play-btn {
+  width: var(--control-height);
+  padding: 0;
+  border-radius: var(--radius-pill);
+}
+
+.play-time {
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.evidence-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-caption);
   color: var(--muted);
 }
 
-.legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.legend i {
+.evidence-key i {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
-}
-
-.legend i.role-customer {
-  background: var(--customer);
-}
-
-.legend i.is-evidence {
   background: var(--evidence-block);
+}
+
+.transport-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* Wide enough for "1.25×", so the button doesn't change size as the speed does. */
+.speed-btn {
+  min-width: 64px;
 }
 
 .no-audio {
@@ -1781,7 +1809,7 @@ mark {
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--surface-2), var(--border), var(--surface-2));
   background-size: 200% 100%;
-  animation: sk 1.2s ease-in-out infinite;
+  animation: sk var(--motion-loop) ease-in-out infinite;
 }
 
 .sk-title {
@@ -1838,7 +1866,7 @@ mark {
   margin-left: auto;
   border-radius: 50%;
   background: var(--bad-ink);
-  animation: pulse 1.4s ease-in-out infinite;
+  animation: pulse var(--motion-loop) ease-in-out infinite;
 }
 
 .new-sim.is-live .live-dot {
@@ -2015,7 +2043,7 @@ kbd {
   display: block;
   height: 100%;
   background: var(--accent);
-  transition: width 0.4s ease;
+  transition: width var(--motion-glide) var(--ease-spring);
 }
 
 .status-met .score-bar i {
@@ -2972,7 +3000,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: var(--radius-pill);
-  animation: spin 800ms linear infinite;
+  animation: spin var(--motion-spin) linear infinite;
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -2993,13 +3021,6 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .col-right {
-    position: static;
-    max-height: none;
-    overflow: visible;
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
 }
 
 @media (max-width: 899px) {
@@ -3100,14 +3121,6 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
     padding: 16px;
   }
 
-  .col-left {
-    padding: 16px;
-  }
-
-  .col-right {
-    padding: var(--space-4) var(--space-4) var(--space-8);
-  }
-
   .player {
     position: static;
   }
@@ -3120,12 +3133,20 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
   }
 }
 
+/* Reduced motion swaps movement for a short fade; it never removes feedback.
+   Colour and opacity changes stay (at the press speed); transforms, loops and
+   entrances that move are dropped. Entrances that only fade opt back in below
+   ("Motion" at the end of this file). */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition: none !important;
     animation: none !important;
+    transition-property: opacity, color, background-color, border-color, box-shadow, outline-color, text-decoration-color !important;
+    transition-duration: var(--motion-fast) !important;
+    transition-timing-function: var(--ease) !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -3177,7 +3198,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
   margin-left: auto;
   border-radius: var(--radius-pill);
   background: var(--bad-ink);
-  animation: pulse 1.4s ease-in-out infinite;
+  animation: pulse var(--motion-loop) ease-in-out infinite;
 }
 
 .primary-nav a.is-live .live-dot {
@@ -4541,12 +4562,12 @@ select.title-select:focus-visible {
 .today-hero h1, .today-hero .today-hero-title { font-size: var(--text-hero); line-height: 1.15; letter-spacing: -.035em; margin-bottom: var(--space-3); font-weight: 600; }
 .today-hero .lede { font-size: var(--text-body); line-height: 1.6; color: var(--text-2); max-width: 40ch; margin: 0; }
 .today-hero-actions { margin-top: var(--space-6); gap: var(--space-3); }
-.today-page .stat-strip { margin: 0; padding: 0; gap: 0; overflow: hidden; }
-.today-page .stat { position: relative; padding: var(--space-4) var(--space-6); gap: var(--space-2); }
-.today-page .stat + .stat::before { content: ''; position: absolute; left: 0; top: var(--space-6); bottom: var(--space-6); width: 1px; background: var(--border); }
-.today-page .stat dt { display: flex; align-items: center; gap: var(--space-2); }
-.today-page .stat .icon-tile { width: 28px; height: 28px; border-radius: var(--radius-xs); }
-.today-page .stat dd { font-size: var(--text-title); line-height: var(--line-title); padding-left: var(--space-1); }
+.today-page .stat-strip, .call-page .stat-strip { margin: 0; padding: 0; gap: 0; overflow: hidden; }
+.today-page .stat, .call-page .stat { position: relative; padding: var(--space-4) var(--space-6); gap: var(--space-2); }
+.today-page .stat + .stat::before, .call-page .stat + .stat::before { content: ''; position: absolute; left: 0; top: var(--space-6); bottom: var(--space-6); width: 1px; background: var(--border); }
+.today-page .stat dt, .call-page .stat dt { display: flex; align-items: center; gap: var(--space-2); }
+.today-page .stat .icon-tile, .call-page .stat .icon-tile { width: 28px; height: 28px; border-radius: var(--radius-xs); }
+.today-page .stat dd, .call-page .stat dd { font-size: var(--text-title); line-height: var(--line-title); padding-left: var(--space-1); }
 .today-work { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr); align-items: start; gap: var(--space-6); }
 .today-primary, .today-side { min-width: 0; display: grid; gap: var(--space-6); }
 .today-page .section-head { padding: var(--space-4) var(--space-6); }
@@ -4604,15 +4625,15 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
 @media (max-width: 1240px) {
   .today-work { grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); }
   .today-skills .skills { grid-template-columns: minmax(0, 1fr); }
-  .today-page .stat { padding-inline: var(--space-4); }
+  .today-page .stat, .call-page .stat { padding-inline: var(--space-4); }
   .today-hero-copy { width: min(100%, 510px); }
 }
 @media (max-width: 1000px) {
   .today-work { grid-template-columns: minmax(0, 1fr); }
   .today-side { grid-template-columns: minmax(0, 1fr); }
-  .today-page .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .today-page .stat:nth-child(3)::before { display: none; }
-  .today-page .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .today-page .stat-strip, .call-page .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-page .stat:nth-child(3)::before, .call-page .stat:nth-child(3)::before { display: none; }
+  .today-page .stat:nth-child(n+3), .call-page .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
   .today-hero::after { background: linear-gradient(90deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, transparent) 45%, color-mix(in srgb, var(--surface) 35%, transparent)); }
 }
 @media (max-width: 760px) {
@@ -4628,9 +4649,9 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
   .today-hero-actions .button { padding-inline: var(--space-3); }
   .today-work, .today-primary, .today-side { gap: var(--space-4); }
   .today-skills .skill { padding: var(--space-4); }
-  .today-page .stat dt { align-items: flex-start; }
-  .today-page .stat dt > span { max-width: 13ch; }
-  .today-page .stat .icon-tile { flex: none; }
+  .today-page .stat dt, .call-page .stat dt { align-items: flex-start; }
+  .today-page .stat dt > span, .call-page .stat dt > span { max-width: 13ch; }
+  .today-page .stat .icon-tile, .call-page .stat .icon-tile { flex: none; }
   .today-page .section-head, .today-section-heading { padding: var(--space-4); }
   .today-skills > .section-head { padding: 0 0 var(--space-3); }
   .today-page .page-section-body { padding-inline: var(--space-4); }
@@ -4775,3 +4796,653 @@ a:hover {
     min-width: 0;
   }
 }
+
+/* ---------- The call page · 20 October 2026 ----------
+   A call reads like Today: the trail and the date, Today's illustrated hero
+   with what needs a person first, the summary strip, then the recording and
+   transcript beside the review (DESIGN.md "The call page"). */
+
+.call-page {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.call-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+}
+
+.call-when {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+
+/* Today's hero inside one card, with the call's details in a footer under the art. */
+.call-hero {
+  display: grid;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+}
+
+.call-hero > .today-hero {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.call-hero .today-hero-copy {
+  width: min(100%, 600px);
+  padding: var(--space-6) var(--space-8);
+}
+
+.call-hero .eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.call-hero h1 {
+  margin: 0 0 var(--space-2);
+}
+
+.call-hero .lede {
+  max-width: 50ch;
+}
+
+.call-hero .today-hero-actions {
+  margin-top: var(--space-4);
+}
+
+/* The people on the call stand where Today has its landscape: Today's
+   portraits on soft discs in their role's colour, facing each other. */
+.call-hero > .today-hero {
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.call-hero > .today-hero::after {
+  content: none;
+}
+
+.call-cast {
+  --cast-size: 136px;
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  padding: var(--space-6) var(--space-8) var(--space-6) 0;
+}
+
+.cast-person {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 152px;
+  min-width: 0;
+  text-align: center;
+}
+
+.cast-portrait {
+  display: grid;
+  place-items: end center;
+  width: var(--cast-size);
+  height: var(--cast-size);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+/* The drawings face right, so the customer's disc turns to face the rep.
+   Turning the disc, not the drawing, keeps multiply blending onto the disc. */
+.cast-person.role-customer .cast-portrait {
+  background: var(--ok-bg);
+  transform: scaleX(-1);
+}
+
+.cast-portrait .person-avatar.avatar-call {
+  width: calc(var(--cast-size) - var(--space-2));
+  height: calc(var(--cast-size) - var(--space-2));
+}
+
+.cast-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.cast-person.role-customer .cast-name {
+  color: var(--ok-ink);
+}
+
+.cast-role {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+
+/* A dashed line between the two, with the call in the middle. */
+.cast-link {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--space-12);
+  height: var(--cast-size);
+}
+
+.cast-link::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: calc(-1 * var(--space-2));
+  right: calc(-1 * var(--space-2));
+  border-top: 1px dashed var(--border-2);
+}
+
+.cast-link-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.call-hero-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-3) var(--space-8);
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+}
+
+.call-hero-foot .call-assign {
+  margin-top: 0;
+}
+
+.call-source {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+
+.call-hero-foot .banner {
+  flex: 1 1 100%;
+  margin-top: 0;
+}
+
+/* The summary strip: Today's numbers, each with a unit and one line of detail.
+   Cells keep their lines at the top when a neighbour's detail wraps. */
+.call-stats .stat {
+  align-content: start;
+}
+
+.call-stats .stat dd small {
+  margin-left: var(--space-1);
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.call-stats .stat dd.stat-note {
+  margin-top: calc(-1 * var(--space-1));
+  font-size: var(--text-caption);
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.stat.is-bad dd {
+  color: var(--bad-ink);
+}
+
+/* Scorecard rows put the play button beside the detail instead of under it. */
+.panel .scorecard .score-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: center;
+}
+
+.panel .scorecard .score-row-head {
+  grid-column: 1 / -1;
+}
+
+.panel .scorecard .score-row .ref-btn {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+/* The progress dock floats over the bottom of the review column too. */
+@media (min-width: 1101px) {
+  .workspace:has(> .review-dock:not([hidden])) .col-right {
+    padding-bottom: calc(var(--space-16) + var(--space-6));
+  }
+}
+
+@media (max-width: 1100px) {
+  .call-page .stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .call-page .stat:nth-child(3)::before {
+    display: none;
+  }
+
+  .call-page .stat:nth-child(n+3) {
+    border-top: 1px solid var(--border);
+  }
+
+  .col-right {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    margin-inline: 0;
+    padding: 0;
+  }
+}
+
+/* Below about 1180 px the copy would be squeezed beside them, so the people stand above it. */
+@media (max-width: 1180px) {
+  .call-hero > .today-hero {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .call-cast {
+    --cast-size: 104px;
+    padding: var(--space-6) var(--space-8) 0;
+  }
+
+  .cast-person {
+    width: 128px;
+  }
+
+  .call-hero .today-hero-copy {
+    width: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .call-page {
+    gap: var(--space-4);
+  }
+
+  .call-cast {
+    --cast-size: 88px;
+    padding: var(--space-4) var(--space-4) 0;
+  }
+
+  .cast-person {
+    width: 104px;
+  }
+
+  .cast-link {
+    width: var(--space-8);
+  }
+
+  .call-hero .today-hero-copy {
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .call-hero-foot {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .lane-secs {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .lanes {
+    gap: var(--space-3);
+  }
+}
+
+/* ---------- Motion · 20 October 2026 ----------
+   Motion explains a change; it never delays one (DESIGN.md "Effects and
+   animation", docs/motion-plan.md). Movement uses --ease-spring, fades use
+   --ease. The helpers live in motion.js; nothing here waits for an animation
+   to show the end state. */
+
+/* Rails (tabs, segmented controls, the sidebar): one thumb slides to the
+   selected item. The item keeps its text colour; the thumb paints its surface.
+   Until motion.js places the thumb, the selected item paints itself as before. */
+.has-thumb {
+  position: relative;
+  isolation: isolate;
+}
+
+.rail-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  transition:
+    transform var(--motion-glide) var(--ease-spring),
+    width var(--motion-glide) var(--ease-spring),
+    height var(--motion-glide) var(--ease-spring),
+    opacity var(--motion) var(--ease);
+}
+
+.tabs.has-thumb > .tab.is-selected,
+.tabs.has-thumb > .tab.is-selected:hover:not(:disabled),
+.segmented.has-thumb > input:checked + label,
+.segmented.has-thumb > a.is-on,
+.scope-toggle.has-thumb > .scope-btn.is-on,
+.scope-toggle.has-thumb > .scope-btn.is-on:hover:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.scope-toggle > .rail-thumb {
+  border-radius: var(--radius-xs);
+}
+
+.primary-nav.has-thumb > .rail-thumb {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.primary-nav.has-thumb > a.is-active,
+.primary-nav.has-thumb > a.is-active:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Text colour follows the thumb as it arrives. */
+.primary-nav.has-thumb > a {
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease), color var(--motion-glide) var(--ease-spring);
+}
+
+@media (min-width: 761px) {
+  .primary-nav.has-thumb > .rail-thumb {
+    border-color: var(--action-bottom);
+    background: var(--action-gradient);
+    box-shadow: var(--shadow-action);
+  }
+}
+
+/* Screens: same-document view transitions. Sideways moves cross-fade with a
+   small rise; going deeper slides in from the trailing edge, coming back from
+   the leading edge. Only the main pane moves; the sidebar stays live. */
+html[data-vt] .main {
+  view-transition-name: main;
+}
+
+::view-transition-old(root) {
+  display: none;
+}
+
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(main) {
+  animation-duration: var(--motion-slow);
+  animation-timing-function: var(--ease-spring);
+}
+
+::view-transition-old(main) {
+  animation: vt-out var(--motion-fast) var(--ease) both;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(main) {
+  animation: vt-rise var(--motion-slow) var(--ease-spring) both;
+  mix-blend-mode: normal;
+}
+
+html[data-vt="push"]::view-transition-old(main) { animation-name: vt-push-out; }
+html[data-vt="push"]::view-transition-new(main) { animation-name: vt-push-in; }
+html[data-vt="pop"]::view-transition-old(main) { animation-name: vt-pop-out; }
+html[data-vt="pop"]::view-transition-new(main) { animation-name: vt-pop-in; }
+
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-rise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes vt-push-out { to { opacity: 0; transform: translateX(-16px); } }
+@keyframes vt-push-in { from { opacity: 0; transform: translateX(24px); } }
+@keyframes vt-pop-out { to { opacity: 0; transform: translateX(16px); } }
+@keyframes vt-pop-in { from { opacity: 0; transform: translateX(-24px); } }
+
+/* Dialogs lift into place and settle back when closed; the backdrop fades.
+   A dialog redrawn while open (.is-settled) does not enter again. */
+.dialog {
+  transition-property: opacity, transform, overlay, display;
+  transition-duration: var(--motion), var(--motion-slow), var(--motion), var(--motion);
+  transition-timing-function: var(--ease), var(--ease-spring), linear, linear;
+  transition-behavior: allow-discrete;
+}
+
+.dialog:not([open]) {
+  opacity: 0;
+  transform: translateY(8px) scale(.97);
+}
+
+.dialog::backdrop {
+  transition-property: background-color, overlay, display;
+  transition-duration: var(--motion);
+  transition-timing-function: var(--ease);
+  transition-behavior: allow-discrete;
+}
+
+.dialog:not([open])::backdrop {
+  background-color: transparent;
+}
+
+@starting-style {
+  .dialog[open]:not(.is-settled) {
+    opacity: 0;
+    transform: translateY(12px) scale(.97);
+  }
+
+  .dialog[open]:not(.is-settled)::backdrop {
+    background-color: transparent;
+  }
+}
+
+/* Menus open from their control and fade out when dismissed (a copy fades;
+   the real menu is already closed). */
+.dropdown-menu {
+  animation-name: menu-in;
+  animation-duration: var(--motion);
+  animation-timing-function: var(--ease-spring);
+}
+
+.dropdown-menu.is-up {
+  animation-name: menu-in-up;
+}
+
+.dropdown-menu.is-leaving {
+  pointer-events: none;
+  animation: menu-out var(--motion-fast) var(--ease) forwards;
+}
+
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px) scale(.97); } }
+@keyframes menu-out { to { opacity: 0; transform: scale(.98); } }
+
+/* Numbers that change while someone watches roll: up for more, down for less. */
+.num {
+  display: inline-block;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.num-d {
+  position: relative;
+  display: inline-block;
+}
+
+.num-new {
+  display: inline-block;
+  animation: num-in-up var(--motion-slow) var(--ease-spring) both;
+}
+
+.num-old {
+  position: absolute;
+  inset: 0;
+  animation: num-out-up var(--motion) var(--ease) both;
+}
+
+.num.is-down .num-new { animation-name: num-in-down; }
+.num.is-down .num-old { animation-name: num-out-down; }
+
+@keyframes num-in-up { from { opacity: 0; transform: translateY(.45em); filter: blur(2px); } }
+@keyframes num-out-up { to { opacity: 0; transform: translateY(-.45em); filter: blur(2px); } }
+@keyframes num-in-down { from { opacity: 0; transform: translateY(-.45em); filter: blur(2px); } }
+@keyframes num-out-down { to { opacity: 0; transform: translateY(.45em); filter: blur(2px); } }
+
+/* The live gauge sweeps to its new value. */
+@property --pct {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* Symbols: a changed icon swaps in; a confirmation check draws itself once. */
+.is-swapping {
+  animation: icon-swap var(--motion-slow) var(--ease-spring) both;
+}
+
+.solar-icon.is-drawing {
+  stroke-dasharray: 21;
+  animation: icon-draw var(--motion-slow) var(--ease) var(--motion-fast) both;
+}
+
+.pill-check {
+  gap: var(--space-1);
+}
+
+.form-status > .solar-icon {
+  margin-right: var(--space-1);
+  vertical-align: -2px;
+}
+
+@keyframes icon-swap { from { opacity: 0; transform: scale(.6); filter: blur(2px); } }
+@keyframes icon-draw { from { stroke-dashoffset: 21; } to { stroke-dashoffset: 0; } }
+
+/* A live line rises into the conversation from its speaker's side. */
+.is-arriving {
+  transform-origin: left bottom;
+  animation: line-in var(--motion-slow) var(--ease-spring) both;
+}
+
+.sim-line.role-customer.is-arriving {
+  transform-origin: right bottom;
+}
+
+@keyframes line-in { from { opacity: 0; transform: translateY(10px) scale(.97); } }
+
+/* The other side is about to speak. */
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--line-body);
+}
+
+.typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  opacity: .35;
+  animation: typing var(--motion-loop) var(--ease) infinite;
+}
+
+.sim-typing {
+  justify-self: end;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+}
+
+.sim-typing.is-arriving {
+  transform-origin: right bottom;
+}
+
+.typing i:nth-child(2) { animation-delay: calc(var(--motion-loop) / 7); }
+.typing i:nth-child(3) { animation-delay: calc(var(--motion-loop) * 2 / 7); }
+
+@keyframes typing {
+  0%, 60%, 100% { opacity: .35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* Review progress: a step that just finished fills its line and draws its check. */
+.step-line.is-filling {
+  background: linear-gradient(var(--text), var(--text)) 0 0 / 100% 100% no-repeat var(--border-2);
+  animation: step-fill var(--motion-glide) var(--ease-spring) both;
+}
+
+@keyframes step-fill { from { background-size: 0% 100%; } }
+
+/* A list item removed while someone watches fades where it stood (motion.js flip). */
+.motion-ghost {
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* Reduced motion: what used to move only fades. */
+@keyframes motion-fade { from { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .is-arriving,
+  .dropdown-menu:not(.is-leaving) {
+    animation: motion-fade var(--motion-fast) var(--ease) both !important;
+  }
+
+  ::view-transition-group(main) {
+    animation: none;
+  }
+
+  ::view-transition-old(main) {
+    animation: vt-out var(--motion-fast) var(--ease) both;
+  }
+
+  ::view-transition-new(main) {
+    animation: motion-fade var(--motion-fast) var(--ease) both;
+  }
+}
+
+/* Microphone capture shares the New call recording card. */
+.upload-voice {
+  margin-top: var(--space-6);
+  display: grid;
+  gap: var(--space-3);
+}
+.upload-voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.upload-voice .hint { margin: 0; }
+.upload-voice audio { width: 100%; min-width: 0; }

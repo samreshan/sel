@@ -19,8 +19,9 @@
 
   const S = window.Sel;
   const { el, icon, iconTile, crumbs, pill, muted, compact, plural, api, navigate, formatStarted, formatDay, quoted } = S;
+  const M = S.motion;
   const enc = encodeURIComponent;
-  const STATUS = { met: ["ok", "Met"], partial: ["warn", "Partly"], missed: ["bad", "Missed"] };
+  const STATUS ={ met: ["ok", "Met"], partial: ["warn", "Partly"], missed: ["bad", "Missed"] };
   const VERDICT = { pass: ["ok", "Passed"], fail: ["bad", "Not yet"], not_applicable: ["neutral", "Did not come up"], unsure: ["warn", "Unclear"] };
   const ESCALATION = {
     contradicted_claim: "A contradicted claim reached a customer",
@@ -211,13 +212,14 @@
   function openAddLead() {
     page.leadDraft = { name: "", phone: "" };
     page.addingLead = true;
+    M.forget("dialog:add-lead");
     rerender();
   }
 
   function addLeadDialog(me) {
     const draft = page.leadDraft || { name: "", phone: "" };
-    const name = el("input", { id: "lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", autofocus: true, value: draft.name || "" });
-    const phone = el("input", { id: "lead-phone", type: "tel", maxlength: "30", autocomplete: "off", value: draft.phone || "" });
+    const name = el("input", { id: "lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", placeholder: "Lead or business name", autofocus: true, value: draft.name || "" });
+    const phone = el("input", { id: "lead-phone", type: "tel", maxlength: "30", autocomplete: "off", placeholder: "98XXXXXXXX", value: draft.phone || "" });
     const err = el("p", { class: "form-error", role: "alert", hidden: true });
     const submit = el("button", { type: "submit", class: "primary", text: "Add lead" });
     const form = el(
@@ -237,6 +239,8 @@
       el("div", { class: "dialog-head" }, el("h2", { id: "add-lead-title", text: "Add a lead" }), el("button", { type: "button", class: "ghost small", "aria-label": "Close", on: { click: () => dialog.close() } }, icon("x", 18))),
       form
     );
+    // The page redraws while the dialog is open; only its first showing lifts in.
+    if (!M.once("dialog:add-lead")) dialog.classList.add("is-settled");
     dialog.addEventListener("close", () => {
       const wasOpen = page.addingLead;
       page.addingLead = false;
@@ -303,7 +307,8 @@
         el("label", { for: `lead-view-${value}`, text: label })
       );
     }
-    const toolbar = el("div", { class: "leads-toolbar" }, el("div", { class: "leads-search" }, search), el("div", { class: "leads-filter" }, filter), toggle);
+    M.glide(toggle);
+    const toolbar =el("div", { class: "leads-toolbar" }, el("div", { class: "leads-search" }, search), el("div", { class: "leads-filter" }, filter), toggle);
     let body;
     if (!leads.length) {
       body = el("div", { class: "leads-empty" }, el("p", { class: "strong", text: "No leads yet" }), muted("Add a lead, then choose it when you add a call."));
@@ -355,14 +360,15 @@
   function openEditLead(lead) {
     page.leadEdit = { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
     page.editingLead = lead.id;
+    M.forget("dialog:edit-lead");
     rerender();
   }
 
   function editLeadDialog(lead, path) {
     const draft = page.leadEdit && page.leadEdit.id === lead.id ? page.leadEdit : { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
     page.leadEdit = draft;
-    const name = el("input", { id: "edit-lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", autofocus: true, value: draft.name || "" });
-    const phone = el("input", { id: "edit-lead-phone", type: "tel", maxlength: "30", autocomplete: "off", value: draft.phone || "" });
+    const name = el("input", { id: "edit-lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", placeholder: "Lead or business name", autofocus: true, value: draft.name || "" });
+    const phone = el("input", { id: "edit-lead-phone", type: "tel", maxlength: "30", autocomplete: "off", placeholder: "98XXXXXXXX", value: draft.phone || "" });
     const reps = S.people().filter((p) => p.role === "rep" || p.id === lead.rep_id);
     const rep = el("select", { id: "edit-lead-rep" }, el("option", { value: "", text: "Unassigned" }), ...reps.map((p) => el("option", { value: p.id, text: p.name })));
     rep.value = draft.rep_id && [...rep.options].some((o) => o.value === draft.rep_id) ? draft.rep_id : "";
@@ -389,6 +395,8 @@
       el("div", { class: "dialog-head" }, el("h2", { id: "edit-lead-title", text: "Edit details" }), el("button", { type: "button", class: "ghost small", "aria-label": "Close", on: { click: () => dialog.close() } }, icon("x", 18))),
       form
     );
+    // The page redraws while the dialog is open; only its first showing lifts in.
+    if (!M.once("dialog:edit-lead")) dialog.classList.add("is-settled");
     const token = {};
     page.leadDialog = token;
     dialog.addEventListener("close", () => {
@@ -434,7 +442,7 @@
     const lead = got(path);
     if (page.errors.has(path)) return main.replaceChildren(failed("Lead", page.errors.get(path), path));
     if (!lead) return main.replaceChildren(loading("Lead"));
-    const notes = el("textarea", { id: "lead-notes", class: "input", rows: "5", maxlength: "2000", value: lead.notes || "" });
+    const notes = el("textarea", { id: "lead-notes", class: "input", rows: "5", maxlength: "2000", placeholder: "What you know about this lead…", value: lead.notes || "" });
     const msg = el("p", { class: "form-status", role: "status" });
     const save = el("button", { type: "button", text: "Save notes" });
     save.addEventListener("click", async () => {
@@ -618,10 +626,15 @@
     if (page.errors.has(path)) return main.replaceChildren(failed("Team", page.errors.get(path), path));
     if (!t) return main.replaceChildren(loading("Team", "Reading the team's calls…"));
     const nodes = [teamHead("Where each rep stands on each skill, what repeats across the team, and what needs you.")];
-    if (t.escalations.length) nodes.push(escalationList(t.escalations, me));
-    nodes.push(roster(t.roster || []));
-    nodes.push(el("div", { class: "bento" }, matrix(t), patterns(t.patterns)));
-    nodes.push(reviewQueue(t.review, me));
+    // Keyed so the sections below slide up when "Needs you" shrinks.
+    const keyed = (node, key) => {
+      if (node) node.dataset.flip = key;
+      return node;
+    };
+    if (t.escalations.length) nodes.push(keyed(escalationList(t.escalations, me), "team:escalations"));
+    nodes.push(keyed(roster(t.roster || []), "team:roster"));
+    nodes.push(keyed(el("div", { class: "bento" }, matrix(t), patterns(t.patterns)), "team:bento"));
+    nodes.push(keyed(reviewQueue(t.review, me), "team:queue"));
     main.replaceChildren(el("div", { class: "page" }, ...compact(nodes)));
   }
 
@@ -632,8 +645,19 @@
         done.disabled = true;
         try {
           await api(`/api/coach/${enc(e.person_id)}/escalations/${enc(e.key)}`, { method: "PUT", json: { status: "resolved", by: me.id } });
-          invalidate("/api/team");
-          rerender();
+          // The handled row fades where it stood and the rest close the gap; then the team view refreshes.
+          const team = page.data.get("/api/team");
+          invalidate("/api/team/");
+          if (team) {
+            const moves = M.flip(page.main);
+            team.escalations = team.escalations.filter((x) => x !== e);
+            rerender();
+            moves.play();
+            load("/api/team");
+          } else {
+            invalidate("/api/team");
+            rerender();
+          }
         } catch (ex) {
           done.disabled = false;
           done.textContent = ex.message;
@@ -641,7 +665,7 @@
       });
       return el(
         "li",
-        { class: "page-row" },
+        { class: "page-row", dataset: { flip: `escalation:${e.person_id}:${e.key}` } },
         icon("alert", 18),
         el("div", { class: "page-row-main" }, el("span", { class: "strong", text: `${e.person_name}: ${ESCALATION[e.reason] || e.reason}` }), el("span", { class: "muted small", text: e.note || "" })),
         e.call_id ? el("a", { class: "button small", href: `#call/${enc(e.call_id)}`, text: "Open the call" }) : e.drill_id ? el("a", { class: "button small", href: `#practice/${enc(e.drill_id)}`, text: "Open the drill" }) : null,

@@ -16,6 +16,7 @@
 
   const S = window.Sel;
   const { el, icon, iconTile, pill, muted, compact, plural, mmss, quoted, api, navigate, formatStarted } = S;
+  const M = S.motion;
   const enc = encodeURIComponent;
   const KEY = "sel.drill";
   const VERDICT = {
@@ -477,25 +478,61 @@
     if (page.room.state === "ready") btns.push(el("button", { type: "button", class: "primary small", on: { click: begin } }, icon("phone", 15), "Start the call"));
     if (live) btns.push(el("button", { type: "button", class: "small", on: { click: finish } }, icon("hangup", 15), "End and get feedback"));
     r.controls.replaceChildren(...btns);
+    syncTyping();
     if (id) paintLive();
+  }
+
+  function toBottom(list, smooth) {
+    list.scrollTo({ top: list.scrollHeight, behavior: smooth && M.ok() ? "smooth" : "auto" });
+  }
+
+  // While the AI customer composes a reply, three dots wait where it will appear.
+  // The status line above the composer says the same for screen readers.
+  function syncTyping() {
+    const r = page.refs;
+    if (!r || !r.lines.isConnected) return;
+    // Only while the customer owes a reply: the reply's line can arrive before the room says it is done.
+    const last = page.lines[page.lines.length - 1];
+    const busy = !!(page.room && page.room.ai_busy && page.room.state === "live") && (!last || last.role === "rep");
+    if (!busy) {
+      if (r.typing) r.typing.remove();
+      r.typing = null;
+      return;
+    }
+    if (!r.typing) {
+      // Not a .sim-line: it is not a line of the call.
+      const ai = (page.room.participants || []).find((p) => p.ai);
+      r.typing = M.arrive(el("li", { class: "sim-typing", "aria-hidden": "true" }, el("div", { class: "sim-line-meta" }, el("span", { class: "who", text: (ai && ai.name) || "Customer" })), M.typing()));
+    }
+    if (r.typing !== r.lines.lastElementChild) {
+      r.lines.append(r.typing);
+      toBottom(r.lines, true);
+    }
   }
 
   function paintLines(full) {
     const r = page.refs;
     if (!r || !page.main || !page.main.contains(r.lines)) return;
     const ai = page.room && (page.room.participants || []).find((p) => p.ai);
+    // Lines that arrived since the last paint rise in; the first paint (or a resumed call) just shows.
+    const first = !r.seen;
+    const fresh = first ? [] : page.lines.filter((l) => !r.seen.has(l.id));
+    const rising = new Set(fresh.length <= 3 ? fresh.map((l) => l.id) : []);
+    r.seen = new Set(page.lines.map((l) => l.id));
     r.lines.replaceChildren(
-      ...page.lines.map((l) =>
-        el(
+      ...page.lines.map((l) => {
+        const row = el(
           "li",
           { class: `sim-line role-${l.role}${l.role === "rep" ? " is-mine" : ""}` },
           el("div", { class: "sim-line-meta" }, el("span", { class: "who", text: l.role === "rep" ? "You" : (ai && ai.name) || "Customer" }), el("span", { class: "card-sub", text: mmss(l.start) }), l.source === "ai" ? el("span", { class: "lang", text: "AI" }) : null),
           el("p", { class: "text", text: l.text })
-        )
-      )
+        );
+        return rising.has(l.id) ? M.arrive(row) : row;
+      })
     );
     if (!page.lines.length) r.lines.append(el("li", { class: "muted sim-lines-empty", text: page.room && page.room.state === "ready" ? "Start the call: the customer speaks first." : "…" }));
-    r.lines.scrollTop = r.lines.scrollHeight;
+    syncTyping();
+    toBottom(r.lines, !first);
     if (full) paintRoom();
   }
 

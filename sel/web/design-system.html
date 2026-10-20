@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sel · Design system</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/design-system.css"><script src="/static/dropdown.js" defer></script><script src="/static/design-system.js" defer></script></head><body class="ds-page"><a class="skip-link" href="#content">Skip to content</a><aside class="ds-sidebar"><a class="brand" href="/" aria-label="Sel home"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sel · Design system</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/design-system.css"><script src="/static/motion.js" defer></script><script src="/static/dropdown.js" defer></script><script src="/static/design-system.js" defer></script></head><body class="ds-page"><a class="skip-link" href="#content">Skip to content</a><aside class="ds-sidebar"><a class="brand" href="/" aria-label="Sel home"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round">
 <path d="M4 12h3l2-5 3 10 2-5h6"/></svg></span><span class="brand-name">Sel</span></a>
 <p class="ds-sidebar-title">Design system</p><nav aria-label="Design system sections"><a href="#overview" aria-current="location">Overview</a><a href="#foundations">Foundations</a><a href="#typography">Typography</a><a href="#buttons">Buttons</a><a href="#cards">Cards & states</a><a href="#forms">Forms & controls</a><a href="#feedback">Feedback</a><a href="#patterns">Product patterns</a><a href="#icons">Iconography</a><a href="#motion">Motion & access</a></nav>
 <div class="ds-sidebar-footer"><span class="pill pill-neutral">Version 1.0</span>
@@ -272,6 +272,68 @@
 <button class="tab" id="pattern-claims" role="tab" aria-selected="false" aria-controls="pattern-panel" data-pattern="claims" tabindex="-1">Claims</button>
 <button class="tab" id="pattern-followup" role="tab" aria-selected="false" aria-controls="pattern-panel" data-pattern="followup" tabindex="-1">Follow-up</button></div>
 <div id="pattern-panel" role="tabpanel" aria-labelledby="pattern-evidence" tabindex="0"></div></div>
+<div class="ds-pattern-panel ds-call-example">
+<div class="ds-pattern-header">
+<div>
+<h3>Call page</h3>
+<p class="muted small">Illustrative content · the trail and date, the header's one next step and the two people, a passive summary strip, then the recording as a lane per speaker · play, seek and speed run on a local clock</p></div><span class="pill pill-neutral">Example</span></div>
+<div class="call-page" role="group" aria-label="Call page example">
+<div class="call-toolbar">
+<nav class="crumbs" aria-label="Call breadcrumb example"><ol><li><a href="#patterns">Calls</a></li><li><span aria-current="page">Ramesh</span></li></ol></nav>
+<p class="call-when"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg><time datetime="2026-10-07T14:00:00+05:45">7 Oct 2026, 14:00 (UTC+05:45)</time></p></div>
+<header class="call-hero call-head">
+<div class="today-hero call-hero-main">
+<div class="today-hero-copy">
+<div class="call-hero-title">
+<p class="eyebrow"><span>Example pack · Call review</span><span class="pill pill-warn">Example data</span></p>
+<h4 class="today-hero-title">Ramesh</h4></div>
+<div class="call-hero-brief">
+<p class="lede">Asha spoke with Ramesh for about a minute. 1 claim contradicts your pack. Check it first.</p>
+<div class="row today-hero-actions"><button type="button" class="primary" data-notice="In Sel this opens the Claims tab beside the transcript. This is a design example."><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg>Check claims</button></div></div></div>
+<div class="call-cast" role="group" aria-label="On the call">
+<div class="cast-person role-rep"><span class="cast-portrait"><span class="person-avatar avatar-call portrait-4" aria-hidden="true"></span></span><span class="cast-name">Asha</span><span class="cast-role">Rep</span></div>
+<span class="cast-link" aria-hidden="true"><span class="cast-link-mark"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#phone"/></svg></span></span>
+<div class="cast-person role-customer"><span class="cast-portrait"><span class="person-avatar avatar-call portrait-1" aria-hidden="true"></span></span><span class="cast-name">Ramesh</span><span class="cast-role">Customer</span></div></div></div>
+<div class="call-hero-foot">
+<div class="call-assign">
+<p class="meta rep-picker"><label for="ds-call-rep">Whose call: </label><select id="ds-call-rep" class="small-select"><option value="">No rep</option><option value="asha" selected>Asha</option><option value="bikash">Bikash</option></select></p>
+<p class="meta rep-picker"><label for="ds-call-lead">Lead: </label><select id="ds-call-lead" class="small-select"><option value="">No lead</option><option value="ramesh" selected>Ramesh Shrestha (Asha)</option><option value="thapa">Thapa Traders (Bikash)</option></select></p></div>
+<div class="call-source"><p>Transcribed by example · analysed by example</p></div></div></header>
+<dl class="stat-strip call-stats" aria-label="Example call summary">
+<div class="stat is-warn"><dt><span class="icon-tile tone-warn"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#gauge"/></svg></span><span>Scorecard</span></dt><dd><span class="num">72</span><small>/100</small></dd><dd class="stat-note">3 met · 1 partly · 1 missed</dd></div>
+<div class="stat"><dt><span class="icon-tile tone-violet"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#target"/></svg></span><span>To improve</span></dt><dd><span class="num">2</span><small>moments</small></dd><dd class="stat-note">3 questions · 1 objection</dd></div>
+<div class="stat is-bad"><dt><span class="icon-tile tone-bad"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#doc"/></svg></span><span>Claims</span></dt><dd><span class="num">1</span><small>contradicted</small></dd><dd class="stat-note">2 of 4 supported · 1 unverified</dd></div>
+<div class="stat is-warn"><dt><span class="icon-tile tone-warn"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#calendar"/></svg></span><span>Follow-ups</span></dt><dd><span class="num">2</span><small>need input</small></dd><dd class="stat-note">3 promises · 1 ready</dd></div></dl>
+<section class="player" aria-label="Example recording">
+<div class="lanes">
+<div class="lane-labels" role="group" aria-label="Talk time">
+<p class="lane-label role-rep"><span class="lane-name">Asha</span><span class="lane-meta">rep<span class="lane-secs"> · 36 s</span> · 52%</span></p>
+<p class="lane-label role-customer"><span class="lane-name">Ramesh</span><span class="lane-meta">customer<span class="lane-secs"> · 33 s</span> · 48%</span></p></div>
+<div class="track">
+<div class="callmap" aria-hidden="true">
+<span class="lane-rail" style="grid-row:1"></span>
+<span class="lane-rail" style="grid-row:2"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:0%;width:5.6%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:5.6%;width:3.2%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:8.8%;width:7.6%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:16.4%;width:4.4%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:20.8%;width:2.4%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:23.2%;width:10%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:33.2%;width:14.8%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:48%;width:4.4%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:52.4%;width:3.6%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:56%;width:12.4%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:68.4%;width:4.8%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:73.2%;width:8.8%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:82%;width:8.4%"></span>
+<span class="callmap-block role-customer" style="grid-row:2;left:90.4%;width:4%"></span>
+<span class="callmap-block role-rep" style="grid-row:1;left:94.4%;width:4.8%"></span></div>
+<span class="playhead" aria-hidden="true" style="left:0%"></span>
+<input class="seek" type="range" min="0" max="70" step="1" value="0" aria-label="Position in the example recording" aria-valuetext="00:00 of 01:10" title="Play from here"></div></div>
+<div class="transport">
+<button type="button" class="ink play-btn" aria-label="Play the example recording"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#play"/></svg></button>
+<span class="play-time">00:00 / 01:10</span>
+<span class="transport-end"><button type="button" class="small ghost speed-btn" title="Playback speed" aria-label="Playback speed 1×">1×</button></span></div></section></div></div>
 <div class="ds-pattern-panel ds-today-example">
 <div class="ds-pattern-header">
 <div>
@@ -367,7 +429,7 @@
 <div class="ds-section-head"><span class="ds-number">09</span>
 <div>
 <h2 id="motion-title">Felt, more than seen.</h2>
-<p>Fast feedback and a gentle settle. No bounce, no decorative loops, no movement that gets between someone and their work.</p></div></div>
+<p>Motion explains a change: where something went, what it became. Fast feedback and a spring that settles without bounce. No decorative loops, no movement that gets between someone and their work.</p></div></div>
 <div class="ds-split">
 <div class="ds-specimen ">
 <h3>An interaction, in three beats</h3>
@@ -378,7 +440,8 @@
 <div class="ds-timings">
 <div><strong>120 ms</strong><span>Press</span></div>
 <div><strong>180 ms</strong><span>Hover & focus</span></div>
-<div><strong>280 ms</strong><span>Reveal</span></div></div></div>
+<div><strong>280 ms</strong><span>Reveal</span></div>
+<div><strong>320 ms</strong><span>Glide · spring</span></div></div></div>
 <div class="ds-specimen ">
 <h3>Consideration is a feature.</h3><ul class="ds-principles"><li><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#keyboard"/></svg>
 <div><strong>Keyboard is a first-class input.</strong>
@@ -386,7 +449,30 @@
 <div><strong>Meaning goes beyond color.</strong>
 <p>Readable text, explicit status labels, and independent evidence and playback states.</p></div></li><li><svg class="solar-icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#user"/></svg>
 <div><strong>Comfort follows the person.</strong>
-<p>Reduced motion, responsive layouts, browser zoom, and readable text at every size.</p></div></li></ul></div></div></section>
+<p>Reduced motion, responsive layouts, browser zoom, and readable text at every size.</p></div></li></ul></div></div>
+<div class="ds-specimen ds-motion-patterns">
+<h3>Change, made legible</h3>
+<p class="muted small">The app's own helpers (<code>motion.js</code>). Each shows the end state at once; motion only carries the eye there. Turn off Preview animations to see the reduced-motion fades.</p>
+<div class="ds-motion-grid">
+<div class="ds-motion-stack">
+<div class="ds-motion-cell"><p class="label">Rolling number</p>
+<div class="score-big" aria-live="polite"><span id="ds-num">72</span><small>/100</small></div>
+<button class="small" id="ds-num-change">Change the score</button></div>
+<div class="ds-motion-cell"><p class="label">Symbol swap</p>
+<button class="small" id="ds-mic" aria-pressed="false"><svg class="solar-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#mic"/></svg>Mute</button></div>
+<div class="ds-motion-cell"><p class="label">Confirmation</p>
+<p class="form-status" id="ds-approve-status" role="status">Ready for approval.</p>
+<button class="small primary" id="ds-approve">Approve example</button></div></div>
+<div class="ds-motion-stack">
+<div class="ds-motion-cell"><p class="label">Arriving line</p>
+<ol class="sim-lines ds-lines" id="ds-lines" aria-label="Example conversation">
+<li class="sim-line role-rep is-mine"><div class="sim-line-meta"><span class="who">You</span></div><p class="text">What does your current setup cost you each month?</p></li></ol>
+<button class="small" id="ds-reply">Play a reply</button></div>
+<div class="ds-motion-cell"><p class="label">List reorder</p>
+<ul class="page-rows ds-flip" id="ds-flip">
+<li class="page-row" data-flip="bill"><div class="page-row-main"><span class="strong">Ask about the current bill</span><span class="muted small">Discovery · example</span></div><button class="small ghost" data-flip-toggle>Dismiss</button></li>
+<li class="page-row" data-flip="price"><div class="page-row-main"><span class="strong">Price came before the question</span><span class="muted small">Objection handling · example</span></div><button class="small ghost" data-flip-toggle>Dismiss</button></li>
+<li class="page-row" data-flip="visit"><div class="page-row-main"><span class="strong">Agree a day for the visit</span><span class="muted small">Next step · example</span></div><button class="small ghost" data-flip-toggle>Dismiss</button></li></ul></div></div></div></div></section>
 <footer class="ds-footer"><span>Sel design language</span><span>Made with care. Built for clarity.</span></footer></main></div><dialog id="preview-dialog" class="dialog ds-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
 <div class="row ds-dialog-head"><span class="pill pill-info">Design preview</span>
 <button class="ghost small" id="close-dialog" aria-label="Close preview"><svg class="solar-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/static/solar-icons.svg#x"/></svg></button></div>

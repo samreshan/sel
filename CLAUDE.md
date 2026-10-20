@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 237 tests; the 9 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 239 tests; the 10 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
@@ -124,6 +124,7 @@ and ffmpeg. A self-signed certificate for LAN testing:
 | `sel/web/sim.js` | Simulator UI ("Practice"), lazy-loaded on first `#sim` |
 | `sel/web/coach.js` | Today (`#today`, the home page), Playbook (`#playbook/<pack>`), People (`#people`); lazy-loaded |
 | `sel/web/pcm-worklet.js` | Audio worklet: microphone → 16 kHz PCM chunks |
+| `sel/web/motion.js` | `window.SelMotion` (also `Sel.motion`): rail thumbs, screen transitions, rolling numbers, icon swap and drawn checks, arriving lines, list FLIP; reads reduced motion live (DESIGN.md "Effects and animation") |
 | `tests/` | stdlib unittest; `test_e2e_browser.py` drives Chromium |
 | `scripts/perf_ui.py`, `scripts/simulate_call.py` | Reproduce the measurements below |
 
@@ -746,7 +747,8 @@ from the click to the frame after the change is on screen.
 Server (`sel/server.py`, `sel/service.py`):
 - HTTP/1.1 keep-alive. A request whose body wasn't read gets
   `Connection: close`, otherwise its body bytes would be parsed as the next
-  request (tested).
+  request (tested). The server then closes in stages (`_linger`; see the
+  last trap below).
 - Static files from memory with gzip precomputed. `index.html` pins each
   `/static/x` to `x?v=<content hash>`, served `immutable`; unhashed URLs get
   `no-cache` + ETag.
@@ -809,6 +811,28 @@ Browser (`sel/web/app.js`):
   wasted request on every load); only reconnects resync now.
 - The simulator lobby rendered before packs arrived and kept an empty pack
   picker; a `packs` event refills it.
+- **Closing at once on a refused request resets the client (Windows).** A
+  request refused before its body is read (an unknown route, a handler that
+  checks first) gets `Connection: close`, but the body can still be on its
+  way: `http.client`, so `urllib`, writes the headers and the body in two
+  sends. A body that reaches the socket after the server closed it is
+  answered with a TCP reset, and Windows throws away the response the client
+  already holds: its read fails with `ConnectionAbortedError: [WinError
+  10053]`. That was `test_moment_actions_over_the_api` (POST of `{}` to a route
+  that doesn't exist) failing 15 runs of 60, and once in a full-suite run.
+  Against the server alone, 8 to 10 % of `urllib` and `http.client` POSTs to an
+  unrouted path failed, 300 of 300 when the body followed the headers by 20 ms,
+  0 of 300 when both left in one segment (the body is then in `rfile`'s buffer
+  already). Fix: `_linger`, called from `Handler.finish` when a connection
+  closes with an unread body, half-closes and reads until the client closes
+  (RFC 9112 section 9.6), at most `LINGER_S` = 2 s; a client that has its
+  answer closes within milliseconds. Now 0 of 300 in every case and the test
+  passes 60 of 60. Reading the body before replying would not do: the
+  keep-alive test expects `Connection: close` for an unread body, and the body
+  may not have arrived yet. A body still arriving after 2 s (a big upload
+  refused at the start) still ends in a reset. With `_linger` turned off,
+  `test_a_late_body_does_not_reset_a_refused_request` (`tests/test_server_perf.py`)
+  fails with the same WinError 10053.
 
 ## Other bugs found and fixed
 

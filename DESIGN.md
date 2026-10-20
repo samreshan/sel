@@ -300,6 +300,7 @@ The existing `icon(name, size)` helper renders the shared sprite for review and
 simulator controls. Shell controls reference the same symbols. Icons inherit
 text color and remain decorative inside controls with accessible names.
 The muted microphone is adapted from Solar's microphone with a diagonal strike.
+The call player's pause symbol is drawn in the same Bold style as play.
 Sel's waveform brand mark remains its own identity asset.
 Standalone section icon containers are 32 px. Review heading icons use a
 20 px unboxed area so they stay subordinate to the card title.
@@ -310,14 +311,53 @@ contains visible author/license credit. No runtime CDN or framework is needed.
 
 ## Effects and animation
 
-- Press: 120 ms. Hover, focus, and state transitions: 180 ms. Reveals: 280 ms.
-- Easing: `--ease`, cubic-bezier(.22, 1, .36, 1). No spring overshoot.
-- Transitions communicate hover/focus/selection; no bouncing or decorative
-  page entrances.
+Motion explains a change (where something went, what it became); it never
+delays one. Every pattern puts the end state in the DOM at once and animation
+only carries the eye there. Helpers live in `sel/web/motion.js`
+(`window.SelMotion`, also `Sel.motion`); the plan and its reasoning are in
+`docs/motion-plan.md`.
+
+- Press: 120 ms (`--motion-fast`). Hover, focus, and state transitions: 180 ms
+  (`--motion`). Reveals: 280 ms (`--motion-slow`). Movement to a new place:
+  320 ms (`--motion-glide`). Ongoing activity: `--motion-loop`; spinners:
+  `--motion-spin`.
+- Easing: `--ease` for fades and colour; `--ease-spring` (a critically damped
+  spring sampled with `linear()`, no overshoot) for anything that moves.
+  Browsers without `linear()` fall back to `--ease`.
+- Patterns, all in the shared stylesheet:
+  - **Rails**: tabs, segmented controls, the Playground sections and the
+    sidebar keep one `.rail-thumb` that slides to the selection
+    (`SelMotion.glide(rail)` after rendering or changing it).
+  - **Screens**: same-document view transitions on the main pane only. Deeper
+    (a list → an item) slides in from the trailing edge, back up from the
+    leading edge, another section cross-fades with a 6 px rise, and the same
+    page with other content (one call to the next) just changes. A page that is
+    not painting skips the animation after 250 ms.
+  - **Dialogs** lift in (`@starting-style`) and settle back on close; a dialog
+    redrawn while open carries `.is-settled` so it does not enter again.
+    Menus open from their control and a copy fades out on dismiss.
+  - **Numbers** that change on screen roll by digit (`SelMotion.number`): live
+    and review scores, tab counts, Today's counts.
+  - **Symbols**: a changed icon swaps in (`.is-swapping`, the mute button); a
+    confirmation check draws once (`SelMotion.check(true)`: approved drafts and
+    team answers, endorsed lines, finished review steps).
+  - **Conversation**: a live line rises in from its speaker's side
+    (`.is-arriving`, at most three at a time); the AI customer shows three
+    dots while it owes a reply. The dots are not a `.sim-line`.
+  - **Lists**: cards and rows that re-sort or leave slide or fade from where
+    they stood (`SelMotion.flip`): dismiss and restore, an approved team answer
+    moving out of the review queue, a handled escalation.
+- No bounce, no decorative loops, no scroll-linked effects, no staggered page
+  entrances.
+- Reduced motion swaps movement for a short fade; it never removes feedback.
+  Colour and opacity transitions stay at the press speed, transforms and loops
+  go, and entrances that only fade opt back in. The design-system preview
+  toggle sets `data-motion="reduce"` on `<html>`, which the helpers also read.
 - Preserve existing real recording/loading feedback. A selected workflow step
   does not need a continuously pulsing effect.
-- Respect the existing reduced-motion override for all transitions/animations.
-- Preserve live meter transforms and transcript performance optimizations.
+- Never animate the review transcript in bulk; only rows that arrive live may
+  animate. Preserve live meter transforms and transcript performance
+  optimizations.
 - Upload, review and simulator workspaces share the quiet grey canvas.
   White cards and inset surfaces establish hierarchy without a decorative dot grid.
 - Evidence and current-playback styling remain distinct and visible together.
@@ -443,8 +483,9 @@ Every page now follows the Today dashboard's language.
 - Header actions sit level with the title (`.page-head` aligns to the top).
   A page's header has at most one primary action. Team's **Manage people** is
   secondary.
-- The call page puts the pack in the meta line. **Whose call** and **Lead** sit
-  on one `.call-assign` row, and Prep is a small button.
+- The call page puts the pack in the header's eyebrow. **Whose call** and
+  **Lead** sit on one `.call-assign` row in the header's footer, and Prep is a
+  small button (see "The call page" below).
 - A card body that opens with text or controls gets the same top inset as one
   that opens with rows. Group titles inside a card body have 16 px above them.
 - People: **The team** is the anchor and **Add a person** supports it.
@@ -456,3 +497,69 @@ Every page now follows the Today dashboard's language.
   Command names are set in `code`.
 - Customer promise days display as "8 Oct 2026" (`Sel.formatDay`, string
   formatting only). The computed date itself is unchanged.
+
+## The call page · 20 October 2026
+
+A call is the main working page, so it reads like Today and puts the answer
+to "what needs me?" first. Each part maps to one question a reviewer asks:
+
+| Question | Part | Weight |
+| --- | --- | --- |
+| Which call is this? | Trail and date, eyebrow, customer name, the two people | High |
+| How did it go? | Scorecard, first in the summary strip | High |
+| What needs me? | Header sentence and its one primary action | High |
+| What can improve? | To improve, then the Coaching tab | Medium |
+| Can I hear it? | Recording card: speaker lanes, play, transcript | Medium |
+| Whose is it? | Whose call, Lead, Prep in the header's footer | Low |
+| Where did this come from? | Transcribed and analysed by, Example data | Low, always shown |
+
+- **Toolbar** (`.call-toolbar`): `.crumbs` (Calls / customer) on the left,
+  the call's start time with a calendar icon on the right, as on Today.
+- **Header** (`.call-hero`, also `.call-head`): Today's hero layout
+  (`.today-hero` type and spacing, without the landscape) inside one
+  featured card. The eyebrow is the pack and "Call review", with an
+  `Example data`, `Simulated` or `Practice` pill. The title is the customer. The lede says who spoke with
+  whom and for how long, then what needs a person first, in this order:
+  contradicted claims, follow-up drafts that need input, drafts ready for
+  approval, moments to improve. The one primary action opens that tab
+  (Check claims, Fill in follow-ups, Review follow-ups, See where to
+  improve, Open the scorecard), scrolls the review into view on narrow
+  screens, and moves focus to the tab. The footer (`.call-hero-foot`, quiet
+  inset surface) holds the `.call-assign` pickers, Prep (or Manage leads
+  when the call has no lead), the provenance caption, and the simulator or
+  Sel's-rules banner with its actions.
+- **The people on the call** (`.call-cast`) stand where Today has its
+  landscape: the rep and the customer as Today's portraits (`.avatar-call`
+  drawings) on 136 px discs, the rep's neutral, the customer's sage, with
+  name and role under each and a dashed line with the phone icon between
+  them. The drawings face right, so the customer's disc is mirrored to face
+  the rep (the disc turns, not the drawing, so multiply still blends onto
+  it). The rep has their team portrait once **Whose call** is set; until
+  then, and for the customer, the portrait is picked from the call's own
+  ids (the lead's id when the call has a lead, so a lead's calls match).
+  Never from a name, so a portrait need not look like the name. The two
+  never share a drawing. Below about 1180 px the people stand above the
+  words at 104 px, and at 88 px on a phone.
+- **Summary strip** (`.stat-strip.call-stats`): Today's strip, passive.
+  Scorecard (score /100; met, partly, missed), To improve (moments; questions
+  and objections heard), Claims (contradicted, else unverified, else
+  supported), Follow-ups (need input, else ready, else approved). Each cell
+  is a number, its unit and one line of detail. A low score or a
+  contradiction colours the number rose, missing input honey; the words
+  always say it too. Two by two below 1100 px.
+- **Recording** (`.player`): a lane per speaker (`.lane-labels`: name in the
+  transcript's speaker colour, role, seconds, share; talk time lives here
+  now). Each line is a block at its real start and length on a quiet rail,
+  so pauses show. The lanes are the seek bar: a transparent range input lies
+  over them (click or drag to play from there, arrow keys step a second),
+  with a visible focus ring on the track and a charcoal playhead. Below:
+  a round charcoal play/pause, the time, playback speed (1×, 1.25×, 1.5×,
+  2×) and Download. "Evidence for the selected card" appears with a
+  highlight. Evidence and the playing block keep their own treatments.
+- **Review column**: "Review" and Keys, then the tabs, which stay at the top
+  of the column while it scrolls (a canvas ring hides cards passing under
+  them). Scorecard rows put the play button beside the detail. On desktop
+  the column reserves room under the progress dock.
+- The progress dock, transcript, tabs, cards and keyboard shortcuts are
+  unchanged.
+- The design-system reference shows this page under `#patterns` (Call page).

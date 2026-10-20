@@ -7,6 +7,18 @@
       "runtimeArgs": ["-m", "sel", "serve", "--port", "8799", "--calls-dir", "C:/Users/amuly/AppData/Local/Temp/claude/D--Projects-Sel/d07ec0cb-ba99-49a3-ace7-68bc8a776c3d/scratchpad/calls"],
       "port": 8799,
       "env": { "SEL_CHAT_LLM_MODEL": "qwen2.5:1.5b" }
+    },
+    {
+      "name": "sel-motion",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "sel", "serve", "--port", "8811", "--calls-dir", "C:/Users/amuly/AppData/Local/Temp/claude/D--Projects-Sel/b25df67b-94ab-4165-8629-bdac9b688ac4/scratchpad/calls"],
+      "port": 8811
+    },
+    {
+      "name": "sel-review",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "sel", "serve", "--port", "8823", "--calls-dir", "C:/Users/amuly/AppData/Local/Temp/claude/D--Projects-Sel/cc650f7e-e814-4050-bec0-edceaa29ecc3/scratchpad/calls"],
+      "port": 8823
     }
   ]
 }

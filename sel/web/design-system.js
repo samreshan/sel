@@ -105,7 +105,10 @@
   function syncMotion() {
     const disabled = reducedMotion.matches || !$('#motion-toggle').checked;
     document.body.classList.toggle('no-motion', disabled);
-    $('#motion-status').textContent = disabled ? 'Reduced motion · instant feedback' : '280 ms · gentle settle';
+    // motion.js reads this too, so the preview toggle reaches the shared helpers.
+    if (disabled) document.documentElement.dataset.motion = 'reduce';
+    else delete document.documentElement.dataset.motion;
+    $('#motion-status').textContent = disabled ? 'Reduced motion · short fades only' : '280 ms · spring settle';
   }
   $('#motion-toggle').addEventListener('change', syncMotion);
   reducedMotion.addEventListener('change', syncMotion);
@@ -140,6 +143,7 @@
     tabs.forEach((t) => { const active = t === tab; t.classList.toggle('is-selected', active); t.setAttribute('aria-selected', String(active)); t.tabIndex = active ? 0 : -1; });
     $('#pattern-panel').innerHTML = patterns[tab.dataset.pattern];
     $('#pattern-panel').setAttribute('aria-labelledby', tab.id);
+    if (window.SelMotion) window.SelMotion.glide(tab.parentElement);
   }
   tabs.forEach((tab, i) => {
     tab.addEventListener('click', () => selectPattern(tab));
@@ -154,7 +158,168 @@
     });
   });
   selectPattern(tabs[0]);
-  const navLinks = [...document.querySelectorAll('.ds-sidebar nav a')];
+
+  // Motion patterns, drawn with the app's helpers (motion.js). Constant example text only.
+  const M = window.SelMotion;
+  if (M) {
+    document.querySelectorAll('.ds-page .segmented').forEach((rail) => M.glide(rail));
+    document.querySelectorAll('.ds-page .scope-toggle').forEach((rail) => {
+      const buttons = [...rail.querySelectorAll('.scope-btn')];
+      buttons.forEach((b) => b.addEventListener('click', () => {
+        buttons.forEach((x) => { x.classList.toggle('is-on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+        M.glide(rail);
+      }));
+      M.glide(rail);
+    });
+
+    let score = 72;
+    $('#ds-num-change').addEventListener('click', () => {
+      score = score >= 90 ? 64 : score + 9;
+      const node = M.number(String(score), 'ds:score');
+      node.id = 'ds-num';
+      $('#ds-num').replaceWith(node);
+    });
+    M.remember('ds:score', '72');
+
+    $('#ds-mic').addEventListener('click', (event) => {
+      const button = event.currentTarget;
+      const muted = button.getAttribute('aria-pressed') !== 'true';
+      button.setAttribute('aria-pressed', String(muted));
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      for (const [k, v] of [['class', 'solar-icon'], ['width', '16'], ['height', '16'], ['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false']]) svg.setAttribute(k, v);
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      use.setAttribute('href', `/static/solar-icons.svg#${muted ? 'micoff' : 'mic'}`);
+      svg.append(use);
+      button.replaceChildren(M.swap(svg, 'ds:mic', muted), muted ? 'Unmute' : 'Mute');
+    });
+    M.remember('ds:mic', false);
+
+    let approved = false;
+    $('#ds-approve').addEventListener('click', (event) => {
+      approved = !approved;
+      event.currentTarget.textContent = approved ? 'Reset example' : 'Approve example';
+      const status = $('#ds-approve-status');
+      status.className = `form-status${approved ? ' is-ok' : ''}`;
+      status.replaceChildren(...(approved ? [M.check(true, 14), 'Approved. Sel does not send it; you do.'] : ['Ready for approval.']));
+    });
+
+    const lines = $('#ds-lines');
+    const said = ['Around eight thousand, more in winter.', 'Mostly the water heater, I think.', 'Can you show me what that would save?'];
+    let next = 0;
+    $('#ds-reply').addEventListener('click', (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      const typing = M.arrive(Object.assign(document.createElement('li'), { className: 'sim-typing' }));
+      typing.setAttribute('aria-hidden', 'true');
+      typing.append(M.typing());
+      lines.append(typing);
+      lines.scrollTo({ top: lines.scrollHeight, behavior: M.ok() ? 'smooth' : 'auto' });
+      setTimeout(() => {
+        typing.remove();
+        const row = document.createElement('li');
+        row.className = 'sim-line role-customer';
+        const meta = document.createElement('div');
+        meta.className = 'sim-line-meta';
+        meta.append(Object.assign(document.createElement('span'), { className: 'who', textContent: 'Customer' }));
+        row.append(meta, Object.assign(document.createElement('p'), { className: 'text', textContent: said[next % said.length] }));
+        next += 1;
+        lines.append(M.arrive(row));
+        lines.scrollTo({ top: lines.scrollHeight, behavior: M.ok() ? 'smooth' : 'auto' });
+        button.disabled = false;
+      }, M.ok() ? 900 : 0);
+    });
+
+    const flipList = $('#ds-flip');
+    flipList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-flip-toggle]');
+      if (!button) return;
+      const row = button.closest('.page-row');
+      const moves = M.flip(flipList);
+      const dismissed = !row.classList.contains('is-dismissed');
+      row.classList.toggle('is-dismissed', dismissed);
+      button.textContent = dismissed ? 'Restore' : 'Dismiss';
+      // Dismissed rows sink to the end, as review cards do.
+      const rows = [...flipList.children];
+      rows.filter((r) => !r.classList.contains('is-dismissed')).concat(rows.filter((r) => r.classList.contains('is-dismissed'))).forEach((r) => flipList.append(r));
+      moves.play();
+      button.focus();
+    });
+  }
+
+  // Call page recording: a local clock moves the playhead over the example lanes.
+  // No audio, no call data, nothing stored.
+  const recording = document.querySelector('.ds-call-example .player');
+  if (recording) {
+    const RATES = [1, 1.25, 1.5, 2];
+    const play = recording.querySelector('.play-btn');
+    const clock = recording.querySelector('.play-time');
+    const speed = recording.querySelector('.speed-btn');
+    const head = recording.querySelector('.playhead');
+    const seek = recording.querySelector('.seek');
+    const END = Number(seek.max); // the clip's length in seconds, as the markup sets it
+    // Each block's span in seconds, read back from the percentages that place it.
+    const blocks = [...recording.querySelectorAll('.callmap-block')].map((node) => {
+      const start = (parseFloat(node.style.left) / 100) * END;
+      return { node, start, end: start + (parseFloat(node.style.width) / 100) * END };
+    });
+    const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    const symbol = (name) => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      for (const [k, v] of [['class', 'solar-icon'], ['width', '16'], ['height', '16'], ['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false']]) svg.setAttribute(k, v);
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      use.setAttribute('href', `/static/solar-icons.svg#${name}`);
+      svg.append(use);
+      return svg;
+    };
+    let t = 0;
+    let rate = 1;
+    let timer = null;
+    let current = null;
+    const sync = () => {
+      head.style.left = `${(t / END) * 100}%`;
+      seek.value = String(t);
+      seek.setAttribute('aria-valuetext', `${mmss(t)} of ${mmss(END)}`);
+      clock.textContent = `${mmss(t)} / ${mmss(END)}`;
+      // The playing block keeps its ring while paused, as in the product; nothing is marked before the first play.
+      const now = t > 0 ? blocks.find((b) => t >= b.start && t < b.end) : null;
+      const node = now ? now.node : null;
+      if (node === current) return;
+      if (current) current.classList.remove('is-current');
+      if (node) node.classList.add('is-current');
+      current = node;
+    };
+    const paint = (on) => {
+      const icon = symbol(on ? 'pause' : 'play');
+      play.replaceChildren(M ? M.swap(icon, 'ds:play', on) : icon);
+      play.setAttribute('aria-label', on ? 'Pause the example recording' : 'Play the example recording');
+    };
+    const stop = () => {
+      clearInterval(timer);
+      timer = null;
+      paint(false);
+    };
+    const start = () => {
+      if (t >= END) t = 0;
+      paint(true);
+      // Four ticks a second, like the audio element's timeupdate.
+      timer = setInterval(() => {
+        t = Math.min(END, t + 0.25 * rate);
+        sync();
+        if (t >= END) stop();
+      }, 250);
+      sync();
+    };
+    play.addEventListener('click', () => (timer ? stop() : start()));
+    seek.addEventListener('input', () => { t = Number(seek.value); sync(); });
+    speed.addEventListener('click', () => {
+      rate = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+      speed.textContent = `${rate}×`;
+      speed.setAttribute('aria-label', `Playback speed ${rate}×`);
+    });
+    if (M) M.remember('ds:play', false);
+  }
+
+  const navLinks =[...document.querySelectorAll('.ds-sidebar nav a')];
   const observer = new IntersectionObserver((entries) => {
     const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
     if (!visible.length) return;

@@ -29,11 +29,12 @@ sys.path.insert(0, str(ROOT))
 READY = "document.querySelectorAll('.transcript .seg').length === {n} && document.querySelector('.panel .card')"
 LONGTASKS = ("window.__lt=[];try{new PerformanceObserver(l=>{for(const e of l.getEntries())window.__lt.push(e.duration)})"
              ".observe({type:'longtask',buffered:true})}catch(e){}")
-# Click, then wait frame by frame until the condition holds; ms until the frame after it does.
+# Click (or go to a hash route), then wait frame by frame until the condition holds; ms until the frame after it does.
 TIMED = """(async ([target, cond]) => {
   const t = performance.now();
   if (target === '__escape') document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
   else if (target.startsWith('__row:')) document.querySelectorAll('.transcript .seg')[Number(target.slice(6))].querySelector('.edit-btn').click();
+  else if (target.startsWith('__hash:')) location.hash = target.slice(7);
   else document.querySelector(target).click();
   for (;;) {
     await new Promise(r => requestAnimationFrame(r));
@@ -142,8 +143,8 @@ def measure(base: str, call: str, n: int, short: str, n_short: int) -> dict:
             page.evaluate(f"document.querySelectorAll('.transcript .seg')[{row}].scrollIntoView()")
             timed["edit_open"].append(t(f"__row:{row}", "document.querySelector('.edit-text')"))
             timed["edit_close"].append(t("__escape", "!document.querySelector('.edit-text')"))
-            timed["switch_short"].append(t(f'a[href="#call/{short}"]', f"document.querySelectorAll('.transcript .seg').length === {n_short}"))
-            timed["switch_long"].append(t(f'a[href="#call/{call}"]', ready))
+            timed["switch_short"].append(t(f"__hash:#call/{short}", f"document.querySelectorAll('.transcript .seg').length === {n_short}"))
+            timed["switch_long"].append(t(f"__hash:#call/{call}", ready))
         out["interaction_ms"] = {k: round(statistics.median(v), 1) for k, v in timed.items()}
 
         cdp = ctx.new_cdp_session(page)

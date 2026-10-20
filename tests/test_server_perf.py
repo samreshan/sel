@@ -5,12 +5,15 @@ import http.client
 import json
 import re
 import shutil
+import socket
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from sel import server as sel_server
 from sel.adapters import FixtureAnalyzer, FixtureTranscriber
 from sel.server import serve
 from sel.service import CallService
@@ -106,6 +109,48 @@ class ServerPerfTests(unittest.TestCase):
         self.assertEqual((r.status, r.getheader("Connection")), (400, "close"))
         r, _ = self.get("/api/packs")
         self.assertEqual(r.status, 200)
+
+    def late_body(self, method, path, conn=None):
+        """Send the headers, wait until the server has answered, then send a body it never asked to read."""
+        c = conn or self.conn()
+        c.putrequest(method, path)
+        c.putheader("Content-Length", "2")
+        c.endheaders()
+        time.sleep(0.05)
+        c.send(b"{}")
+        r = c.getresponse()
+        r.read()
+        return r
+
+    def test_a_late_body_does_not_reset_a_refused_request(self):
+        # http.client sends the headers and the body in two writes. A server that refuses before reading the
+        # body and then closes at once answers the late body with a TCP reset, and on Windows the reset throws
+        # away the answer the client already holds: its read fails with WinError 10053.
+        for _ in range(10):
+            r = self.late_body("POST", "/api/no-such-route")
+            self.assertEqual((r.status, r.getheader("Connection")), (404, "close"))
+        # Same for a method the server has no handler for, on a connection that already carried a
+        # request whose body was read.
+        c = self.conn()
+        c.request("POST", "/api/people", body=b"{}")
+        c.getresponse().read()
+        self.assertEqual(self.late_body("PATCH", "/api/people", c).status, 501)
+
+    def test_linger_waits_for_the_client_to_close_but_not_forever(self):
+        with mock.patch.object(sel_server, "LINGER_S", 0.3):
+            a, b = socket.socketpair()
+            with a, b:
+                b.sendall(b"{}")
+                b.close()
+                started = time.monotonic()
+                sel_server._linger(a)  # reads the stray bytes, sees the client close, returns
+                self.assertLess(time.monotonic() - started, 0.2)
+            a, b = socket.socketpair()
+            with a, b:
+                started = time.monotonic()
+                sel_server._linger(a)  # a client that stays silent is given up on
+                self.assertGreaterEqual(time.monotonic() - started, 0.2)
+                self.assertEqual(b.recv(10), b"")  # ...after being told the server is done sending
 
     def test_upload_streams_to_disk(self):
         payload = bytes(range(256)) * 12000  # 3 MB

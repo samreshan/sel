@@ -8,7 +8,9 @@ Performance notes (measured numbers are in CLAUDE.md):
 
 * HTTP/1.1 keep-alive, so a page load reuses a few connections. A request
   whose body was not read gets ``Connection: close``, so stray bytes can
-  never be parsed as the next request.
+  never be parsed as the next request. That close is made in stages
+  (``_linger``): closing at once resets the connection if the client's body
+  arrives late, and Windows then throws away the answer the client has.
 * Static files are served from memory with their gzip version precomputed.
   ``index.html`` refers to them by content hash (``app.js?v=…``) and those
   URLs are cacheable forever, so a reload fetches only ``index.html`` (a 304).
@@ -28,6 +30,7 @@ import json
 import mimetypes
 import queue
 import re
+import socket
 import ssl
 import threading
 import time
@@ -50,6 +53,7 @@ COMPRESSIBLE = ("text/", "application/javascript", "application/json", "image/sv
 SSE_PING_S = 15.0
 HEALTH_TTL_S = 30.0
 DOCTOR_TTL_S = 30.0
+LINGER_S = 2.0  # how long to read on after answering a request whose body was not read
 
 
 class ApiError(Exception):
@@ -112,6 +116,29 @@ def _entry(body: bytes, ctype: str) -> dict[str, Any]:
             "hash": digest[:12], "etag": f'"{digest[:20]}"'}
 
 
+def _linger(sock: socket.socket) -> None:
+    """Close in stages (RFC 9112 section 9.6): stop sending, then read until the client closes.
+
+    A request refused before its body was read leaves the client still sending it, often a moment after
+    the answer left (``http.client`` writes the headers and the body separately). Closing at once makes the
+    server's TCP stack answer those bytes with a reset, and on Windows the reset wipes the answer the
+    client has already received but not yet read: its read fails with WinError 10053. A client that has
+    its answer closes at once, so this takes milliseconds; ``LINGER_S`` bounds it for one that does not.
+    """
+    try:
+        sock.shutdown(socket.SHUT_WR)
+    except OSError:
+        return
+    deadline = time.monotonic() + LINGER_S
+    try:
+        while (left := deadline - time.monotonic()) > 0:
+            sock.settimeout(left)
+            if not sock.recv(65536):
+                return  # the client closed its end: nothing more can arrive
+    except OSError:
+        pass  # timed out, or the client reset the connection: nothing left to protect
+
+
 def make_handler(service: CallService, health=None, quiet: bool = False, hub: SimulatorHub | None = None,
                  doctor=None):
     hub = hub or SimulatorHub(service)
@@ -134,6 +161,18 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
         def log_message(self, fmt: str, *args: Any) -> None:
             if not quiet and not any(p in self.path for p in ("/audio", "/api/events", "/signal")):
                 super().log_message(fmt, *args)
+
+        def parse_request(self) -> bool:
+            # Start every request clean, so finish() judges this one even when it is refused before
+            # dispatch (send_error) and never the previous request's headers.
+            self._body_read = False
+            self.headers = None
+            return super().parse_request()
+
+        def finish(self) -> None:
+            super().finish()
+            if self.close_connection and self._unread():
+                _linger(self.connection)
 
         # -- plumbing -------------------------------------------------------
 
@@ -234,7 +273,6 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
             return self.headers.get("X-Sel-Tab") or None
 
         def _dispatch(self) -> None:
-            self._body_read = False
             url = urllib.parse.urlsplit(self.path)
             query = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query).items()}
             path = url.path

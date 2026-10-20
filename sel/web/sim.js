@@ -16,6 +16,7 @@
 
   const S = window.Sel;
   const { el, icon, pill, muted, compact, plural, mmss, quoted, api, upload, navigate } = S;
+  const M = S.motion;
   const enc = encodeURIComponent;
 
   const KEY = "sel.sim";
@@ -224,6 +225,7 @@
       roleCust,
       el("label", { for: "sim-role-cust", text: "Customer" })
     );
+    M.glide(roles);
     const error = el("p", { class: "form-error", role: "alert", hidden: !sim.error, text: sim.error || "" });
     const caps = el("div", { class: "sim-caps" });
     const rooms = el("ul", { class: "sim-rooms", "aria-live": "polite" });
@@ -410,8 +412,8 @@
     sim.refs = null;
     sim.lobby = null;
     const p = profile();
-    const name = el("input", { id: "sim-jname", type: "text", value: p.name || "", autocomplete: "name" });
-    const email = el("input", { id: "sim-jemail", type: "email", value: p.email || "", autocomplete: "email" });
+    const name = el("input", { id: "sim-jname", type: "text", value: p.name || "", autocomplete: "name", placeholder: "How the other side sees you" });
+    const email = el("input", { id: "sim-jemail", type: "email", value: p.email || "", autocomplete: "email", placeholder: "name@example.com" });
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
     const form = el(
       "form",
@@ -691,7 +693,7 @@
           el(
             "button",
             { type: "button", class: "small", "aria-pressed": sim.mic === "muted" ? "true" : "false", on: { click: toggleMute } },
-            icon(sim.mic === "muted" ? "micoff" : "mic", 16),
+            M.swap(icon(sim.mic === "muted" ? "micoff" : "mic", 16), "sim:mic", sim.mic),
             sim.mic === "muted" ? "Unmute" : "Mute"
           )
         );
@@ -787,8 +789,10 @@
       list.replaceChildren(frag);
     } else {
       const pending = sim.pendingLines.map((line) => ({ line, i: sim.lines.indexOf(line) })).sort((a, b) => b.i - a.i);
+      // A line or two as they are said rise in; a batch (a resumed call) just appears.
+      const arriving = pending.length <= 3;
       for (const { line, i } of pending) {
-        const row = lineRow(line);
+        const row = arriving ? M.arrive(lineRow(line)) : lineRow(line);
         const next = sim.lines[i + 1];
         list.insertBefore(row, next ? r.lineRows.get(next.id) || null : null);
         r.lineRows.set(line.id, row);
@@ -817,6 +821,19 @@
     const overall = shown.overall;
     const talk = shown.talk || {};
     const share = talk.rep_share;
+    // The score is redrawn per line; bars and the gauge move from what was on screen.
+    const room = (sim.room && sim.room.code) || "";
+    const tweens = [];
+    const bar = (c) => {
+      const pct = c.points === null ? 0 : Math.round(c.points * 100);
+      const node = el("i", { style: `width:${pct}%` });
+      const prev = M.remember(`sim:${room}:bar:${c.id || c.title}`, pct);
+      if (prev !== undefined && prev !== pct) tweens.push(() => M.from(node, { width: `${prev}%` }));
+      return node;
+    };
+    const dial = gauge(overall, `sim:${room}:score`);
+    const was = M.remember(`sim:${room}:gauge`, overall);
+    if (Number.isFinite(was) && Number.isFinite(overall) && was !== overall) tweens.push(() => M.from(dial, { "--pct": was }));
     r.score.replaceChildren(
       el(
         "div",
@@ -827,7 +844,7 @@
           el("h2", { id: "sim-score-title", class: "section-title", text: final ? "Score at hang-up" : "Live score" }),
           el("p", { class: "card-sub", text: "Rules over the transcript, graded against the pack's scorecard. The full review follows the call." })
         ),
-        gauge(overall)
+        dial
       ),
       el(
         "ul",
@@ -839,7 +856,7 @@
             { class: `score-row status-${c.status}` },
             el("div", { class: "score-row-head" }, el("span", { class: "score-title", text: c.title }), pill(s.cls, s.label)),
             c.detail ? el("p", { class: "score-detail", text: c.detail }) : null,
-            el("span", { class: "score-bar", "aria-hidden": "true" }, el("i", { style: `width:${c.points === null ? 0 : Math.round(c.points * 100)}%` }))
+            el("span", { class: "score-bar", "aria-hidden": "true" }, bar(c))
           );
         })
       ),
@@ -857,6 +874,7 @@
           )
         : null
     );
+    for (const play of tweens) play();
 
     const actions = (snap && snap.actions) || [];
     r.actions.hidden = !!final;
@@ -914,13 +932,14 @@
     );
   }
 
-  function gauge(value) {
+  // `key`: the number rolls from the last value shown under it.
+  function gauge(value, key) {
     const pct = value === null || value === undefined ? 0 : value;
     const tone = value === null || value === undefined ? "neutral" : pct >= 75 ? "ok" : pct >= 50 ? "warn" : "bad";
     return el(
       "div",
       { class: `gauge tone-${tone}`, style: `--pct:${pct}`, role: "img", "aria-label": value === null || value === undefined ? "No score yet" : `Score ${pct} out of 100` },
-      el("span", { class: "gauge-num", text: value === null || value === undefined ? "–" : String(pct) }),
+      el("span", { class: "gauge-num" }, M.number(value === null || value === undefined ? "–" : String(pct), key)),
       el("small", { text: "/100" })
     );
   }

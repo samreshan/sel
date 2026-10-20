@@ -233,8 +233,27 @@
     });
   }
 
+  // The menu closes at once; a copy of it fades out where it was.
+  function fadeOut() {
+    const motion = window.SelMotion;
+    if (menu.hidden || !menu.parentNode || !motion || !motion.ok()) return;
+    const ghost = menu.cloneNode(true);
+    ghost.removeAttribute("id");
+    ghost.removeAttribute("role");
+    for (const n of ghost.querySelectorAll("[id]")) n.removeAttribute("id");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.inert = true;
+    ghost.classList.add("is-leaving");
+    menu.parentNode.append(ghost);
+    ghost.scrollTop = menu.scrollTop;
+    const drop = () => ghost.remove();
+    ghost.addEventListener("animationend", drop, { once: true });
+    setTimeout(drop, 400);
+  }
+
   function close() {
     optionObserver.disconnect();
+    fadeOut();
     if (openSelect) {
       openSelect.classList.remove("is-open");
       openSelect.setAttribute("aria-expanded", "false");

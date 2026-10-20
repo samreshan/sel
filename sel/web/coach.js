@@ -17,6 +17,7 @@
 
   const S = window.Sel;
   const { el, icon, iconTile, pill, muted, compact, plural, api, navigate, formatStarted, stageText, DRAFT_STATUS, SCORE_STATUS } = S;
+  const M = S.motion;
   const enc = encodeURIComponent;
   const ROLE = { rep: "Rep", manager: "Manager" };
 
@@ -222,7 +223,8 @@
 
   // A passive summary: numbers, not buttons.
   function counts(t) {
-    const stat = (label, n, name, tone) => el("div", { class: `stat${tone === "warn" && n > 0 ? " is-warn" : ""}` }, el("dt", {}, iconTile(tone, name), el("span", { text: label })), el("dd", { text: String(n) }));
+    // A count that changed since this person last saw Today rolls to its new value.
+    const stat = (label, n, name, tone) => el("div", { class: `stat${tone === "warn" && n > 0 ? " is-warn" : ""}` }, el("dt", {}, iconTile(tone, name), el("span", { text: label })), el("dd", {}, M.number(String(n), `today:${page.todayFor || ""}:${name}`)));
     return el(
       "dl",
       { class: "stat-strip", "aria-label": "Summary" },
@@ -450,7 +452,7 @@
   // ---------- choosing who you are ----------
 
   function personForm(onDone, submitLabel) {
-    const name = el("input", { type: "text", id: "p-name", autocomplete: "name", required: true, maxlength: "80" });
+    const name = el("input", { type: "text", id: "p-name", autocomplete: "name", required: true, maxlength: "80", placeholder: "Full name" });
     const role = el("select", { id: "p-role" }, el("option", { value: "rep", text: "Rep" }), el("option", { value: "manager", text: "Manager" }));
     const err = el("p", { class: "form-error", role: "alert", hidden: true });
     const btn = el("button", { type: "submit", class: "primary", text: submitLabel });
@@ -508,7 +510,7 @@
     const people = S.people();
     const me = S.viewer();
     const rows = people.map((p) => {
-      const name = el("input", { type: "text", value: p.name, "aria-label": `Name of ${p.name}`, maxlength: "80" });
+      const name = el("input", { type: "text", value: p.name, "aria-label": `Name of ${p.name}`, maxlength: "80", placeholder: "Full name" });
       const role = el("select", { "aria-label": `Role of ${p.name}` }, el("option", { value: "rep", text: "Rep" }), el("option", { value: "manager", text: "Manager" }));
       role.value = p.role;
       const msg = el("span", { class: "muted small", role: "status" });
@@ -634,8 +636,10 @@
       "lines", "accent", ...compact(body));
   }
   function playgroundTabs() {
-    return el("div", { class: "scope-toggle", "aria-label": "Playground sections" }, ...[["practise", "Practise"], ["library", "Library"], ["progress", "My progress"]].map(([id, label]) =>
+    const rail = el("div", { class: "scope-toggle", "aria-label": "Playground sections" }, ...[["practise", "Practise"], ["library", "Library"], ["progress", "My progress"]].map(([id, label]) =>
       el("button", { type: "button", class: `scope-btn${playground.tab === id ? " is-on" : ""}`, text: label, "aria-pressed": String(playground.tab === id), on: { click: () => { playground.tab = id; rerender(); page.main.querySelector(`[aria-label="Playground sections"] button[aria-pressed="true"]`)?.focus(); } } })));
+    M.glide(rail);
+    return rail;
   }
   function exerciseForm(id, detail) {
     const ex = playground.exercise;
@@ -739,11 +743,15 @@
     rerender();
   }
 
+  // Keyed for motion: an answer a manager approves moves from the review queue into
+  // Team answers, and its check draws once.
   function answerItem(a, actions) {
+    const approved = a.status === "approved";
+    const justApproved = M.changed(`answer:${a.id}`, a.status) && approved;
     return el(
       "li",
-      { class: "skill" },
-      el("div", { class: "skill-head" }, el("span", { class: "strong", text: a.objection }), a.status === "approved" ? pill("info", "Team answer") : pill("warn", "Proposed")),
+      { class: "skill", dataset: { flip: a.id } },
+      el("div", { class: "skill-head" }, el("span", { class: "strong", text: a.objection }), approved ? el("span", { class: "pill pill-info pill-check" }, M.check(justApproved, 12), "Team answer") : pill("warn", "Proposed")),
       el("p", { class: "better-line-text", text: S.quoted(a.answer) }),
       el("p", { class: "muted small", text: `${a.answer_from === "rep" ? "Said by a rep on a real call" : "A better line a rep endorsed"} · ${a.check && a.check.check === "ok" ? "Checked against your pack" : "Refused"}` }),
       actions || null
@@ -786,10 +794,12 @@
     });
     const decide = (a, action) => async (ev) => {
       ev.currentTarget.disabled = true;
+      const moves = M.flip(page.main);
       try {
         await api(`/api/playbook/${enc(id)}/answers`, { method: "POST", json: { action, id: a.id, by: me.id } });
         page.librarian = action === "approve" ? "Approved for the team." : "Rejected.";
-        loadAnswers(id); // this tab's own change is not echoed back
+        await loadAnswers(id); // this tab's own change is not echoed back
+        moves.play();
       } catch (e) {
         page.librarian = e.message;
         rerender();

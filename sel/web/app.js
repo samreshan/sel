@@ -62,15 +62,32 @@
     error: { cls: "bad", label: "Failed" },
   };
   const DRAFT_FIELDS = {
-    email: [["to", "To", "email"], ["send_by", "Send by", "date"], ["subject", "Subject", "text"], ["body", "Body", "textarea"]],
-    calendar: [["title", "Title", "text"], ["date", "Date", "date"], ["time", "Time", "time"], ["body", "Body", "textarea"]],
+    email: [["to", "To", "email", "name@example.com"], ["send_by", "Send by", "date"], ["subject", "Subject", "text", "What this email is about"], ["body", "Body", "textarea", "Write the email…"]],
+    calendar: [["title", "Title", "text", "Meeting title"], ["date", "Date", "date"], ["time", "Time", "time"], ["body", "Body", "textarea", "Notes for the invite…"]],
   };
   const FIELD_LABEL = { to: "To", send_by: "Send by", subject: "Subject", body: "Body", title: "Title", date: "Date", time: "Time" };
   const TABS = [["coaching", "Coaching"], ["claims", "Claims"], ["followups", "Follow-ups"], ["refused", "Refused"]];
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const REFUSED_EXPLAINER =
     "The model proposed these, but Sel could not find the cited words in the call or the cited passage in your documents, so they are not shown as findings.";
-  const reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  // Motion helpers (motion.js). If that script is missing, everything still works, without motion.
+  const M = window.SelMotion || {
+    ok: () => false,
+    changed: () => false,
+    once: () => false,
+    remember: () => undefined,
+    forget() {},
+    from: () => null,
+    cue: (n) => n,
+    swap: (n) => n,
+    arrive: (n) => n,
+    glide() {},
+    number: (t) => document.createTextNode(String(t)),
+    check: () => null,
+    typing: () => document.createElement("span"),
+    flip: () => ({ play() {} }),
+    transition: (kind, update) => update(),
+  };
 
   // ---------- state ----------
 
@@ -121,6 +138,7 @@
     idx: null, // segment index for the shown report
     segRows: new Map(),
     mapBlocks: new Map(), // segment id -> call-map block
+    mapEnd: 0, // where the transcript's last line ends, in seconds: the call map's time axis until the recording reports its length
     health: null,
     pollTimer: null,
     stream: { es: null, qs: null, connected: false },
@@ -283,7 +301,7 @@
   }
 
   function scrollRow(node, block) {
-    node.scrollIntoView({ block, behavior: reduceMotion ? "auto" : "smooth" });
+    node.scrollIntoView({ block, behavior: M.ok() ? "smooth" : "auto" });
   }
 
   function escapeRe(s) {
@@ -511,7 +529,39 @@
     state.idx = null;
   }
 
-  async function route() {
+  // Where a route sits, to choose its screen transition: the sidebar section it
+  // belongs to and how deep it is (a list, an item, a page about that item).
+  // The Playbook's pack is chosen in its title, so switching packs is not deeper.
+  function placeOf(hash) {
+    const h = decodeURIComponent(String(hash || "").replace(/^#/, "")) || "today";
+    const [page, arg] = h.split("/");
+    if (page === "call" || page === "new") return { section: "calls", depth: 1, key: h };
+    if (page === "prep") return { section: "leads", depth: 2, key: h };
+    if (page === "playbook") return { section: "playbook", depth: 0, key: page };
+    return { section: page === "sim" ? "playbook" : NAV_OF[page] || page, depth: arg ? 1 : 0, key: h };
+  }
+
+  let lastPlace = null;
+
+  // Deeper slides in, back up slides back, another section cross-fades; the
+  // same page with other content (one call to the next) just changes.
+  function route() {
+    const to = placeOf(location.hash);
+    const from = lastPlace;
+    lastPlace = to;
+    let kind = null;
+    if (from && from.key !== to.key) {
+      if (to.depth > from.depth) kind = "push";
+      else if (to.depth < from.depth) kind = "pop";
+      else if (to.section !== from.section) kind = "fade";
+    }
+    if (!kind) return applyRoute();
+    return new Promise((resolve) => {
+      M.transition(kind, () => resolve(applyRoute()));
+    });
+  }
+
+  async function applyRoute() {
     const hash = decodeURIComponent(location.hash.replace(/^#/, "")) || "today";
     const m = /^call\/([a-z0-9-]{1,64})$/.exec(hash);
     const sim = /^sim(?:\/([a-z0-9]{6}))?$/.exec(hash);
@@ -833,16 +883,19 @@
     list.hidden = !s;
     bar.hidden = !s;
     if (!s) return;
+    // Steps finished while this call was on screen fill their line and draw their check.
+    const before = M.remember(`steps:${call.id}`, s.done);
+    const fresh = (i) => before !== undefined && i >= before && i < s.done;
     const items = [];
     STEPS.forEach((label, i) => {
-      if (i > 0) items.push(el("li", { class: `step-line${i <= s.done ? " is-done" : ""}`, "aria-hidden": "true" }));
+      if (i > 0) items.push(el("li", { class: `step-line${i <= s.done ? " is-done" : ""}${fresh(i - 1) ? " is-filling" : ""}`, "aria-hidden": "true" }));
       const done = i < s.done;
       const current = i === s.current;
       items.push(
         el(
           "li",
           { class: `step${done ? " is-done" : ""}${current ? " is-current" : ""}`, "aria-current": current ? "step" : null },
-          el("span", { class: "step-num" }, done ? icon("check", 12) : String(i + 1)),
+          el("span", { class: "step-num" }, done ? (fresh(i) ? M.check(true, 12) : icon("check", 12)) : String(i + 1)),
           el("span", { text: label }),
           done ? el("span", { class: "sr-only", text: " (done)" }) : null
         )
@@ -884,18 +937,22 @@
     if (state.viewerId && !viewer()) state.viewerId = null;
     renderViewer();
     renderList();
-    if (state.view === "call" && state.refs) renderHead(state.refs.head);
+    if (state.view === "call" && state.refs) renderHead();
     // The new-call form can paint before the team arrives. Refresh it once
     // people land, before anyone has a reason to have filled it in.
     if (state.view === "new" && !hadPeople && state.people.length) renderMain();
     emit("people-changed", state.people);
   }
 
-  // Decorative characters are keyed to immutable person IDs, never inferred from a name.
-  function personAvatar(person, size = "") {
+  // Decorative characters are keyed to immutable IDs, never inferred from a name.
+  function portraitOf(id) {
     let hash = 0;
-    for (const char of String(person.id)) hash = (Math.imul(31, hash) + char.charCodeAt(0)) >>> 0;
-    return el("span", { class: `person-avatar portrait-${hash % 6}${size ? ` avatar-${size}` : ""}`, "aria-hidden": "true" });
+    for (const char of String(id)) hash = (Math.imul(31, hash) + char.charCodeAt(0)) >>> 0;
+    return hash % 6;
+  }
+
+  function personAvatar(person, size = "") {
+    return el("span", { class: `person-avatar portrait-${portraitOf(person.id)}${size ? ` avatar-${size}` : ""}`, "aria-hidden": "true" });
   }
 
   function renderViewer() {
@@ -926,6 +983,7 @@
       if (on_) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     }
+    M.glide(document.querySelector(".primary-nav"));
   }
 
   function renderList() {
@@ -1049,6 +1107,7 @@
             } } }),
           el("label", { for: `calls-view-${value}`, text: label }));
       }
+      M.glide(toggle);
       const body = state.callLayout === "table"
         ? callsTable()
         : el("ul", { class: "calls-page-list", "aria-label": "All calls" }, ...state.calls.map((c) => callItem(c, false)));
@@ -1061,7 +1120,10 @@
 
   // ---------- main pane dispatch ----------
 
+  let cleanupUpload = null;
+
   function renderMain() {
+    if (cleanupUpload) { cleanupUpload(); cleanupUpload = null; }
     const main = $("#main");
     renderSteps();
     main.classList.toggle(
@@ -1207,10 +1269,23 @@
 
   // ---------- call view ----------
 
+  // The call page reads like Today: a trail and the date, an illustrated
+  // header that says what needs a person first, a summary strip, then the
+  // recording and transcript beside the review.
   function mountCall(main, key) {
     const call = state.call;
-    const head = el("header", { class: "call-head" });
-    const tiles = el("div", { class: "tiles" });
+    const toolbar = el("div", { class: "call-toolbar" });
+    const heroTitle = el("div", { class: "call-hero-title" });
+    const heroBrief = el("div", { class: "call-hero-brief" });
+    const heroFoot = el("div", { class: "call-hero-foot" });
+    const cast = el("div", { class: "call-cast", role: "group", "aria-label": "On the call" });
+    const head = el(
+      "header",
+      { class: "call-hero call-head" },
+      el("div", { class: "today-hero call-hero-main" }, el("div", { class: "today-hero-copy" }, heroTitle, heroBrief), cast),
+      heroFoot
+    );
+    const tiles = el("dl", { class: "stat-strip call-stats", "aria-label": "Call summary" });
     const notice = el("div", { class: "notice", role: "status", hidden: true });
     const list = el("ol", { class: "transcript", "aria-label": "Transcript" });
     const txSub = el("p", { class: "card-sub" });
@@ -1221,29 +1296,22 @@
       hidden: true,
       on: { click: clearHighlight },
     });
-    const talk = el("section", { class: "talk", "aria-labelledby": "talk-title" });
     const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Review" });
     const panel = el("div", { class: "panel", id: "panel", role: "tabpanel" });
-    const map = el("div", { class: "callmap", "aria-hidden": "true", title: "Call map: click to play from that moment" });
-    map.addEventListener("click", (e) => seekFromMap(e));
+    // Who spoke when: a lane per speaker on the call's own time axis. Hidden from
+    // screen readers; the seek bar and the transcript's times do the same job.
+    const map = el("div", { class: "callmap", "aria-hidden": "true" });
+    const lanes = el("div", { class: "lane-labels", role: "group", "aria-label": "Talk time" });
+    const track = el("div", { class: "track" }, map);
+    const evidenceKey = el("span", { class: "evidence-key", hidden: true }, el("i", { "aria-hidden": "true" }), "Evidence for the selected card");
+    const player = el("section", { class: "player", "aria-label": "Recording" }, el("div", { class: "lanes" }, lanes, track));
     // One listener for every transcript row instead of two per row.
     list.addEventListener("click", onTranscriptClick);
-    const player = el(
-      "section",
-      { class: "player", "aria-label": "Recording" },
-      map,
-      el(
-        "div",
-        { class: "legend" },
-        el("span", {}, el("i", { class: "role-rep" }), "Rep"),
-        el("span", {}, el("i", { class: "role-customer" }), "Customer"),
-        el("span", {}, el("i", { class: "is-evidence" }), "Evidence for the selected card")
-      )
-    );
 
     stopPlayLoop();
+    let controls = null;
     if (call.audio_url) {
-      const audio = el("audio", { controls: true, preload: "metadata", src: call.audio_url });
+      const audio = el("audio", { preload: "metadata", src: call.audio_url });
       audio.addEventListener("timeupdate", syncPlayhead);
       audio.addEventListener("seeked", syncPlayhead);
       audio.addEventListener("ratechange", syncPlayhead);
@@ -1251,10 +1319,11 @@
       audio.addEventListener("pause", stopPlayLoop);
       audio.addEventListener("ended", stopPlayLoop);
       state.audio = audio;
-      player.append(audio);
+      controls = transport(audio, track, evidenceKey, call);
+      player.append(controls.node, audio);
     } else {
       state.audio = null;
-      player.append(el("p", { class: "no-audio", text: "No recording for this call." }));
+      player.append(el("div", { class: "transport" }, el("p", { class: "no-audio", text: "No recording for this call." }), evidenceKey));
     }
 
     const keysHint = el(
@@ -1282,7 +1351,7 @@
       )
     );
 
-    state.refs = { head, tiles, notice, list, txSub, clear, talk, tabs, panel, map, keys, keysHint };
+    state.refs = { head, toolbar, heroTitle, heroBrief, heroFoot, cast, tiles, notice, list, txSub, clear, lanes, tabs, panel, map, evidenceKey, keys, keysHint, syncTransport: controls && controls.sync };
     state.mountKey = key;
     state.segRows = new Map();
     state.mapBlocks = new Map();
@@ -1292,47 +1361,124 @@
     main.replaceChildren(
       el(
         "div",
-        { class: "call-cols" },
+        { class: "call-page" },
+        toolbar,
+        head,
+        tiles,
         el(
           "div",
-          { class: "col-left" },
-          head,
-          tiles,
-          player,
-          notice,
-          el(
-            "section",
-            { class: "transcript-card", "aria-labelledby": "tx-title" },
-            el(
-              "div",
-              { class: "section-head" },
-              el(
-                "div",
-                { class: "section-head-main" },
-                iconTile("accent", "lines"),
-                el("div", {}, el("h2", { class: "section-title", id: "tx-title", text: "Transcript" }), txSub)
-              ),
-              clear
-            ),
-            list
-          )
-        ),
-        el(
-          "aside",
-          { class: "col-right", "aria-label": "Review" },
+          { class: "call-cols" },
           el(
             "div",
-            { class: "inspector-head" },
-            el("div", {}, el("h2", { text: "Call review" }), el("p", { class: "card-sub", text: "Findings, claim checks and drafts" })),
-            keysHint
+            { class: "col-left" },
+            player,
+            notice,
+            el(
+              "section",
+              { class: "transcript-card", "aria-labelledby": "tx-title" },
+              el(
+                "div",
+                { class: "section-head" },
+                el(
+                  "div",
+                  { class: "section-head-main" },
+                  iconTile("accent", "lines"),
+                  el("div", {}, el("h2", { class: "section-title", id: "tx-title", text: "Transcript" }), txSub)
+                ),
+                clear
+              ),
+              list
+            )
           ),
-          keys,
-          talk,
-          tabs,
-          panel
+          el(
+            "aside",
+            { class: "col-right", "aria-label": "Review" },
+            el("div", { class: "inspector-head" }, el("h2", { class: "section-title", text: "Review" }), keysHint),
+            keys,
+            tabs,
+            panel
+          )
         )
       )
     );
+  }
+
+  const RATES = [1, 1.25, 1.5, 2];
+
+  // Play, position and speed for the recording. The call map is the seek bar:
+  // a range input lies over it, so a click or a drag plays from that moment
+  // and the arrow keys step through the call.
+  function transport(audio, track, evidenceKey, call) {
+    const seek = el("input", { type: "range", class: "seek", min: "0", max: "1", step: "1", value: "0", "aria-label": "Position in the recording", title: "Play from here" });
+    const play = el("button", { type: "button", class: "ink play-btn", "aria-label": "Play the recording" }, icon("play", 16));
+    const time = el("span", { class: "play-time" });
+    const speed = el("button", { type: "button", class: "small ghost speed-btn", title: "Playback speed", "aria-label": "Playback speed 1×" }, "1×");
+    const ext = String(call.audio_file || "").split(".").pop();
+    const download = el("a", { class: "button small ghost", href: call.audio_url, download: `${call.customer_name || call.id}${ext ? `.${ext}` : ""}`, text: "Download" });
+    const head = el("span", { class: "playhead", "aria-hidden": "true" });
+    track.append(head, seek);
+    const sync = () => {
+      const length = timelineLength();
+      const t = Math.min(audio.currentTime || 0, length);
+      seek.max = String(length);
+      seek.value = String(t);
+      seek.setAttribute("aria-valuetext", `${mmss(t)} of ${mmss(length)}`);
+      head.style.left = `${(t / length) * 100}%`; // on the playhead only: a property on the track would restyle every block
+      time.textContent = `${mmss(t)} / ${mmss(length)}`;
+    };
+    const playing = () => {
+      const on = !audio.paused;
+      play.replaceChildren(M.swap(icon(on ? "pause" : "play", 16), `play:${call.id}`, on));
+      play.setAttribute("aria-label", on ? "Pause the recording" : "Play the recording");
+    };
+    play.addEventListener("click", () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+    seek.addEventListener("input", () => {
+      audio.currentTime = Number(seek.value);
+      sync();
+    });
+    speed.addEventListener("click", () => {
+      audio.playbackRate = RATES[(RATES.indexOf(audio.playbackRate) + 1) % RATES.length];
+    });
+    audio.addEventListener("ratechange", () => {
+      speed.textContent = `${audio.playbackRate}×`;
+      speed.setAttribute("aria-label", `Playback speed ${audio.playbackRate}×`);
+    });
+    audio.addEventListener("timeupdate", sync);
+    audio.addEventListener("seeked", sync);
+    audio.addEventListener("loadedmetadata", sizeTimeline);
+    audio.addEventListener("durationchange", sizeTimeline);
+    for (const type of ["play", "pause", "ended"]) audio.addEventListener(type, playing);
+    return { node: el("div", { class: "transport" }, play, time, evidenceKey, el("span", { class: "transport-end" }, speed, download)), sync };
+  }
+
+  // The call map and the seek bar share one time axis: the recording's length once it is known, else the transcript's.
+  function timelineLength() {
+    const d = state.audio ? state.audio.duration : NaN;
+    return Math.max(state.mapEnd, Number.isFinite(d) ? d : 0) || 1;
+  }
+
+  // A recording longer than its transcript narrows the map, so the blocks keep to the time axis.
+  function sizeTimeline() {
+    const r = state.refs;
+    if (!r) return;
+    r.map.style.width = `${(state.mapEnd / timelineLength()) * 100}%`;
+    if (r.syncTransport) r.syncTransport();
+  }
+
+  // The header's action: open that tab and bring the review into view (below the transcript on narrow screens).
+  function openTab(id) {
+    const r = state.refs;
+    if (!r) return;
+    setTab(id);
+    const side = r.tabs.closest(".col-right");
+    if (side) side.scrollTop = 0;
+    // A long jump goes straight there: on a phone it crosses the transcript, whose off-screen
+    // chunks change height as a smooth scroll paints them, so it would stop short.
+    const box = r.tabs.getBoundingClientRect();
+    const near = Math.abs(box.top) < window.innerHeight;
+    if (box.top < 0 || box.bottom > window.innerHeight) r.tabs.scrollIntoView({ block: "start", behavior: M.ok() && near ? "smooth" : "auto" });
+    const tab = document.getElementById(`tab-${id}`);
+    if (tab) tab.focus({ preventScroll: true });
   }
 
   function toggleKeys(force) {
@@ -1357,19 +1503,21 @@
     const r = state.refs;
     if (!r || !state.call) return;
     index();
-    renderHead(r.head);
+    renderHead();
     renderSummary(r.tiles);
     renderNotice(r.notice);
     const mk = mapKeyOf();
     if (mk !== state.mapKey) renderCallMap(r.map, mk);
     if (transcriptKey() !== state.txKey) renderTranscript(r.list);
-    renderTalk(r.talk);
+    renderTalk(r.lanes);
     renderTabs(r.tabs);
     renderPanel();
   }
 
-  // ---------- summary tiles and talk time ----------
+  // ---------- summary strip, the header's next step and talk time ----------
 
+  // Numbers, as on Today: the score, what to improve, claims and follow-ups.
+  // The header says which of them needs a person first.
   function renderSummary(tiles) {
     const r = state.call.report;
     const count = (kind) => r.findings.filter((f) => f.kind === kind).length;
@@ -1379,150 +1527,196 @@
     const needs = drafts.filter((d) => d.status === "needs_input").length;
     const ready = drafts.filter((d) => d.status === "ready_for_approval").length;
     const approved = drafts.filter((d) => d.status === "approved").length;
-
-    let claimLine;
-    let claimPill;
-    if (!r.claims.length) {
-      claimLine = "No claims checked";
-      claimPill = ["neutral", "Nothing to compare"];
-    } else if (verdicts.contradicted || verdicts.unverified) {
-      claimLine = [
-        verdicts.contradicted ? `${verdicts.contradicted} contradicted` : null,
-        verdicts.unverified ? `${verdicts.unverified} unverified` : null,
-      ].filter(Boolean).join(", ");
-      claimPill = [verdicts.contradicted ? "bad" : "neutral", `${verdicts.supported} of ${r.claims.length} supported`];
-    } else {
-      claimLine = "All supported";
-      claimPill = ["ok", plural(r.claims.length, "claim matches the pack", "claims match the pack")];
-    }
-
-    let draftPill;
-    if (needs) draftPill = ["warn", `${needs} need${needs === 1 ? "s" : ""} input`];
-    else if (ready) draftPill = ["info", `${ready} ready to approve`];
-    else if (approved) draftPill = ["ok", `${approved} approved`];
-    else draftPill = ["neutral", "No drafts"];
-
     const coached = coachingOf();
-    const weak = coached ? coached.moments.filter((m) => m.kind === "weak" && m.state !== "dismissed").length : 0;
-    const spec = [
-      ["coaching", "What happened?", `${plural(count("question"), "question", "questions")}, ${plural(count("objection"), "objection", "objections")}`, ["violet", coached ? plural(weak, "moment to improve", "moments to improve") : plural(count("coaching"), "coaching point", "coaching points")]],
-      ["claims", "What did we claim?", claimLine, claimPill],
-      ["followups", "What did we promise?", plural(r.commitments.length, "promise", "promises"), draftPill],
-    ];
+    const weak = coached ? coached.moments.filter((m) => m.kind === "weak" && m.state !== "dismissed").length : count("coaching");
+    const promises = plural(r.commitments.length, "promise", "promises");
+
+    const score = r.score && r.score.criteria && r.score.criteria.length ? r.score : null;
+    const overall = score && Number.isFinite(score.overall) ? score.overall : null;
+    const tone = overall === null ? "neutral" : overall >= 75 ? "ok" : overall >= 50 ? "warn" : "bad";
+
+    let claims;
+    if (!r.claims.length) claims = ["neutral", 0, "checked", "Nothing to compare"];
+    else if (verdicts.contradicted) {
+      claims = ["bad", verdicts.contradicted, "contradicted", compact([`${verdicts.supported} of ${r.claims.length} supported`, verdicts.unverified ? `${verdicts.unverified} unverified` : null]).join(" · ")];
+    } else if (verdicts.unverified) claims = ["neutral", verdicts.unverified, "unverified", `${verdicts.supported} of ${r.claims.length} supported`];
+    else claims = ["ok", r.claims.length, "supported", "All match your pack"];
+
+    let followups;
+    if (needs) followups = ["warn", needs, needs === 1 ? "needs input" : "need input", compact([promises, ready ? `${ready} ready` : null]).join(" · ")];
+    else if (ready) followups = ["info", ready, "ready to approve", promises];
+    else if (approved) followups = ["ok", approved, "approved", promises];
+    else followups = ["neutral", 0, "drafts", promises];
+
     tiles.replaceChildren(
-      ...spec.map(([tab, q, a, [cls, sub]]) =>
-        el(
-          "button",
-          {
-            type: "button",
-            class: "tile",
-            "aria-pressed": state.tab === tab ? "true" : "false",
-            on: { click: () => setTab(tab) },
-          },
-          el("span", { class: "tile-q", text: q }),
-          el("span", { class: "tile-a", text: a }),
-          pill(cls, sub)
-        )
-      )
+      stat("Scorecard", overall === null ? "–" : overall, "/100", score ? scoreSummary(score.criteria) : "No scorecard in this pack", "gauge", tone, "score"),
+      stat(coached ? "To improve" : "Coaching", weak, coached ? (weak === 1 ? "moment" : "moments") : weak === 1 ? "point" : "points", `${plural(count("question"), "question", "questions")} · ${plural(count("objection"), "objection", "objections")}`, "target", "violet", "weak"),
+      stat("Claims", claims[1], claims[2], claims[3], "doc", claims[0], "claims"),
+      stat("Follow-ups", followups[1], followups[2], followups[3], "calendar", followups[0], "drafts")
+    );
+    renderBrief(state.refs.heroBrief, { contradicted: verdicts.contradicted, needs, ready, weak });
+  }
+
+  // A count that changed while the call was open rolls to its new value (an approved draft, a dismissed moment).
+  function stat(label, value, unit, note, iconName, tone, key) {
+    return el(
+      "div",
+      { class: `stat${tone === "bad" || (tone === "warn" && value) ? ` is-${tone}` : ""}` },
+      el("dt", {}, iconTile(tone, iconName), el("span", { text: label })),
+      el("dd", {}, M.number(String(value), `call:${state.call.id}:${key}`), el("small", { text: unit })),
+      el("dd", { class: "stat-note", text: note })
     );
   }
 
-  function renderTalk(node) {
-    const { segments, speakers } = state.call.report.transcript;
-    const secs = new Map();
-    for (const seg of segments) secs.set(seg.speaker, (secs.get(seg.speaker) || 0) + Math.max(0, seg.end - seg.start));
-    const total = [...secs.values()].reduce((a, b) => a + b, 0);
-    if (!total) {
-      node.hidden = true;
-      return;
+  function scoreSummary(criteria) {
+    const n = (status) => criteria.filter((c) => c.status === status).length;
+    const parts = [
+      [n("met"), "met"],
+      [n("partial"), "partly"],
+      [n("missed"), "missed"],
+      [n("na"), "not raised"],
+    ].filter(([k]) => k > 0);
+    return parts.length ? parts.map(([k, word]) => `${k} ${word}`).join(" · ") : "Nothing scored yet";
+  }
+
+  // One sentence on the call, one on what needs a person first, and that as the header's one action.
+  function renderBrief(node, f) {
+    const idx = index();
+    const speakers = [...idx.speakers.values()];
+    const rep = speakers.find((s) => s.role === "rep");
+    const cust = speakers.find((s) => s.role === "customer");
+    const end = idx.list.reduce((last, s) => Math.max(last, s.end), 0);
+    const who = !end ? "" : rep && cust ? `${speakerLabel(rep)} spoke with ${speakerLabel(cust)} for ${spokenFor(end)}.` : `The call ran for ${spokenFor(end)}.`;
+    let next;
+    if (f.contradicted) {
+      next = { tab: "claims", icon: "doc", label: "Check claims", text: `${plural(f.contradicted, "claim contradicts", "claims contradict")} your pack. Check ${f.contradicted === 1 ? "it" : "them"} first.` };
+    } else if (f.needs) {
+      next = { tab: "followups", icon: "calendar", label: "Fill in follow-ups", text: `${plural(f.needs, "follow-up draft needs", "follow-up drafts need")} details before approval.` };
+    } else if (f.ready) {
+      next = { tab: "followups", icon: "mail", label: "Review follow-ups", text: `${plural(f.ready, "follow-up draft is", "follow-up drafts are")} ready for your approval.` };
+    } else if (f.weak) {
+      next = { tab: "coaching", icon: "target", label: "See where to improve", text: `Sel found ${plural(f.weak, "moment", "moments")} to improve.` };
+    } else {
+      next = { tab: "coaching", icon: "gauge", label: "Open the scorecard", text: "Nothing on this call needs you right now." };
     }
-    node.hidden = false;
-    const rows = speakers
-      .filter((sp) => secs.get(sp.id))
-      .sort((a, b) => (a.role === "rep" ? -1 : 0) - (b.role === "rep" ? -1 : 0));
-    const share = (sp) => Math.round((secs.get(sp.id) / total) * 100);
     node.replaceChildren(
-      el("h3", { id: "talk-title", text: "Talk time" }),
-      el(
-        "div",
-        { class: "talk-figures" },
-        ...rows.map((sp) =>
+      el("p", { class: "lede", text: `${who} ${next.text}`.trim() }),
+      el("div", { class: "row today-hero-actions" }, el("button", { type: "button", class: "primary", on: { click: () => openTab(next.tab) } }, icon(next.icon, 16), next.label))
+    );
+  }
+
+  function spokenFor(seconds) {
+    const s = Math.round(seconds);
+    if (s < 60) return plural(s, "second", "seconds");
+    if (s < 90) return "about a minute";
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m} minutes`;
+    return `${plural(Math.floor(m / 60), "hour", "hours")}${m % 60 ? ` ${m % 60} min` : ""}`;
+  }
+
+  // Speakers in lane order (the rep, then the customer, then anyone else) with the seconds each spoke.
+  function talkRows() {
+    const idx = index();
+    const secs = new Map();
+    for (const seg of idx.list) secs.set(seg.speaker, (secs.get(seg.speaker) || 0) + Math.max(0, seg.end - seg.start));
+    const rank = (row) => (row.speaker && row.speaker.role === "rep" ? 0 : row.speaker && row.speaker.role === "customer" ? 1 : 2);
+    return [...secs.keys()]
+      .map((id, order) => ({ id, order, speaker: idx.speakers.get(id) || null, secs: secs.get(id) }))
+      .sort((a, b) => rank(a) - rank(b) || a.order - b.order);
+  }
+
+  // Each lane's label: who, their role, and their share of the talking.
+  function renderTalk(node) {
+    const rows = talkRows();
+    const total = rows.reduce((sum, row) => sum + row.secs, 0);
+    node.replaceChildren(
+      ...rows.map((row) => {
+        const role = row.speaker ? row.speaker.role : "other";
+        return el(
+          "p",
+          { class: `lane-label role-${role}` },
+          el("span", { class: "lane-name", text: speakerLabel(row.speaker) }),
           el(
-            "div",
-            { class: "talk-figure" },
-            el("span", { class: "k", text: `${speakerLabel(sp)} · ${(ROLE_LABEL[sp.role] || "Speaker").toLowerCase()}` }),
-            el("span", { class: "v" }, `${Math.round(secs.get(sp.id))}s`, el("small", { text: `${share(sp)}%` }))
+            "span",
+            { class: "lane-meta" },
+            (ROLE_LABEL[role] || "Speaker").toLowerCase(),
+            total ? el("span", { class: "lane-secs", text: ` · ${Math.round(row.secs)} s` }) : null,
+            total ? ` · ${Math.round((row.secs / total) * 100)}%` : null
           )
-        )
-      ),
-      el(
-        "div",
-        { class: "talk-bar", "aria-hidden": "true" },
-        ...rows.map((sp) =>
-          el("span", {
-            style: `flex: ${secs.get(sp.id)} 1 0; background: var(${sp.role === "rep" ? "--accent" : sp.role === "customer" ? "--customer" : "--muted"})`,
-          })
-        )
-      )
+        );
+      })
     );
   }
 
   // ---------- call map ----------
 
+  // Blocks sit at their real start and length as a share of the transcript,
+  // so pauses show; each lane is a grid row. Plain percentages, set once: a
+  // calc() per block made a long call's first paint noticeably slower.
   function renderCallMap(map, key) {
     const idx = index();
+    const lane = new Map(talkRows().map((row, i) => [row.id, String(i + 1)]));
+    const end = idx.list.reduce((last, s) => Math.max(last, s.end), 0) || 1;
     state.mapBlocks = new Map();
     state.currentBlock = null;
     const frag = document.createDocumentFragment();
+    for (const row of lane.values()) {
+      const rail = document.createElement("span");
+      rail.className = "lane-rail";
+      rail.style.gridRow = row;
+      frag.append(rail);
+    }
     for (const seg of idx.list) {
       const sp = idx.speakers.get(seg.speaker);
       const b = document.createElement("span");
       b.className = `callmap-block role-${sp ? sp.role : "other"}${state.evidence.has(seg.id) ? " is-evidence" : ""}`;
-      b.style.flex = `${Math.max(0.5, seg.end - seg.start)} 1 0`;
-      b.dataset.start = String(seg.start);
+      b.style.cssText = `grid-row:${lane.get(seg.speaker)};left:${(seg.start / end) * 100}%;width:${(Math.max(0, seg.end - seg.start) / end) * 100}%`;
       state.mapBlocks.set(seg.id, b);
       frag.append(b);
     }
+    map.style.gridTemplateRows = `repeat(${Math.max(1, lane.size)}, var(--lane-h))`;
     map.replaceChildren(frag);
+    state.mapEnd = end;
     state.mapKey = key;
+    sizeTimeline();
     markPlayback();
   }
 
-  function seekFromMap(e) {
-    const block = e.target.closest(".callmap-block");
-    if (block) seekTo(Number(block.dataset.start));
-  }
-
-  function renderHead(head) {
+  function renderHead() {
     const call = state.call;
     const report = call.report;
-    const rep = report.transcript.speakers.find((s) => s.role === "rep");
+    const r = state.refs;
     const cust = report.transcript.speakers.find((s) => s.role === "customer");
     const title = call.customer_name || (cust && cust.name) || call.original_filename || call.id;
     const meta = report.meta || call.report_meta || {};
     const timings = Object.entries(meta.timings || {})
       .map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? `${v.toFixed(1)} s` : v}`)
       .join(" · ");
-    const when = [packName(call.pack_id), formatStarted(call.started_at), rep && rep.name ? `Rep: ${rep.name}` : null].filter(Boolean).join(" · ");
     const owner = state.people.length ? repPicker(call) : null;
     const lead = call.kind !== "practice" ? leadPicker(call) : null;
     const rules = String(meta.analyzer || "").startsWith("rules");
     const sim = call.source === "simulator";
-    head.replaceChildren(
+    const kind = call.source === "fixture" ? ["warn", "Example data"] : sim ? ["info", "Simulated"] : call.kind === "practice" ? ["neutral", "Practice"] : null;
+    r.toolbar.replaceChildren(
       ...compact([
+        crumbs([{ href: "#calls", text: "Calls" }, { text: title }]),
+        call.started_at ? el("p", { class: "call-when" }, icon("calendar", 16), el("time", { datetime: call.started_at, text: formatStarted(call.started_at) })) : null,
+      ])
+    );
+    r.heroTitle.replaceChildren(
+      el("p", { class: "eyebrow" }, el("span", { text: `${packName(call.pack_id)} · Call review` }), kind ? pill(kind[0], kind[1]) : null),
+      el("h1", { text: title })
+    );
+    renderCast();
+    r.heroFoot.replaceChildren(
+      ...compact([
+        owner || lead ? el("div", { class: "call-assign" }, ...compact([owner, lead])) : null,
         el(
           "div",
-          { class: "head-main" },
-          crumbs([{ href: "#calls", text: "Calls" }, { text: title }]),
-          el("h1", { text: title }),
-          el("p", { class: "meta", text: when }),
-          owner || lead ? el("div", { class: "call-assign" }, ...compact([owner, lead])) : null,
-          el("p", { class: "meta small", text: `Transcribed by ${meta.transcriber || "unknown"} · analysed by ${meta.analyzer || "unknown"}` }),
-          timings ? el("p", { class: "meta small", text: `Timings: ${timings}` }) : null
+          { class: "call-source" },
+          el("p", { text: `Transcribed by ${meta.transcriber || "unknown"} · analysed by ${meta.analyzer || "unknown"}` }),
+          timings ? el("p", { text: `Timings: ${timings}` }) : null
         ),
-        call.source === "fixture"
-          ? el("div", { class: "banner", role: "note" }, el("strong", { text: "Example data:" }), " hand-written fixture, not model output")
-          : null,
         sim || rules
           ? el(
               "div",
@@ -1551,6 +1745,37 @@
     );
   }
 
+  // The two people on the call, drawn as Today's portraits and facing each other.
+  // The rep gets their team portrait once the call is theirs; until then, and for
+  // the customer, the portrait comes from the call's own ids (the lead's, so a
+  // lead's calls match). Never from a name. The two never share a portrait.
+  function renderCast() {
+    if (state.refs && state.call && state.call.report) state.refs.cast.replaceChildren(...callCast(state.call, state.call.report));
+  }
+
+  function callCast(call, report) {
+    const speakers = report.transcript.speakers;
+    const rep = speakers.find((s) => s.role === "rep");
+    const cust = speakers.find((s) => s.role === "customer");
+    const owner = call.rep_id ? state.people.find((p) => p.id === call.rep_id) || null : null;
+    const repAt = portraitOf(owner ? owner.id : `${call.id}:${rep ? rep.id : "rep"}`);
+    let custAt = portraitOf(call.lead_id ? `lead:${call.lead_id}` : `${call.id}:${cust ? cust.id : "customer"}`);
+    if (custAt === repAt) custAt = (custAt + 1) % 6;
+    const seat = (role, at, name) =>
+      el(
+        "div",
+        { class: `cast-person role-${role}` },
+        el("span", { class: "cast-portrait" }, el("span", { class: `person-avatar avatar-call portrait-${at}`, "aria-hidden": "true" })),
+        el("span", { class: "cast-name", text: name }),
+        el("span", { class: "cast-role", text: ROLE_LABEL[role] })
+      );
+    return [
+      seat("rep", repAt, owner ? owner.name : rep ? speakerLabel(rep) : ROLE_LABEL.rep),
+      el("span", { class: "cast-link", "aria-hidden": "true" }, el("span", { class: "cast-link-mark" }, icon("phone", 16))),
+      seat("customer", custAt, call.customer_name || (cust && cust.name) || ROLE_LABEL.customer),
+    ];
+  }
+
   // Whose call this is, for Today and coaching. Changing it doesn't touch the transcript's speaker names.
   function repPicker(call) {
     const sel = el("select", { id: "call-rep", class: "small-select" }, el("option", { value: "", text: "No rep" }));
@@ -1563,6 +1788,7 @@
         const summary = await api(`/api/calls/${enc(call.id)}/rep`, { method: "PUT", json: { rep_id: sel.value || null } });
         call.rep_id = summary.rep_id;
         upsertCall(summary);
+        renderCast();
         msg.textContent = "Saved.";
       } catch (e) {
         sel.value = call.rep_id || "";
@@ -1601,15 +1827,16 @@
     fillLeadSelect(sel, call.lead_id || "");
     if (state.leads === null) loadLeads();
     const msg = el("span", { class: "muted small", role: "status" });
-    const prep = el("a", { class: "button small", href:call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads", text: call.lead_id ? "Prep" : "Leads" });
+    const prep = el("a", { class: "button small", href:call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads", text: call.lead_id ? "Prep" : "Manage leads" });
     sel.addEventListener("change", async () => {
       sel.disabled = true;
       try {
         const summary = await api(`/api/calls/${enc(call.id)}/lead`, { method: "PUT", json: { lead_id: sel.value || null } });
         call.lead_id = summary.lead_id;
         upsertCall(summary);
+        renderCast();
         prep.href = call.lead_id ? `#prep/${enc(call.lead_id)}` : "#leads";
-        prep.textContent = call.lead_id ? "Prep" : "Leads";
+        prep.textContent = call.lead_id ? "Prep" : "Manage leads";
         msg.textContent = "Saved.";
         emit("lead", { id: call.lead_id }); // this tab's own change is not echoed on the stream
       } catch (e) {
@@ -1802,6 +2029,7 @@
   function markEvidenceChrome() {
     if (state.refs && state.refs.map) state.refs.map.classList.toggle("has-evidence", state.evidence.size > 0);
     if (state.refs && state.refs.clear) state.refs.clear.hidden = state.evidence.size === 0;
+    if (state.refs && state.refs.evidenceKey) state.refs.evidenceKey.hidden = state.evidence.size === 0;
   }
 
   function clearHighlight() {
@@ -1909,7 +2137,7 @@
   }
 
   function editForm(seg) {
-    const ta = el("textarea", { class: "edit-text", rows: "3", "aria-label": "Corrected text for this line", value: seg.text });
+    const ta = el("textarea", { class: "edit-text", rows: "3", "aria-label": "Corrected text for this line", placeholder: "What was actually said", value: seg.text });
     const save = el("button", { type: "button", class: "primary small", text: "Save" });
     const cancel = el("button", { type: "button", class: "small", text: "Cancel" });
     save.addEventListener("click", () => saveSegment(seg.id, ta.value, save));
@@ -2020,16 +2248,17 @@
           },
           label,
           " ",
-          el("span", { class: "badge", text: String(counts[id]) })
+          el("span", { class: "badge" }, M.number(String(counts[id]), `tab:${state.call.id}:${id}`))
         );
       })
     );
+    tabs.dataset.rail = `review:${state.call.id}`;
+    M.glide(tabs);
   }
 
   function setTab(id) {
     if (state.tab === id || !state.refs) return;
     state.tab = id;
-    renderSummary(state.refs.tiles);
     renderTabs(state.refs.tabs);
     renderPanel();
   }
@@ -2105,7 +2334,7 @@
         el(
           "div",
           { class: "score-big", "aria-label": overall === null ? "No score" : `Score ${overall} out of 100` },
-          el("span", { text: overall === null ? "–" : String(overall) }),
+          el("span", {}, M.number(overall === null ? "–" : String(overall), `score:${state.callId}`)),
           el("small", { text: "/100" })
         )
       ),
@@ -2284,6 +2513,7 @@
       class: "input",
       rows: isEdit ? "3" : "2",
       maxlength: isEdit ? "400" : "500",
+      placeholder: isEdit ? "A better line the rep could say" : "Add a note for the rep",
       value: isEdit ? (m.better_line ? m.better_line.text : "") : m.note || "",
     });
     const save = el("button", { type: "submit", class: "primary small", text: isEdit ? "Check and save" : "Save note" });
@@ -2373,10 +2603,17 @@
       })
     );
     const stateTag = dismissed ? ["neutral", "Dismissed"] : endorsed ? ["ok", "Endorsed"] : m.state === "edited" ? ["info", "Edited"] : null;
+    // Endorsing while the card is on screen draws the check once.
+    const justEndorsed = M.changed(`moment:${state.callId}:${m.id}`, m.state) && endorsed;
+    const statePill = stateTag && !dismissed
+      ? endorsed
+        ? el("span", { class: "pill pill-ok pill-check" }, M.check(justEndorsed, 12), "Endorsed")
+        : pill(...stateTag)
+      : null;
     return el(
       "article",
       { class: `card moment${dismissed ? " is-dismissed" : ""}`, dataset: { item: m.id, segs: segIds.join(" ") }, tabindex: "-1", "aria-busy": busy ? "true" : null },
-      el("div", { class: "card-tags" }, cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label), stateTag && !dismissed ? pill(...stateTag) : null),
+      el("div", { class: "card-tags" }, cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label), statePill),
       cardHead(dismissed ? "neutral" : tag.cls, tag.icon, m.title, saidBy(segIds)),
       saidBlock(m),
       m.why ? labelled(m.kind === "weak" ? "What fell short" : "What worked", m.why) : null,
@@ -2425,7 +2662,8 @@
       state.momentBusy.delete(momentId);
     }
     if (state.callId === callId && state.refs) {
-      renderPanel();
+      if (action === "dismiss") movePanel();
+      else renderPanel();
       renderSummary(state.refs.tiles);
       // The panel was redrawn: give focus back to the control that was used.
       const btn = state.refs.panel.querySelector(`[data-item="${momentId}"] [data-action="${action}"]`);
@@ -2463,20 +2701,27 @@
     );
   }
 
+  // Dismissing or restoring re-sorts the cards; each slides to its new place.
+  function movePanel() {
+    const moves = state.refs ? M.flip(state.refs.panel, ".card[data-item]", (n) => n.dataset.item) : null;
+    renderPanel();
+    if (moves) moves.play();
+  }
+
   // Optimistic: the card changes at once and changes back if the server refuses.
   async function setDismissed(itemId, dismiss) {
     const callId = state.callId;
     const review = state.call.review;
     const before = review.dismissed.slice();
     review.dismissed = dismiss ? [...new Set([...before, itemId])].sort() : before.filter((x) => x !== itemId);
-    renderPanel();
+    movePanel();
     try {
       const saved = await api(`/api/calls/${enc(callId)}/items/${enc(itemId)}/${dismiss ? "dismiss" : "restore"}`, { method: "POST" });
       if (state.callId === callId && state.call) state.call.review = saved;
     } catch (e) {
       if (state.callId !== callId) return;
       review.dismissed = before;
-      renderPanel();
+      movePanel();
       state.notice = { kind: "error", text: `Could not ${dismiss ? "dismiss" : "restore"} ${itemId}: ${e.message}` };
       renderNotice(state.refs.notice);
     }
@@ -2682,7 +2927,7 @@
     const msg = state.draftMsg[draft.id];
     const form = el("form", { class: "draft", "aria-label": isEmail ? "Email draft" : "Calendar draft", novalidate: true });
 
-    const fieldNodes = specs.map(([key, label, type]) => {
+    const fieldNodes = specs.map(([key, label, type, placeholder]) => {
       const id = `d-${draft.id}-${key}`;
       const common = {
         id,
@@ -2690,6 +2935,7 @@
         class: "input",
         "aria-invalid": missing.has(key) ? "true" : null,
         value: values[key] || "",
+        placeholder: placeholder || null,
       };
       const input = type === "textarea" ? el("textarea", { ...common, rows: "6" }) : el("input", { type, ...common });
       input.addEventListener("input", () => {
@@ -2738,6 +2984,9 @@
       statusText = msg.text;
       statusKind = msg.kind;
     }
+    // Approving while the draft is on screen draws the check once.
+    const justApproved = M.changed(`draft:${state.callId}:${draft.id}`, draft.status) && draft.status === "approved";
+    const approvedNote = !dirty && msg && msg.kind === "ok" && draft.status === "approved";
 
     form.append(
       ...compact([
@@ -2750,7 +2999,7 @@
           ? el("p", { class: "missing", text: `Missing: ${[...missing].map((k) => FIELD_LABEL[k] || k).join(", ")}` })
           : null,
         el("div", { class: "row actions" }, ...actions),
-        el("p", { class: `form-status${statusKind ? ` is-${statusKind}` : ""}`, role: "status", text: statusText }),
+        el("p", { class: `form-status${statusKind ? ` is-${statusKind}` : ""}`, role: "status" }, approvedNote ? M.check(justApproved, 14) : null, statusText),
       ])
     );
     form.addEventListener("submit", (e) => {
@@ -3007,12 +3256,123 @@
       timeHint.textContent = `Times are read in ${value.trim() || offset}.`;
     };
     showZone(offset);
-    const offsetInput = el("input", { type: "text", id: "f-offset", name: "offset", value: offset, autocomplete: "off", spellcheck: "false" });
+    const offsetInput = el("input", { type: "text", id: "f-offset", name: "offset", value: offset, placeholder: "+05:45", autocomplete: "off", spellcheck: "false" });
     offsetInput.addEventListener("input", () => showZone(offsetInput.value));
 
     const submit = el("button", { type: "submit", class: "primary", id: "upload-submit", text: "Upload and analyse", disabled: !state.packList.length });
     const bar = el("progress", { class: "upload-progress", max: "1", value: "0", hidden: true, "aria-label": "Upload progress" });
     const errBox = el("p", { id: "upload-error", class: "form-error", role: "alert", hidden: true });
+    let recorder = null, stream = null, timer = null, previewUrl = null;
+    let disposed = false, pending = false;
+    const recordStatus = el("p", { class: "hint small", role: "status", text: "Record using your microphone, then listen before uploading. Microphone audio only." });
+    const preview = el("audio", { controls: true, hidden: true, "aria-label": "Recorded voice preview" });
+    const recordButton = el("button", { type: "button", id: "record-voice" }, icon("mic", 16), "Record voice");
+    const stopButton = el("button", { type: "button", text: "Stop recording", hidden: true });
+    const release = () => {
+      clearInterval(timer);
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      stream = null;
+    };
+    cleanupUpload = () => {
+      disposed = true;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      release();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      window.removeEventListener("pagehide", cleanup);
+    };
+    const cleanup = cleanupUpload;
+    window.addEventListener("pagehide", cleanup);
+    const ready = () => {
+      pending = false;
+      release();
+      fileInput.disabled = false;
+      recordButton.disabled = false;
+      stopButton.hidden = true;
+      submit.disabled = !state.packList.length;
+    };
+    fileInput.addEventListener("change", () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+      preview.removeAttribute("src");
+      preview.hidden = true;
+    });
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      recordButton.disabled = true;
+      recordStatus.textContent = "Microphone recording needs a supported browser on localhost or HTTPS. You can still choose a file.";
+    }
+    recordButton.addEventListener("click", async () => {
+      pending = true;
+      recordButton.disabled = true;
+      fileInput.disabled = true;
+      submit.disabled = true;
+      recordStatus.textContent = "Waiting for microphone permission…";
+      try {
+        const captured = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (disposed) { captured.getTracks().forEach((track) => track.stop()); return; }
+        stream = captured;
+        const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type));
+        recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+        const chunks = [];
+        let bytes = 0, failed = false;
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data.size) { chunks.push(event.data); bytes += event.data.size; }
+          if (bytes >= MAX_UPLOAD && recorder.state !== "inactive") recorder.stop();
+        });
+        recorder.addEventListener("error", () => {
+          failed = true;
+          recordStatus.textContent = "Recording failed. Try again or choose an audio file.";
+          if (recorder.state !== "inactive") recorder.stop();
+          ready();
+        });
+        recorder.addEventListener("stop", () => {
+          if (disposed) return;
+          ready();
+          if (failed) return;
+          const type = recorder.mimeType || mime || "audio/webm";
+          const blob = new Blob(chunks, { type });
+          if (!blob.size || blob.size > MAX_UPLOAD) {
+            recordStatus.textContent = blob.size ? "Recording exceeded 500 MB. Try a shorter recording." : "No audio was captured. Try again.";
+            return;
+          }
+          const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+          const files = new DataTransfer();
+          files.items.add(new File([blob], `voice-${Date.now()}.${ext}`, { type }));
+          fileInput.files = files.files;
+          fileInput.dispatchEvent(new Event("change"));
+          previewUrl = URL.createObjectURL(blob);
+          preview.src = previewUrl;
+          preview.hidden = false;
+          channels.value = "mono";
+          channels.dispatchEvent(new Event("change"));
+          recordStatus.textContent = "Recording ready. Listen below, then upload and analyse. Record again to replace it.";
+        });
+        recorder.start(1000);
+        pending = false;
+        const started = Date.now();
+        form.querySelector("#f-start").value = defaultStartValue(offsetInput.value);
+        const tick = () => { recordStatus.textContent = `Recording · ${mmss((Date.now() - started) / 1000)} — microphone audio only`; };
+        tick();
+        timer = setInterval(tick, 1000);
+        stopButton.hidden = false;
+        stopButton.focus();
+        stream.getAudioTracks().forEach((track) => track.addEventListener("ended", () => {
+          if (recorder.state !== "inactive") recorder.stop();
+        }));
+      } catch (error) {
+        if (disposed) return;
+        ready();
+        recordStatus.textContent = error.name === "NotAllowedError" ? "Microphone access was denied. Allow it in browser settings and try again, or choose a file." : "Could not start the microphone. Check that it is connected and available, or choose a file.";
+      }
+    });
+    stopButton.addEventListener("click", () => {
+      if (recorder && recorder.state !== "inactive") {
+        stopButton.disabled = true;
+        recorder.addEventListener("stop", () => { stopButton.disabled = false; recordButton.focus(); }, { once: true });
+        recorder.stop();
+      }
+    });
+    const voiceControls = el("div", { class: "upload-voice" },
+      el("div", { class: "upload-voice-actions" }, recordButton, stopButton), recordStatus, preview);
     const sectionHead = (title, sub, iconName) =>
       el(
         "div",
@@ -3034,7 +3394,7 @@
           "section",
           { class: "list-card page-section bento-anchor upload-recording" },
           sectionHead("Recording", "The file Sel will transcribe.", "mic"),
-          el("div", { class: "page-section-body" }, fileInput, drop)
+          el("div", { class: "page-section-body" }, fileInput, drop, voiceControls)
         ),
         el(
           "section",
@@ -3068,9 +3428,9 @@
           el(
             "div",
             { class: "upload-more-grid" },
-            formField("f-rep", optionalLabel("Rep's name in the call"), el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", value: saved.rep || "" }), "Labels the transcript. Defaults to the rep chosen above."),
-            formField("f-cust", optionalLabel("Customer name"), el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off" })),
-            formField("f-cust-email", optionalLabel("Customer email"), el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off" }), "For the follow-up draft. Sel does not send email."),
+            formField("f-rep", optionalLabel("Rep's name in the call"), el("input", { type: "text", id: "f-rep", name: "rep_name", autocomplete: "off", placeholder: "e.g. Sita", value: saved.rep || "" }), "Labels the transcript. Defaults to the rep chosen above."),
+            formField("f-cust", optionalLabel("Customer name"), el("input", { type: "text", id: "f-cust", name: "customer_name", autocomplete: "off", placeholder: "e.g. Ram Shrestha" })),
+            formField("f-cust-email", optionalLabel("Customer email"), el("input", { type: "email", id: "f-cust-email", name: "customer_email", autocomplete: "off", placeholder: "name@example.com" }), "For the follow-up draft. Sel does not send email."),
             formField("f-offset", "Time zone", offsetInput, "For example +05:45 or -03:00."),
             formField("f-channels", "Recording layout", channels),
             repChannelField
@@ -3092,13 +3452,14 @@
     }
     form.addEventListener("drop", (e) => {
       e.preventDefault();
-      if (e.dataTransfer && e.dataTransfer.files.length) {
+      if (!fileInput.disabled && e.dataTransfer && e.dataTransfer.files.length) {
         fileInput.files = e.dataTransfer.files;
         fileInput.dispatchEvent(new Event("change"));
       }
     });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
+      if (pending || (recorder && recorder.state !== "inactive")) return;
       submitUpload(form);
     });
     main.replaceChildren(
@@ -3311,7 +3672,11 @@
     DRAFT_STATUS,
     SCORE_STATUS,
     ROLE_LABEL,
-    reduceMotion,
+    // Read live: the system setting can change while the page is open.
+    get reduceMotion() {
+      return !M.ok();
+    },
+    motion: M,
     worklet: (SCRIPT && SCRIPT.dataset.worklet) || "/static/pcm-worklet.js",
     sim: null,
     coach: null,

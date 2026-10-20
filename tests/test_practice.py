@@ -84,17 +84,27 @@ class AICustomerTests(unittest.TestCase):
                "if_good": "Warms up.", "if_poor": "Stays doubtful.", "difficulty": 1}
 
     def test_rules_customer_softens_after_a_question_and_ends_on_a_dated_promise(self):
-        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "It has a great warranty."}]
-        self.assertEqual(rules_reply(lines, 1)["mood"], "doubtful")
-        lines.append({"role": "rep", "text": "What does the other quote include?"})
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "What are you comparing it with?"}]
         self.assertEqual(rules_reply(lines, 1)["mood"], "warming")
         lines.append({"role": "rep", "text": "I'll email you the comparison by tomorrow evening."})
         self.assertTrue(rules_reply(lines, 1)["end_call"])
 
+    def test_defending_first_needs_one_more_question(self):
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "It has a great warranty."}]
+        self.assertEqual(rules_reply(lines, 1)["mood"], "doubtful")
+        lines.append({"role": "rep", "text": "What does the other quote include?"})
+        self.assertEqual(rules_reply(lines, 1)["mood"], "calm")  # asked once, but defended first
+        lines.append({"role": "rep", "text": "I'll email you the comparison by tomorrow evening."})
+        refused = rules_reply(lines, 1)
+        self.assertFalse(refused["end_call"])  # not convinced yet: no day is fixed
+        self.assertIn("not ready", refused["say"])
+        lines.append({"role": "rep", "text": "Which matters more to you, the price or how long it lasts?"})
+        self.assertEqual(rules_reply(lines, 1)["mood"], "warming")
+
     def test_the_model_cannot_hang_up_early(self):
         llm = ScriptedLLM({"customer": {"say": "Okay, bye.", "end_call": True, "mood": "calm"}})
         ai = AICustomer(self.PERSONA, llm)
-        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "It has a warranty."}]
+        lines = [{"role": "customer", "text": "It is a little expensive."}, {"role": "rep", "text": "What matters most to you?"}]
         self.assertFalse(ai.reply(lines)["end_call"])
         lines.append({"role": "rep", "text": "I'll email you the quote by tomorrow evening."})
         self.assertTrue(ai.reply(lines)["end_call"])  # a dated next step was agreed
@@ -114,6 +124,76 @@ class AICustomerTests(unittest.TestCase):
         names = {p[1] for p in llm.prompts}
         self.assertEqual(len(names), 1)
         self.assertIn("It is a little expensive.", llm.prompts[0][1])
+
+
+class ToughCustomerTests(unittest.TestCase):
+    """Code decides where the customer stands; the model only words it, and may not give in early."""
+
+    PERSONA = {**AICustomerTests.PERSONA, "difficulty": 2}
+
+    def lines(self, *rep):
+        return TextCustomerTests.lines(self, *rep)
+
+    def test_stance_counts_real_questions_only(self):
+        from sel.ai_customer import stance
+
+        self.assertEqual(stance(self.lines("Hello."), 2)["stance"], "holding")
+        for offer in ("Can I send you a brochure?", "Does that make sense?", "It lasts long, right?",
+                      "Would you like me to email it?"):
+            with self.subTest(offer=offer):
+                self.assertEqual(stance(self.lines(offer), 1)["asked"], 0)
+        st = stance(self.lines("What are you comparing it with?", "And what is your monthly bill?"), 2)
+        self.assertEqual((st["stance"], st["asked"], st["needed"]), ("softening", 2, 2))
+        defended = stance(self.lines("Ours has a 25-year warranty.", "What are you comparing?", "How big is your roof?"), 2)
+        self.assertEqual((defended["defended"], defended["needed"], defended["stance"]), (True, 3, "holding"))
+        self.assertEqual(stance(self.lines("Hello.", "I'll call you on Sunday morning."), 2)["stance"], "refuse_step")
+
+    def test_each_rep_turn_carries_its_note_and_the_prompts_still_extend(self):
+        from sel.ai_customer import NOTES
+
+        chat = TextCustomerTests.Chat(["Why is it so much?", "Hmm, my bill is about 3,000 a month."])
+        ai = AICustomer(self.PERSONA, chat)
+        ai.reply(self.lines("Ours has a 25-year warranty."))
+        ai.reply(self.lines("Ours has a 25-year warranty.", "What is your monthly bill?"))
+        a, b = chat.calls[0]["messages"], chat.calls[1]["messages"]
+        self.assertEqual(b[:len(a)], a)  # the note on a turn never changes later
+        self.assertTrue(a[-1]["content"].endswith(NOTES["holding"]))
+        self.assertTrue(b[-1]["content"].endswith(NOTES["holding"]))  # defended first: one question is not enough
+        self.assertIn("[note]", a[0]["content"])
+
+    def test_a_model_that_gives_in_early_is_overruled(self):
+        chat = TextCustomerTests.Chat(["Absolutely, that's very helpful!", "Sounds good, let's book it."])
+        ai = AICustomer(self.PERSONA, chat)
+        held = ai.reply(self.lines("Ours has a 25-year warranty."))
+        self.assertEqual(held["by"], "rules (no language model)")
+        self.assertEqual(ai.overruled, ["Absolutely, that's very helpful!"])
+        asked = self.lines("What are you comparing?", "What is your monthly bill?")
+        self.assertEqual(ai.reply(asked)["say"], "Sounds good, let's book it.")  # softened: the model may warm up
+        self.assertEqual(len(ai.overruled), 1)
+
+    def test_a_dated_step_before_softening_does_not_end_the_call(self):
+        chat = TextCustomerTests.Chat(["Okay, Sunday works.", "I'm not ready for that yet."])
+        ai = AICustomer(self.PERSONA, chat)
+        early = ai.reply(self.lines("Hello.", "I'll call you on Sunday morning."))
+        self.assertFalse(early["end_call"])
+        self.assertEqual(early["by"], "rules (no language model)")  # "works" while holding: overruled
+        self.assertIn("not ready", early["say"])
+        self.assertTrue(chat.calls[0]["messages"][-1]["content"].endswith("Say you are not ready to commit, and why.]"))
+
+    def test_json_format_gets_the_note_and_the_same_guard(self):
+        llm = ScriptedLLM({"customer": {"say": "Absolutely, that's very helpful.", "end_call": True, "mood": "warming"}})
+        ai = AICustomer(self.PERSONA, llm, fmt="json")
+        out = ai.reply(self.lines("Ours has a 25-year warranty."))
+        self.assertEqual(out["by"], "rules (no language model)")
+        self.assertFalse(out["end_call"])
+        self.assertIn("[note: you are not convinced yet", llm.prompts[0][2])
+
+    def test_the_rules_customer_says_goodbye_unconvinced(self):
+        lines = self.lines(*["It is the best on the market."] * 8)
+        out = rules_reply(lines, 2)
+        self.assertTrue(out["end_call"])
+        self.assertEqual(out["mood"], "doubtful")
+        self.assertIn("think about it", out["say"])
 
 
 class JudgeTests(unittest.TestCase):
@@ -394,13 +474,13 @@ class TextCustomerTests(unittest.TestCase):
         self.assertLessEqual(chat.calls[0]["max_tokens"], 60)
 
     def test_code_decides_the_mood_and_the_ending(self):
-        chat = self.Chat(["Sounds good, thanks. End call.", "Great, talk then."])
+        chat = self.Chat(["Fine, thanks. End call.", "Great, talk then."])
         ai = AICustomer(self.PERSONA, chat)
-        plain = ai.reply(self.lines("It has a warranty."))
+        plain = ai.reply(self.lines("What are you comparing?"))
         self.assertFalse(plain["end_call"])  # the model's "End call." does not hang up
-        self.assertEqual(plain["say"], "Sounds good, thanks.")
-        self.assertEqual(plain["mood"], rules_reply(self.lines("It has a warranty."), 1)["mood"])
-        done = ai.reply(self.lines("It has a warranty.", "I'll email you the quote by tomorrow evening."))
+        self.assertEqual(plain["say"], "Fine, thanks.")
+        self.assertEqual(plain["mood"], rules_reply(self.lines("What are you comparing?"), 1)["mood"])
+        done = ai.reply(self.lines("What are you comparing?", "I'll email you the quote by tomorrow evening."))
         self.assertTrue(done["end_call"])  # a dated next step: code ends the call, in the model's words
         self.assertEqual(done["say"], "Great, talk then.")
 

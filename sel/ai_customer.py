@@ -20,10 +20,18 @@ to the rules customer when the model fails, so a drill never stalls. A
 warm-up request when the room opens loads the model and reads the persona
 before the rep's first line.
 
+Code decides where the customer stands (``stance``), from Sel's rules over the
+rep's lines: the customer holds the concern until the rep has asked enough real
+questions (one per difficulty level, one more if the rep defended before asking,
+as the Judge counts it), refuses to fix a day while still holding, and agrees to
+a dated next step only once softened. Each rep turn carries a short note telling
+the model where it stands; a reply that gives in while the customer is still
+holding is replaced by the rules customer's line (``overruled``). Small models
+gave in after one exchange ("Absolutely, that's very helpful").
+
 The rules customer opens with the persona's opening (the real customer line,
-anonymised), softens after the rep asks questions about what the customer
-needs (how many depends on the difficulty), pushes back otherwise, and ends
-the call once a next step is agreed or after a few turns.
+anonymised), follows the same stance, and ends the call once a dated next step
+is agreed or after a few turns.
 """
 
 from __future__ import annotations
@@ -63,8 +71,29 @@ If the salesperson handles it well: {if_good}
 If they do not: {if_poor}
 Difficulty: {difficulty}
 Reply with only what you say out loud: one or two short sentences, under 25 words. No names, labels, quotes or
-stage directions. Do not invent prices or product facts; react to what the salesperson says."""
-CONNECTS = "(The salesperson calls you. You answer.)"  # a constant first turn, so every prompt shares one prefix
+stage directions. Do not invent prices or product facts; react to what the salesperson says.
+The salesperson's turns end with a [note] saying where you stand. Follow it and never say it out loud."""
+CONNECTS = "(The salesperson calls you. You answer.)"
+NOTES = {  # where the customer stands, as told to the model at the end of each rep turn
+    "holding": "[note: you are not convinced yet. Keep your concern: push back, compare, or ask what you really get. "
+               "Do not agree, praise the answer or accept a next step.]",
+    "refuse_step": "[note: they want to fix a next step, but you are not convinced yet. Say you are not ready to "
+                   "commit, and why.]",
+    "softening": "[note: they have asked about what matters to you. You can warm up a little and answer honestly; "
+                 "you may agree to a clear next step.]",
+    "agreed": "[note: you have agreed a clear next step. Say a short goodbye that confirms it.]",
+}
+# A customer who gives in: refused while code says the customer is still holding.
+_GIVES_IN = re.compile(r"\b(?:sounds? (?:good|great|perfect|fair)|(?:that'?s|that is|very) (?:very |really )?"
+                       r"(?:helpful|great|perfect|fair|reassuring)|that helps|absolutely(?!,? not)|you'?ve convinced me|"
+                       r"i'?m convinced|let'?s (?:do it|go ahead|book|proceed|schedule)|sign me up|i'?ll take it|"
+                       r"(?:that|it) works for me|\bworks(?: for me)?[.!]*$|see you (?:then|on\b)|\bdeal[.!]*$|"
+                       r"i'?m interested\b)", re.I)
+# Questions that are not about the customer: offers, permission and "does that make sense?".
+_NOT_DISCOVERY = re.compile(r"^\W*(?:(?:so|and|okay|ok)\W+)?(?:(?:can|could|shall|may) (?:i|we) (?:send|email|share|"
+                            r"book|schedule|come|call|visit|arrange|set up|show|go ahead)|would you like (?:me|us) to|"
+                            r"does (?:that|this) (?:make sense|help|sound|work)|any (?:other )?questions|"
+                            r"(?:is )?that (?:ok|okay|fine)|sounds? good)", re.I)  # a constant first turn, so every prompt shares one prefix
 TEXT_MAX_TOKENS = 48
 FORMATS = ("text", "json")
 _LABEL = re.compile(r"^\s*(?:you\s*\(customer\)|customer|me|you|[A-Z][a-z]+)\s*:\s*", re.I)
@@ -89,6 +118,7 @@ class AICustomer:
         # A client without plain-text chat (scripted test models) uses the JSON format.
         self.format = fmt if fmt == "json" or hasattr(llm, "complete_chat") else "json"
         self.timings: list[float] = []  # seconds per model reply, for scripts/drill_latency.py
+        self.overruled: list[str] = []  # model lines that gave in while the customer was still holding
 
     @property
     def name(self) -> str:
@@ -104,7 +134,7 @@ class AICustomer:
         try:
             if self.format == "text":
                 self.llm.complete_chat(turns(self.text_system, [{"role": "customer", "text": self.opening()["say"]}],
-                                             open_turn=False), max_tokens=1)
+                                             open_turn=False, difficulty=self.difficulty), max_tokens=1)
             else:
                 self.llm.complete_json(self.system, render([]), SCHEMA, "customer-warm-up", max_tokens=1)
         except LLMError:
@@ -117,12 +147,14 @@ class AICustomer:
         if self.llm is not None:
             t = time.perf_counter()
             try:
-                out = self.llm.complete_json(self.system, render(lines), SCHEMA, "customer", max_tokens=80)
+                out = self.llm.complete_json(self.system, render(lines, self.difficulty), SCHEMA, "customer",
+                                             max_tokens=80)
                 self.timings.append(time.perf_counter() - t)
                 # Small models write stage directions into the line ("Sounds good, thanks. End call.").
                 say = _STAGE.sub("", " ".join(str(out.get("say") or "").split())).strip()
-                if say and not _IDS.search(say):
-                    return {"say": say[:MAX_SAY], "end_call": bool(out.get("end_call")) and may_end(lines),
+                if say and not _IDS.search(say) and not self._gives_in(say, lines):
+                    return {"say": say[:MAX_SAY],
+                            "end_call": bool(out.get("end_call")) and may_end(lines, self.difficulty),
                             "mood": out.get("mood") if out.get("mood") in MOODS else "calm", "by": self.name,
                             "seconds": round(self.timings[-1], 2)}
             except LLMError:
@@ -137,23 +169,32 @@ class AICustomer:
                 1 for x in lines if x["role"] == "customer") >= MAX_TURNS else self._model_goodbye(lines, rules)
         t = time.perf_counter()
         try:
-            out = self.llm.complete_chat(turns(self.text_system, lines), max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
+            out = self.llm.complete_chat(turns(self.text_system, lines, difficulty=self.difficulty),
+                                         max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
             self.timings.append(time.perf_counter() - t)
         except LLMError:
             self.timings.append(time.perf_counter() - t)
             return {**rules, "by": "rules (no language model)"}
         say = clean_line(out)
-        if not say:
+        if not say or self._gives_in(say, lines):
             return {**rules, "by": "rules (no language model)"}
         # Mood comes from Sel's rules (how the rep has done so far), not from the model.
         return {"say": say, "end_call": False, "mood": rules["mood"], "by": self.name,
                 "seconds": round(self.timings[-1], 2)}
 
+    def _gives_in(self, say: str, lines: list[dict[str, Any]]) -> bool:
+        """A line that agrees or praises while code says the customer is still holding: refused and logged."""
+        if stance(lines, self.difficulty)["stance"] in ("holding", "refuse_step") and _GIVES_IN.search(say):
+            self.overruled.append(say)
+            return True
+        return False
+
     def _model_goodbye(self, lines: list[dict[str, Any]], rules: dict[str, Any]) -> dict[str, Any]:
         """The model's own words for agreeing to the next step; the rules decided the call ends."""
         t = time.perf_counter()
         try:
-            out = self.llm.complete_chat(turns(self.text_system, lines), max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
+            out = self.llm.complete_chat(turns(self.text_system, lines, difficulty=self.difficulty),
+                                         max_tokens=TEXT_MAX_TOKENS, stop=["\n"])
             self.timings.append(time.perf_counter() - t)
             say = clean_line(out)
         except LLMError:
@@ -165,20 +206,33 @@ class AICustomer:
                 "seconds": round(self.timings[-1], 2)}
 
 
-def turns(system: str, lines: list[dict[str, Any]], open_turn: bool = True) -> list[dict[str, str]]:
+def turns(system: str, lines: list[dict[str, Any]], open_turn: bool = True,
+          difficulty: int | None = None) -> list[dict[str, str]]:
     """The drill as chat turns: the rep is the user, the customer the assistant.
 
     Starts with the same two messages every time (the persona and a constant
     "the call connects" turn), and consecutive lines by one side are joined, so
-    each request is the previous one with the newest turns appended.
+    each request is the previous one with the newest turns appended. With a
+    ``difficulty``, each rep turn ends with the note for where the customer
+    stood after it; that depends only on the lines up to that turn, so the
+    earlier turns read the same in every request.
     """
-    msgs: list[dict[str, str]] = [{"role": "system", "content": system}, {"role": "user", "content": CONNECTS}]
-    for x in lines:
+    groups: list[list[Any]] = []  # [role, text, index of the group's last line]
+    for i, x in enumerate(lines):
         role = "user" if x["role"] == "rep" else "assistant"
         text = " ".join(str(x.get("text") or "").split())
         if not text:
             continue
-        if msgs[-1]["role"] == role:
+        if groups and groups[-1][0] == role:
+            groups[-1][1] += " " + text
+            groups[-1][2] = i
+        else:
+            groups.append([role, text, i])
+    msgs: list[dict[str, str]] = [{"role": "system", "content": system}, {"role": "user", "content": CONNECTS}]
+    for role, text, last in groups:
+        if role == "user" and difficulty is not None:
+            text += " " + NOTES[stance(lines[:last + 1], difficulty)["stance"]]
+        if msgs[-1]["role"] == role:  # the customer answers before the rep speaks: joined to the call connecting
             msgs[-1] = {"role": role, "content": msgs[-1]["content"] + " " + text}
         else:
             msgs.append({"role": role, "content": text})
@@ -200,49 +254,97 @@ def clean_line(text: str) -> str:
     return " ".join(parts[:2])[:MAX_SAY]
 
 
-def render(lines: list[dict[str, Any]]) -> str:
+def render(lines: list[dict[str, Any]], difficulty: int | None = None) -> str:
+    note = f"\n{NOTES[stance(lines, difficulty)['stance']]}" if difficulty is not None else ""
     return "\n".join(f"{'SALESPERSON' if x['role'] == 'rep' else 'YOU (CUSTOMER)'}: {x['text']}" for x in lines[-20:]) + \
-        "\nYOU (CUSTOMER):"
+        note + "\nYOU (CUSTOMER):"
 
 
 MIN_TURNS_TO_END = 4  # customer lines before a model may end the call without an agreed next step
 
 
-def may_end(lines: list[dict[str, Any]]) -> bool:
+def _discovery(sentence: str) -> bool:
+    from .live import is_question, is_tag_question
+
+    return is_question(sentence) and not is_tag_question(sentence) and not _NOT_DISCOVERY.search(sentence)
+
+
+def stance(lines: list[dict[str, Any]], difficulty: int = 2) -> dict[str, Any]:
+    """Where the customer stands after the latest line, from Sel's rules over the rep's lines.
+
+    ``asked`` counts the rep's real questions (not tag questions, offers such as "Can I send you…" or "Does that
+    make sense?"). The customer softens at ``needed``: the difficulty, plus one if the rep's first reply defended
+    (a claim before any question, as the objection rule and the Judge count it). A dated next step offered before
+    that is refused (``refuse_step``); after it, it is agreed.
+    """
+    from .dates import due_phrase_in
+    from .live import is_claimish, is_commitment, sentences
+
+    reps = [x["text"] for x in lines if x["role"] == "rep"]
+    asked = sum(1 for text in reps for s in sentences(text) if _discovery(s))
+    defended = False
+    if reps:
+        for s in sentences(reps[0]):
+            if _discovery(s):
+                break
+            if is_claimish(s):
+                defended = True
+                break
+    needed = max(1, int(difficulty)) + (1 if defended else 0)
+    offered = bool(reps) and lines[-1]["role"] == "rep" and any(
+        is_commitment(s, s) and due_phrase_in(s) for s in sentences(reps[-1]))
+    if asked < needed:
+        state = "refuse_step" if offered else "holding"
+    else:
+        state = "agreed" if offered else "softening"
+    return {"stance": state, "asked": asked, "needed": needed, "defended": defended}
+
+
+def may_end(lines: list[dict[str, Any]], difficulty: int = 2) -> bool:
     """Whether the customer may hang up: a dated next step was just agreed, or the call has gone on a while.
 
     Small models set end_call on their first reply; code decides, so a drill is never cut short.
     """
-    from .dates import due_phrase_in
-    from .live import is_commitment, sentences
-
-    reps = [x["text"] for x in lines if x["role"] == "rep"]
-    agreed = bool(reps) and any(is_commitment(s, s) and due_phrase_in(s) for s in sentences(reps[-1]))
+    agreed = stance(lines, difficulty)["stance"] == "agreed"
     return agreed or sum(1 for x in lines if x["role"] == "customer") >= MIN_TURNS_TO_END
 
 
+HOLDING = ("Maybe, but it still seems like a lot to me.",
+           "I hear you, but I'm still not sure it's worth it for us.",
+           "Everyone tells me that. Why would it be different with you?")
+ANNOYED = ("You keep telling me the same thing. I'm still not convinced it's worth it.",
+           "You're not listening to what I'm asking. Why should I believe you?")
+ASKED_NOT_ENOUGH = ("Honestly, I just want to be sure what I'm getting before I decide.",
+                    "I suppose. But what difference would that make for me?")
+
+
 def rules_reply(lines: list[dict[str, Any]], difficulty: int = 2) -> dict[str, Any]:
-    from .dates import due_phrase_in
-    from .live import is_commitment, is_question, is_tag_question, sentences
+    from .live import sentences
 
     rep_lines = [x["text"] for x in lines if x["role"] == "rep"]
     mine = [x for x in lines if x["role"] == "customer"]
-    good = sum(1 for text in rep_lines for s in sentences(text) if is_question(s) and not is_tag_question(s))
-    last = rep_lines[-1] if rep_lines else ""
-    agreed = any(is_commitment(s, s) and due_phrase_in(s) for s in sentences(last))
-    if agreed or len(mine) >= MAX_TURNS:
+    st = stance(lines, difficulty)
+    softened = st["asked"] >= st["needed"]
+    if st["stance"] == "agreed":
         return {"say": "Okay, that works. Send me the details and we'll talk then. Thank you.", "end_call": True,
-                "mood": "warming" if good >= difficulty else "calm"}
-    asked = any(is_question(s) and not is_tag_question(s) for s in sentences(last))
-    if asked and good >= difficulty and any(x.get("mood") == "warming" for x in mine):
+                "mood": "warming"}
+    if len(mine) >= MAX_TURNS:
+        if softened:
+            return {"say": "Okay. Send me the details and I'll think it over. Thank you.", "end_call": True,
+                    "mood": "calm"}
+        return {"say": "I'll think about it. Thank you for calling.", "end_call": True, "mood": "doubtful"}
+    if st["stance"] == "refuse_step":
+        return {"say": "I'm not ready to fix a day yet. I still don't see why it's worth it.", "end_call": False,
+                "mood": "doubtful"}
+    last = rep_lines[-1] if rep_lines else ""
+    asked = any(_discovery(s) for s in sentences(last))
+    if asked and softened and any(x.get("mood") == "warming" for x in mine):
         return {"say": "Okay, I'm listening. What do you suggest we do next?", "end_call": False, "mood": "warming"}
-    if asked and good >= difficulty:
+    if asked and softened:
         return {"say": "That helps, thank you. So what would the next step be?", "end_call": False, "mood": "warming"}
     if asked:
-        return {"say": "Honestly, I just want to be sure what I'm getting for the price before I decide.",
-                "end_call": False, "mood": "calm"}
+        return {"say": ASKED_NOT_ENOUGH[len(mine) % len(ASKED_NOT_ENOUGH)], "end_call": False, "mood": "calm"}
     pushed = sum(1 for x in mine if x.get("mood") in ("doubtful", "annoyed"))
     if pushed >= 2:
-        return {"say": "You keep telling me the same thing. I'm still not convinced it's worth it.", "end_call": False,
-                "mood": "annoyed"}
-    return {"say": "Maybe, but it still seems like a lot to me.", "end_call": False, "mood": "doubtful"}
+        return {"say": ANNOYED[pushed % len(ANNOYED)], "end_call": False, "mood": "annoyed"}
+    return {"say": HOLDING[len(mine) % len(HOLDING)], "end_call": False, "mood": "doubtful"}

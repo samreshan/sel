@@ -67,7 +67,7 @@ whose follow-up drafts wait for approval.
 ## Commands
 
 ```bash
-python -m unittest discover -s tests -t .                 # 230 tests; the 9 browser tests skip without Playwright
+python -m unittest discover -s tests -t .                 # 237 tests; the 9 browser tests skip without Playwright
 python -m sel serve                                       # http://127.0.0.1:8765, loads the two example calls
 python -m sel doctor                                      # models in use, where they run, licences; fails on a proprietary service
 python -m sel demo-setup [--next]                         # with Sel running: team, lead, the first real call through the models (docs/scope.md)
@@ -76,7 +76,7 @@ python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --analyzer ru
 python -m sel demo examples/calls/pos-01 --pack packs/demo-pos --analyzer rules
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --coaching fixture   # coaching vs coaching_gold.json (fixture|rules|llm; --moments per-criterion|single)
 python -m sel eval examples/calls/solar-01 --pack packs/demo-solar --transfer rules    # Judge vs transfer_gold.json (rules|llm)
-python scripts/drill_latency.py                            # AI customer reply times (--model, --rules, --format text|json)
+python scripts/drill_latency.py                            # AI customer reply times and toughness (--model, --rules, --format text|json, --rep asks|defends)
 python scripts/screens_team.py --out shots/                # Leads, Prep, Team, Settings, Playbook screenshots (desktop, 390 px) + keyboard pass
 python scripts/perf_ui.py                                 # UI performance on a generated 2-hour call (Playwright)
 python scripts/simulate_call.py examples/calls/pos-02 --pack demo-pos --model base   # two browsers, live Whisper
@@ -473,9 +473,21 @@ check on that call) → the Coach closes the focus or keeps going.
   rep line queues one reply on the AI worker thread; a reply that arrives
   while the rep spoke again is recomputed; `ai_busy` is cleared under the same
   lock that adds the reply. A model error, an empty line or a line with ids
-  falls back to the rules customer (softens after `difficulty` real
-  questions, pushes back otherwise, says goodbye when a dated next step is
-  agreed or after 8 turns). `end_call` ends the room; the rep's tab files it.
+  falls back to the rules customer. `end_call` ends the room; the rep's tab
+  files it.
+- **Where the customer stands is code's call** (`ai_customer.stance`, 20 Oct).
+  From Sel's rules over the rep's lines: `asked` counts real questions (not
+  tag questions, offers such as "Can I send you…", or "Does that make
+  sense?"); the customer softens at `needed` = the difficulty, plus one if the
+  rep's first reply defended before asking (as the Judge counts it). Stances:
+  `holding`, `refuse_step` (a dated next step offered while still holding: the
+  customer won't fix a day), `softening`, `agreed` (the call ends). Each rep
+  turn ends with a `[note: …]` for the stance after it; it depends only on the
+  lines up to that turn, so each prompt still extends the last. A model line
+  that gives in while holding ("Absolutely, that's very helpful", "Sunday
+  works") is replaced by the rules line and kept in `AICustomer.overruled`.
+  The rules customer follows the same stances and, after 8 lines unconvinced,
+  says "I'll think about it" instead of agreeing.
 - **Filing and debrief.** A drill room is filed as a call of kind
   `practice` with `drill_id`, analysed by the rules (keeps the CPU free) and
   never coached; `on_drill_finished` records the attempt (status judging) and
@@ -821,6 +833,12 @@ Browser (`sel/web/app.js`):
   --format text` and `--format json` on the i7 and the M2 and record both here.
   Windowing to the last N lines was not done: it would change the start of
   every prompt and stop the server reusing it.
+- The tougher customer (stance notes and the gives-in guard, 20 Oct) is tested
+  only with scripted models. Run `scripts/drill_latency.py --rep defends` and
+  `--rep asks` on qwen2.5:1.5b: with `defends` the customer should never end
+  the call (`refuse_step` at the end) and `overruled` says how often the model
+  tried to give in; with `asks` it should agree. If the model echoes the
+  `[note]` (refused for the brackets), the rules line is used; count those too.
 - Phase 4's model passes (Prep writer, Librarian, 1:1 summary) are tested only
   with scripted models; measure them on the demo machines.
 - Model briefs (Prep, 1:1) are cached in memory: a restart rebuilds them on

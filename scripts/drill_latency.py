@@ -10,6 +10,7 @@ inherits SEL_LLM_*), or --model to try another one on the same server.
     python scripts/drill_latency.py --model qwen2.5:1.5b --runs 3
     python scripts/drill_latency.py --rules              # no model: the floor
     python scripts/drill_latency.py --format json        # the older JSON reply format, to compare with text
+    python scripts/drill_latency.py --rep defends        # a rep who only defends: does the customer hold out?
 
 Each drill room warms the model up when it opens (as in the app); the script waits for that before
 the first rep line, so "first reply" is what a rep sees after reading the customer's opening.
@@ -32,6 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from sel import ai_customer  # noqa: E402
 from sel.ai_customer import AICustomer  # noqa: E402
 from sel.cli import _report_for_example  # noqa: E402
 from sel.coach import diagnose  # noqa: E402
@@ -43,12 +45,29 @@ from sel.scoring import score_report  # noqa: E402
 from sel.service import CallService  # noqa: E402
 from sel.simulator import SimulatorHub  # noqa: E402
 
-REP_LINES = [
-    "I understand. Can I ask what the other quote includes: which panels and which inverter?",
-    "And how many years of warranty did they offer on the inverter?",
-    "Ours includes installation and net-metering application support. Would a site visit help you compare?",
-    "Great, I'll email you the comparison by tomorrow evening and call you on Sunday morning.",
-]
+REPS = {
+    # Asks first: the customer should soften after two real questions and agree the dated step.
+    "asks": [
+        "I understand. Can I ask what the other quote includes: which panels and which inverter?",
+        "And how many years of warranty did they offer on the inverter?",
+        "Ours includes installation and net-metering application support. Would a site visit help you compare?",
+        "Great, I'll email you the comparison by tomorrow evening and call you on Sunday morning.",
+    ],
+    # Only defends: the customer should hold out and refuse to fix a day.
+    "defends": [
+        "Our panels have a 25-year performance warranty, so it is worth the price.",
+        "We use tier-one panels and our installation team is the best in the valley.",
+        "Trust me, the quality difference pays for itself.",
+        "I'll email you the quote by tomorrow evening and call you on Sunday morning.",
+    ],
+}
+
+
+def final_stance(lines: list[dict], difficulty: int) -> str:
+    """Where the customer stood after the rep's last line (agreed, refuse_step, softening or holding)."""
+    lines = [{"role": x["role"], "text": x["text"]} for x in lines]
+    last = max((i for i, x in enumerate(lines) if x["role"] == "rep"), default=-1)
+    return ai_customer.stance(lines[:last + 1], difficulty)["stance"]
 
 
 def pct(values: list[float], p: float) -> float:
@@ -63,6 +82,8 @@ def main() -> int:
     ap.add_argument("--rules", action="store_true", help="no model: the rules customer")
     ap.add_argument("--format", choices=("text", "json"), default=None,
                     help="AI customer reply format (default: SEL_CUSTOMER_FORMAT, else text)")
+    ap.add_argument("--rep", choices=tuple(REPS), default="asks",
+                    help="the scripted rep: asks questions first (default) or only defends")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     args = ap.parse_args()
     if args.model:
@@ -94,7 +115,7 @@ def main() -> int:
             warm_s = time.perf_counter() - t
             hub.start(room.code, client)
             replies = []
-            for line in REP_LINES:
+            for line in REPS[args.rep]:
                 if room.state != "live":
                     break
                 before = len(room.lines)
@@ -104,7 +125,8 @@ def main() -> int:
                     time.sleep(0.02)
                 replies.append(room.lines[-1]["text"] if room.lines[-1]["role"] == "customer" else None)
             runs.append({"seconds": list(room.ai_seconds), "replies": replies, "warm_up_s": round(warm_s, 2),
-                         "format": agent.format,
+                         "format": agent.format, "overruled": list(agent.overruled),
+                         "stance": final_stance(room.lines, agent.difficulty),
                          "by": sorted({x.get("source") for x in room.lines}), "ended_by_customer": room.state == "ended"})
         hub.close()
         service.wait_idle()
@@ -124,6 +146,12 @@ def main() -> int:
         "max_s": round(max(measured), 2) if measured else None,
         "target_s": "2 to 3",
         "example_replies": runs[-1]["replies"],
+        "rep": args.rep,
+        # Toughness: model lines refused for giving in while Sel's rules said the customer was still holding.
+        "overruled": [x for r in runs for x in r["overruled"]],
+        "model_lines": sum(len(r["seconds"]) for r in runs),
+        "ended_by_customer": [r["ended_by_customer"] for r in runs],
+        "final_stance": runs[-1]["stance"],
         "llm_usage": llm.stats.to_dict() if llm else None,
     }
     if llm and llm.stats.calls:
@@ -142,6 +170,13 @@ def main() -> int:
               f"over {out['replies']} replies (target {out['target_s']} s)")
         if out["warm_up_replies_s"]:
             print(f"Warm-up drill (not counted): {out['warm_up_replies_s']}")
+        print(f"Rep: {out['rep']}; ended by the customer: {out['ended_by_customer']}; "
+              f"where the customer stood at the end: {out['final_stance']}")
+        if llm:
+            print(f"Model lines that gave in too early (replaced by the rules customer): {len(out['overruled'])} of "
+                  f"{out['model_lines']}")
+        for x in out["overruled"]:
+            print(f"  overruled: {x}")
         for r in out["example_replies"]:
             print(f"  customer: {r}")
     return 0

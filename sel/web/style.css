@@ -143,6 +143,7 @@
   --space-16: 64px;
   --text-display: clamp(36px, 4.5vw, 64px);
   --text-hero: clamp(28px, 3vw, 40px);
+  --text-hero-compact: 32px;
   --font-ui: "Switzer", system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", sans-serif;
   --font: "Switzer", system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -942,8 +943,12 @@ progress {
 }
 
 /* The review scrolls on its own beside the transcript, its tabs held at the
-   top while it does. The small inline inset keeps focus rings unclipped. */
+   top while it does. The small inline inset keeps focus rings unclipped.
+   Cards leaving the bottom fade out instead of being cut at the edge; the
+   fade is no taller than the bottom padding, so at the end nothing is faded. */
 .col-right {
+  --col-fade: var(--space-8);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--col-fade)), transparent);
   min-width: 0;
   position: sticky;
   top: var(--space-6);
@@ -2639,6 +2644,76 @@ button.danger:hover:not(:disabled) {
   margin-top: -4px;
 }
 
+/* Before the call: the empty tile is the invite, and mine checks the microphone. */
+.person.is-invite {
+  opacity: 1;
+  background: var(--surface);
+  border: 1px dashed var(--border-2);
+}
+
+.person-invite,
+.person-check {
+  grid-column: 2;
+}
+
+.person-invite {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+.invite-code {
+  font: 600 var(--text-title) var(--mono);
+  letter-spacing: .12em;
+  color: var(--text);
+}
+
+.person-check.is-ok {
+  color: var(--ok-ink);
+}
+
+.sim-ready {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-2);
+}
+
+.sim-ready svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ok-ink);
+}
+
+.sim-tip {
+  margin: 0;
+  color: var(--muted);
+}
+
+.sim-focus {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--violet-bg);
+  color: var(--violet-ink);
+  font-size: var(--text-small);
+}
+
+.sim-focus svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.score-row.is-focus {
+  box-shadow: inset 0 0 0 1px var(--violet-ink);
+}
+
 .sim-lines {
   list-style: none;
   margin: 0;
@@ -2913,6 +2988,11 @@ button.danger:hover:not(:disabled) {
 
   .flow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Stacked, the invite comes first: it is what the waiting room is for. */
+  .person.is-invite {
+    order: -1;
   }
 
   .main.is-sim {
@@ -4562,12 +4642,12 @@ select.title-select:focus-visible {
 .today-hero h1, .today-hero .today-hero-title { font-size: var(--text-hero); line-height: 1.15; letter-spacing: -.035em; margin-bottom: var(--space-3); font-weight: 600; }
 .today-hero .lede { font-size: var(--text-body); line-height: 1.6; color: var(--text-2); max-width: 40ch; margin: 0; }
 .today-hero-actions { margin-top: var(--space-6); gap: var(--space-3); }
-.today-page .stat-strip, .call-page .stat-strip { margin: 0; padding: 0; gap: 0; overflow: hidden; }
-.today-page .stat, .call-page .stat { position: relative; padding: var(--space-4) var(--space-6); gap: var(--space-2); }
-.today-page .stat + .stat::before, .call-page .stat + .stat::before { content: ''; position: absolute; left: 0; top: var(--space-6); bottom: var(--space-6); width: 1px; background: var(--border); }
-.today-page .stat dt, .call-page .stat dt { display: flex; align-items: center; gap: var(--space-2); }
-.today-page .stat .icon-tile, .call-page .stat .icon-tile { width: 28px; height: 28px; border-radius: var(--radius-xs); }
-.today-page .stat dd, .call-page .stat dd { font-size: var(--text-title); line-height: var(--line-title); padding-left: var(--space-1); }
+.today-page .stat-strip, .call-page .stat-strip, .hero-page .stat-strip { margin: 0; padding: 0; gap: 0; overflow: hidden; }
+.today-page .stat, .call-page .stat, .hero-page .stat { position: relative; padding: var(--space-4) var(--space-6); gap: var(--space-2); }
+.today-page .stat + .stat::before, .call-page .stat + .stat::before, .hero-page .stat + .stat::before { content: ''; position: absolute; left: 0; top: var(--space-6); bottom: var(--space-6); width: 1px; background: var(--border); }
+.today-page .stat dt, .call-page .stat dt, .hero-page .stat dt { display: flex; align-items: center; gap: var(--space-2); }
+.today-page .stat .icon-tile, .call-page .stat .icon-tile, .hero-page .stat .icon-tile { width: 28px; height: 28px; border-radius: var(--radius-xs); }
+.today-page .stat dd, .call-page .stat dd, .hero-page .stat dd { font-size: var(--text-title); line-height: var(--line-title); padding-left: var(--space-1); }
 .today-work { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr); align-items: start; gap: var(--space-6); }
 .today-primary, .today-side { min-width: 0; display: grid; gap: var(--space-6); }
 .today-page .section-head { padding: var(--space-4) var(--space-6); }
@@ -4625,15 +4705,15 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
 @media (max-width: 1240px) {
   .today-work { grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); }
   .today-skills .skills { grid-template-columns: minmax(0, 1fr); }
-  .today-page .stat, .call-page .stat { padding-inline: var(--space-4); }
+  .today-page .stat, .call-page .stat, .hero-page .stat { padding-inline: var(--space-4); }
   .today-hero-copy { width: min(100%, 510px); }
 }
 @media (max-width: 1000px) {
   .today-work { grid-template-columns: minmax(0, 1fr); }
   .today-side { grid-template-columns: minmax(0, 1fr); }
-  .today-page .stat-strip, .call-page .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .today-page .stat:nth-child(3)::before, .call-page .stat:nth-child(3)::before { display: none; }
-  .today-page .stat:nth-child(n+3), .call-page .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .today-page .stat-strip, .call-page .stat-strip, .hero-page .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-page .stat:nth-child(3)::before, .call-page .stat:nth-child(3)::before, .hero-page .stat:nth-child(3)::before { display: none; }
+  .today-page .stat:nth-child(n+3), .call-page .stat:nth-child(n+3), .hero-page .stat:nth-child(n+3) { border-top: 1px solid var(--border); }
   .today-hero::after { background: linear-gradient(90deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, transparent) 45%, color-mix(in srgb, var(--surface) 35%, transparent)); }
 }
 @media (max-width: 760px) {
@@ -4649,9 +4729,9 @@ button.person-pick { grid-template-columns: auto 1fr; column-gap: var(--space-3)
   .today-hero-actions .button { padding-inline: var(--space-3); }
   .today-work, .today-primary, .today-side { gap: var(--space-4); }
   .today-skills .skill { padding: var(--space-4); }
-  .today-page .stat dt, .call-page .stat dt { align-items: flex-start; }
-  .today-page .stat dt > span, .call-page .stat dt > span { max-width: 13ch; }
-  .today-page .stat .icon-tile, .call-page .stat .icon-tile { flex: none; }
+  .today-page .stat dt, .call-page .stat dt, .hero-page .stat dt { align-items: flex-start; }
+  .today-page .stat dt > span, .call-page .stat dt > span, .hero-page .stat dt > span { max-width: 13ch; }
+  .today-page .stat .icon-tile, .call-page .stat .icon-tile, .hero-page .stat .icon-tile { flex: none; }
   .today-page .section-head, .today-section-heading { padding: var(--space-4); }
   .today-skills > .section-head { padding: 0 0 var(--space-3); }
   .today-page .page-section-body { padding-inline: var(--space-4); }
@@ -5030,10 +5110,28 @@ a:hover {
   grid-row: 2;
 }
 
-/* The progress dock floats over the bottom of the review column too. */
+/* The progress dock floats over the bottom of the review column too. The
+   room kept for the dock sits inside the columns' row, not below it, so at
+   the end of the page the held review column still fits beside the
+   transcript instead of being pushed up past the top of the screen. The
+   room is the dock's height (it sits one row tall here) and a small gap, so
+   both columns end just above it. */
 @media (min-width: 1101px) {
+  .workspace:has(> .review-dock:not([hidden])) {
+    --dock-room: calc(var(--space-16) + var(--space-4) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .workspace:has(> .review-dock:not([hidden])) > .main.is-call {
+    padding-bottom: 0;
+  }
+
+  .workspace:has(> .review-dock:not([hidden])) .col-left {
+    padding-bottom: var(--dock-room);
+  }
+
   .workspace:has(> .review-dock:not([hidden])) .col-right {
-    padding-bottom: calc(var(--space-16) + var(--space-6));
+    --col-fade: var(--space-16);
+    padding-bottom: var(--dock-room);
   }
 }
 
@@ -5051,6 +5149,7 @@ a:hover {
   }
 
   .col-right {
+    mask-image: none;
     position: static;
     max-height: none;
     overflow: visible;
@@ -5115,6 +5214,273 @@ a:hover {
 @media (max-width: 480px) {
   .lanes {
     gap: var(--space-3);
+  }
+}
+
+/* Laptop-height screens (about 960 px or less) keep the call header to
+   one quiet band so the recording, the tabs and the first lines of the
+   transcript are on screen without scrolling. Tall screens keep the roomy
+   header; narrow ones stack as before. */
+@media (min-width: 1181px) and (max-height: 960px) {
+  .main.is-call {
+    padding-top: var(--space-6);
+  }
+
+  .call-page {
+    gap: var(--space-4);
+  }
+
+  .call-hero .today-hero-copy {
+    width: min(100%, 680px);
+    padding: var(--space-4) var(--space-8);
+  }
+
+  .call-hero .eyebrow {
+    margin-bottom: var(--space-1);
+  }
+
+  .call-hero h1 {
+    margin-bottom: var(--space-1);
+    font-size: var(--text-hero-compact);
+  }
+
+  .call-hero .today-hero-actions {
+    margin-top: var(--space-3);
+  }
+
+  .call-cast {
+    --cast-size: 96px;
+    padding-block: var(--space-3);
+  }
+
+  .cast-person {
+    width: 112px;
+  }
+
+  .call-hero-foot {
+    padding-block: var(--space-2);
+  }
+
+  /* Provenance shares the pickers' row and wraps within itself. */
+  .call-hero-foot .call-source {
+    flex: 1 1 240px;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .call-hero .lede {
+    max-width: none;
+  }
+
+  .call-page .stat {
+    padding-block: var(--space-3);
+    gap: var(--space-1);
+  }
+
+  .call-page .stat + .stat::before {
+    top: var(--space-4);
+    bottom: var(--space-4);
+  }
+
+  .call-stats .stat dd.stat-note {
+    margin-top: 0;
+  }
+
+  .call-page .player {
+    padding: var(--space-3) var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .call-page .play-btn {
+    width: var(--control-compact);
+    min-height: var(--control-compact);
+  }
+
+  .call-page .transcript-card .section-head {
+    padding-block: var(--space-2);
+  }
+
+  .call-page .stat .icon-tile {
+    width: var(--space-6);
+    height: var(--space-6);
+  }
+}
+
+/* ---------- Choosing a portrait · 21 October 2026 ----------
+   People choose their own drawing (People: click the portrait) and a lead
+   chooses the customer's (Edit details). Never guessed from a name. */
+
+.portrait-btn {
+  flex: none;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  box-shadow: none;
+}
+
+.portrait-btn:hover:not(:disabled) {
+  background: none;
+}
+
+.portrait-btn:hover .person-avatar {
+  border-color: var(--border-2);
+}
+
+.portrait-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.portrait-picker legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.portrait-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.portrait-option {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease), box-shadow var(--motion) var(--ease);
+}
+
+.portrait-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: 0;
+  opacity: 0;
+}
+
+.portrait-option:hover {
+  background: var(--surface-2);
+}
+
+/* Selected is the blue-grey border and ring; keyboard focus keeps its own outline. */
+.portrait-option:has(input:checked) {
+  border-color: var(--focus);
+  box-shadow: var(--shadow-ring);
+}
+
+.portrait-option:has(input:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.portrait-option-text {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+
+/* Automatic sits on its own row, avatar beside its word; the six drawings share the next. */
+.portrait-options.is-auto {
+  margin-bottom: var(--space-2);
+}
+
+.portrait-options.is-auto .portrait-option {
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-3);
+}
+
+.portrait-options.is-auto .portrait-option-text {
+  font-size: var(--text-small);
+  color: var(--text-2);
+}
+
+/* ---------- Review tabs · 21 October 2026 ----------
+   Each card plays its evidence from the head, beside the title. Claims pair
+   what was said with what the pack says; follow-ups group what waits for a
+   person first (DESIGN.md "The call page"). */
+
+.card-head > .ref-btn {
+  flex: none;
+  margin-left: auto;
+  min-height: 30px;
+  box-shadow: none;
+}
+
+.claim-compare {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.compare-part {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The verdict's reason: rose when the pack contradicts what was said. */
+.explanation.verdict-contradicted,
+.explanation.verdict-unverified {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
+}
+
+.explanation.verdict-contradicted {
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
+.explanation.verdict-unverified {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+/* What a draft still needs comes first, with an icon and the words. */
+.draft .missing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel .group > div:first-child .card-sub {
+  margin-top: 2px;
+}
+
+/* ---------- People header on Lead, Prep and a rep · 21 October 2026 ----------
+   The call page's header (`.call-hero` with `.today-hero` type) without its
+   footer, from Sel.pageHero; a rep's page has one person on the disc. */
+
+.hero-page .call-toolbar .crumbs {
+  margin-bottom: 0;
+}
+
+/* One person (a rep's page): the title already says who, so the disc stands alone. */
+.call-cast.is-single .cast-name,
+.call-cast.is-single .cast-role {
+  display: none;
+}
+
+/* Beside the words the people sit at the card's end; stacked above them they line up with the words. */
+@media (min-width: 1181px) {
+  .page-hero .call-cast {
+    justify-content: flex-end;
   }
 }
 
@@ -5446,3 +5812,64 @@ html[data-vt="pop"]::view-transition-new(main) { animation-name: vt-pop-in; }
 }
 .upload-voice .hint { margin: 0; }
 .upload-voice audio { width: 100%; min-width: 0; }
+
+/* Today: day/night PNG sheets follow the shared six-portrait selection. */
+.today-illustrated { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-height: 300px; }
+.today-illustrated::after { display: none; }
+.today-illustrated .today-hero-copy { width: 100%; min-width: 0; grid-column: 1; grid-row: 1; }
+.today-scene { position: relative; width: 100%; min-width: 0; max-width: 280px; aspect-ratio: 1; grid-column: 2; grid-row: 1; align-self: center; justify-self: center; pointer-events: none; }
+.scene-art { position: absolute; inset: 0; display: block; background-size: 300% 200%; background-position: inherit; background-repeat: no-repeat; }
+.scene-day { background-image: url('/static/dashboard-characters-day.png'); }
+.scene-night { background-image: url('/static/dashboard-characters-night.png'); visibility: hidden; }
+[data-period="night"] .scene-day { visibility: hidden; }
+[data-period="night"] .scene-night { visibility: visible; }
+@media (max-width: 700px) {
+  .today-illustrated { grid-template-columns: minmax(0, 1fr); }
+  .today-illustrated .today-hero-copy { grid-row: 1; }
+  .today-scene { grid-column: 1; grid-row: 2; max-width: 240px; }
+}
+
+/* Supporting line art: PNGs, shared portrait selection, no interactive artwork. */
+.line-art { display: block; flex: none; width: 112px; max-width: 100%; height: auto; object-fit: contain; pointer-events: none; }
+.line-art-character { width: 180px; aspect-ratio: 1; background-size: 300% 200%; background-repeat: no-repeat; }
+.line-art-recording { background-image: url('/static/line-art-recording.png'); }
+.line-art-conversation { background-image: url('/static/line-art-conversation.png'); }
+.line-art-welcome { width: 280px; }
+.line-art-search { width: 96px; }
+.welcome-setup { width: min(100%, 880px); max-width: 880px; grid-template-columns: minmax(0, 1fr) minmax(180px, 280px); column-gap: var(--space-8); align-items: center; }
+.welcome-setup .welcome-copy { grid-column: 1; }
+.welcome-setup .person-form { grid-column: 1; min-width: 0; }
+.welcome-setup > .line-art { grid-column: 2; grid-row: 1 / span 2; justify-self: center; }
+.art-intro { display: flex; align-items: center; justify-content: space-between; padding-right: var(--space-6); border-bottom: 1px solid var(--border); gap: var(--space-3); }
+.art-intro > .section-head { flex: 1; min-width: 0; border-bottom: 0; }
+.upload-art { flex: none; }
+.upload-art .line-art { width: 160px; }
+.conversation-intro { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-width: 0; }
+.conversation-intro > div { min-width: 0; }
+.conversation-intro .line-art { width: 160px; }
+.illustrated-empty { display: grid; justify-items: start; align-content: start; gap: var(--space-2); }
+.illustrated-empty > .line-art { margin-bottom: var(--space-2); }
+.illustrated-empty > :where(h2, p) { margin: 0; }
+@media (max-width: 700px) {
+  .welcome-setup { grid-template-columns: minmax(0, 1fr); }
+  .welcome-setup > .line-art { grid-column: 1; grid-row: 3; width: 240px; }
+  .art-intro { padding-right: var(--space-4); }
+  .upload-art .line-art, .conversation-intro .line-art { width: 120px; }
+}
+@media (max-width: 420px) {
+  .art-intro { gap: var(--space-1); }
+  .upload-art .line-art { width: 88px; }
+  .conversation-intro { flex-direction: column; align-items: start; }
+  .conversation-intro .line-art { align-self: center; }
+}
+
+/* Remaining planned placements: ready-to-start drills and reading. */
+.line-art-rehearsal { background-image: url('/static/line-art-rehearsal.png'); }
+.line-art-reading { background-image: url('/static/line-art-reading.png'); }
+.drill-start { justify-content: space-between; align-items: center; gap: var(--space-4); }
+.drill-start .line-art, .reading-intro .line-art, .library-skills > .section-head > .line-art { width: 120px; }
+.library-skills > .section-head > .section-head-main { flex: 1; min-width: 0; }
+.library-skills > .section-head > .section-head-main > div { min-width: 0; }
+@media (max-width: 700px) {
+  .drill-start .line-art, .reading-intro .line-art, .library-skills > .section-head > .line-art { width: 88px; }
+}

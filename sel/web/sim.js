@@ -51,6 +51,7 @@
     error: null,
     // media
     mic: "off", // off | asking | on | muted | denied | unavailable
+    heardLocal: false, // the microphone check heard this browser's own voice
     localStream: null,
     remoteStream: null,
     remoteAudio: null,
@@ -73,6 +74,7 @@
     clock: { at: 0, elapsed: 0 },
     timer: 0,
     meterRaf: 0,
+    focus: null, // {person, focus}: the rep's coaching focus, shown before the call
     refs: null,
     lobby: null,
     report: null, // the filed call's report, for next actions
@@ -453,7 +455,9 @@
       eyebrow: el("p", { class: "eyebrow" }),
       statePill: el("span", {}),
       timer: el("span", { class: "sim-timer", "aria-live": "off" }),
-      copy: el("button", { type: "button", class: "small ghost", on: { click: copyLink } }, icon("link", 15), "Copy invite link"),
+      copy: el("button", { type: "button", class: "small primary", on: { click: copyLink } }, icon("link", 15), el("span", { text: "Copy invite link" })),
+      tip: el("p", { class: "fine sim-tip" }, icon("keyboard", 15), el("span", { text: "On one computer? Wear headphones, or type lines once the call starts." })),
+      transcript: null,
       flow: el("ol", { class: "flow", "aria-label": "Call workflow" }),
       people: el("div", { class: "sim-people" }),
       controls: el("div", { class: "sim-controls" }),
@@ -479,14 +483,13 @@
         el(
           "header",
           { class: "sim-head" },
-          el("div", {}, refs.eyebrow, el("div", { class: "sim-title-row" }, refs.title, refs.statePill, refs.timer)),
-          refs.copy
+          el("div", {}, refs.eyebrow, el("div", { class: "sim-title-row" }, refs.title, refs.statePill, refs.timer))
         ),
         refs.flow,
         refs.error,
         refs.after,
-        el("section", { class: "card sim-call" }, refs.people, refs.controls, refs.devNote),
-        el(
+        el("section", { class: "card sim-call" }, refs.people, refs.controls, refs.devNote, refs.tip),
+        (refs.transcript = el(
           "section",
           { class: "transcript-card sim-transcript", "aria-labelledby": "sim-tx-title" },
           el(
@@ -502,7 +505,7 @@
           refs.lines,
           refs.empty,
           refs.composer
-        )
+        ))
       ),
       el("aside", { class: "sim-side", "aria-label": "Live review" }, refs.score, refs.actions, refs.feed)
     );
@@ -568,7 +571,10 @@
     r.title.textContent = `Call ${room.code}`;
     const [cls, label] = ROOM_STATE[room.state] || ["neutral", room.state];
     r.statePill.replaceChildren(pill(cls, label));
-    r.copy.hidden = room.state !== "waiting";
+    // Before the call there is nothing to read or type: the transcript waits until it starts.
+    const early = ["waiting", "ready"].includes(room.state) && !sim.lines.length;
+    r.transcript.hidden = early;
+    r.tip.hidden = !early;
     r.error.textContent = room.error || sim.error || "";
     r.error.hidden = !(room.error || sim.error);
   }
@@ -587,9 +593,11 @@
 
   function copyLink() {
     const url = `${location.origin}${location.pathname}#sim/${sim.room.code}`;
+    // One button, moved into the empty tile each time the tiles are drawn.
+    const label = (text) => sim.refs && (sim.refs.copy.lastChild.textContent = text);
     const done = () => {
-      sim.refs.copy.lastChild.textContent = "Link copied";
-      setTimeout(() => sim.refs && (sim.refs.copy.lastChild.textContent = "Copy invite link"), 1500);
+      label("Link copied");
+      setTimeout(() => label("Copy invite link"), 1500);
     };
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, () => prompt("Invite link", url));
     else prompt("Invite link", url);
@@ -604,7 +612,7 @@
     const at = order.indexOf(st);
     const steps = FLOW.map((label) => ({ label, status: "todo", note: "" }));
     const set = (i, status, note) => Object.assign(steps[i], { status, note: note || "" });
-    set(0, at === 0 ? "current" : "done", at === 0 ? "Waiting for the other side" : `${room.participants.length} joined`);
+    set(0, at === 0 ? "current" : "done", at === 0 ? "" : `${room.participants.length} joined`);
     if (at >= 1) set(1, at <= 2 ? "current" : "done", at === 1 ? "Press Start when ready" : at === 2 ? "On the call" : mmss(room.elapsed));
     if (at >= 2) set(2, at === 2 ? "current" : "done", sim.live && sim.live.score && sim.live.score.overall !== null ? `${sim.live.score.overall}/100` : "");
     if (at >= 3) {
@@ -650,33 +658,63 @@
     );
   }
 
+  // Before the call: whether this browser hears its own microphone.
+  function micCheckText() {
+    if (!canMic() || ["denied", "unavailable"].includes(sim.mic)) return "";
+    if (sim.mic === "off" || sim.mic === "asking") return "Turn on your microphone to check it before the call.";
+    if (sim.mic === "muted") return "Muted. Unmute to check your microphone.";
+    return sim.heardLocal ? "Your microphone is working." : "Say something: the bars should move.";
+  }
+
   function renderPeople() {
     if (!sim.room) return;
+    const st = sim.room.state;
+    const before = ["waiting", "ready"].includes(st);
+    sim.meters.localEl = sim.meters.remoteEl = null;
     const tiles = ["rep", "customer"].map((role) => {
       const p = sim.room.participants.find((x) => x.role === role);
       const me = role === myRole();
-      const meter = el("span", { class: "meter", "aria-hidden": "true" },
-        ...Array.from({ length: 25 }, () => el("i", {})));
-      if (me) sim.meters.localEl = meter;
-      else sim.meters.remoteEl = meter;
+      // Bars only while there is a microphone to listen to; otherwise they would look live.
+      const hearing = me ? ["on", "muted"].includes(sim.mic) : !!(p && p.online && p.mic);
+      let meter = null;
+      if (hearing) {
+        meter = el("span", { class: "meter", "aria-hidden": "true" }, ...Array.from({ length: 25 }, () => el("i", {})));
+        if (me) sim.meters.localEl = meter;
+        else sim.meters.remoteEl = meter;
+      }
+      let extra = null;
+      if (me && before) {
+        const text = micCheckText();
+        extra = text ? el("p", { class: `card-sub person-check${sim.heardLocal && sim.mic === "on" ? " is-ok" : ""}`, text }) : null;
+      } else if (!p && st === "waiting") {
+        const label = S.ROLE_LABEL[role].toLowerCase();
+        extra = el(
+          "div",
+          { class: "person-invite" },
+          el("p", { class: "card-sub", text: `Send the ${label} this link, or read them the code to type in the call simulator.` }),
+          el("span", { class: "invite-code", text: sim.room.code }),
+          sim.refs.copy
+        );
+      }
       return el(
         "div",
-        { class: `person role-${role}${p && p.online ? " is-online" : ""}${me ? " is-me" : ""}` },
+        { class: `person role-${role}${p && p.online ? " is-online" : ""}${me ? " is-me" : ""}${extra && !me ? " is-invite" : ""}` },
         callPortrait(p, role),
         el(
           "div",
           { class: "person-text" },
-          el("span", { class: "strong", text: p ? `${p.name || S.ROLE_LABEL[role]}${me ? " (you)" : ""}` : "Not joined yet" }),
+          el("span", { class: "strong", text: p ? `${p.name || S.ROLE_LABEL[role]}${me ? " (you)" : ""}` : `Invite the ${S.ROLE_LABEL[role].toLowerCase()}` }),
           el(
             "span",
             { class: "card-sub" },
             S.ROLE_LABEL[role],
             " · ",
-            p ? (p.online ? "online" : "offline") : "waiting",
+            p ? (p.online ? "online" : "offline") : "not joined yet",
             p && p.online ? ` · mic ${p.mic ? "on" : "off"}` : ""
           )
         ),
-        meter
+        meter,
+        extra
       );
     });
     sim.refs.people.replaceChildren(...tiles);
@@ -708,7 +746,13 @@
         );
       }
     }
-    if (st === "ready") btns.push(el("button", { type: "button", class: "primary", on: { click: startCall } }, icon("phone", 16), "Start the call"));
+    if (st === "ready") {
+      const o = other();
+      const link = sim.pc ? sim.pc.connectionState : null;
+      const audio = link === "connected" ? "Audio link: connected. You should hear each other." : sim.pc ? "Connecting the audio…" : "No audio link yet. Turn on a microphone to talk, or type once the call starts.";
+      btns.push(el("p", { class: "sim-ready" }, icon("check", 15), el("span", { text: `${(o && o.name) || "The other side"} is here. ${audio}` })));
+      btns.push(el("button", { type: "button", class: "primary", on: { click: startCall } }, icon("phone", 16), "Start the call"));
+    }
     if (st === "live") btns.push(el("button", { type: "button", class: "danger", on: { click: hangUp } }, icon("hangup", 16), "Hang up"));
     if (st === "waiting" || st === "ready") btns.push(el("button", { type: "button", class: "small ghost", text: "Leave", on: { click: leave } }));
     if (st === "ended" && myRole() !== "rep" && other() && !other().online) {
@@ -726,7 +770,7 @@
     if (st === "live" && myRole() === "rep") notes.push(sim.recorder ? "Recording: you on the left channel, the customer on the right." : "This browser is not recording; the transcript is still filed.");
     if (st === "live" && myRole() !== "rep") notes.push("The rep's browser records the call.");
     if (st === "live" && sim.mic === "on" && !speechLive()) notes.push("Speech is not transcribed on this server: type what you say.");
-    if (sim.pc && st !== "saved") notes.push(`Audio link: ${sim.pc.connectionState}.`);
+    if (sim.pc && !["ready", "saved"].includes(st)) notes.push(`Audio link: ${sim.pc.connectionState}.`);
     if (st === "ended") notes.push(myRole() === "rep" ? "Saving the recording…" : "Waiting for the rep's browser to save the recording…");
     r.devNote.textContent = notes.join(" ");
     r.devNote.hidden = !notes.length;
@@ -813,7 +857,7 @@
     const final = sim.room && sim.room.live && sim.room.live.final_score;
     const shown = final || score;
     if (!shown) {
-      r.score.replaceChildren(el("h2", { id: "sim-score-title", class: "section-title", text: "Live score" }), muted("The score starts with the call."));
+      r.score.replaceChildren(...scorecardPreview().filter(Boolean));
       r.actions.replaceChildren();
       r.feed.replaceChildren();
       return;
@@ -930,6 +974,55 @@
           )
         : muted("Questions, objections, claims and promises show up here as they are said.")
     );
+  }
+
+  // Before the call: the pack's own scorecard wording, and the rep's coaching focus if it is on this pack.
+  function scorecardPreview() {
+    const room = sim.room;
+    const rep = myRole() === "rep";
+    const pack = room ? S.packs().find((pk) => pk.id === room.pack_id) : null;
+    const criteria = (pack && pack.scorecard) || [];
+    loadFocus();
+    const focus = rep && sim.focus && sim.focus.focus && room && sim.focus.focus.pack_id === room.pack_id ? sim.focus.focus : null;
+    const head = el(
+      "div",
+      {},
+      el("h2", { id: "sim-score-title", class: "section-title", text: rep ? "What you'll be scored on" : "What the rep is scored on" }),
+      el("p", { class: "card-sub", text: criteria.length ? "From the pack's scorecard. The live score starts with the call." : "The score starts with the call." })
+    );
+    if (!criteria.length) return [head];
+    return [
+      head,
+      focus
+        ? el("p", { class: "sim-focus" }, icon("target", 15), el("span", {}, el("span", { class: "strong", text: "Your focus: " }), focus.title))
+        : null,
+      el(
+        "ul",
+        { class: "score-list" },
+        ...criteria.map((c) =>
+          el(
+            "li",
+            { class: `score-row${focus && focus.criterion === c.id ? " is-focus" : ""}` },
+            el("div", { class: "score-row-head" }, el("span", { class: "score-title", text: c.title }), focus && focus.criterion === c.id ? pill("violet", "Your focus") : null),
+            c.description ? el("p", { class: "score-detail", text: c.description }) : null
+          )
+        )
+      ),
+    ];
+  }
+
+  // The rep's focus, read once per person; the preview redraws when it arrives.
+  function loadFocus() {
+    const id = myRole() === "rep" ? personId() : null;
+    if (!id || (sim.focus && sim.focus.person === id)) return;
+    sim.focus = { person: id, focus: null };
+    api(`/api/coach/${enc(id)}`)
+      .then((view) => {
+        if (!sim.focus || sim.focus.person !== id) return;
+        sim.focus.focus = view.focus || null;
+        dirty("live");
+      })
+      .catch(() => {}); // no focus shown; the scorecard still is
   }
 
   // `key`: the number rolls from the last value shown under it.
@@ -1193,7 +1286,7 @@
     track.enabled = !track.enabled;
     sim.mic = track.enabled ? "on" : "muted";
     post("mic", { mic: track.enabled }).catch(() => {});
-    dirty("controls");
+    dirty("controls", "people");
   }
 
   function audioCtx() {
@@ -1244,6 +1337,10 @@
           node.children[i].style.setProperty("--level", Math.max(0.08, level).toFixed(2));
         }
         node.classList.toggle("is-speaking", peak > 0.08);
+        if (key === "local" && enabled && peak > 0.25 && !sim.heardLocal) {
+          sim.heardLocal = true;
+          dirty("people");
+        }
       }
     };
     sim.meterRaf = requestAnimationFrame(step);
@@ -1503,6 +1600,7 @@
     sim.localRec = null;
     sim.remoteRec = null;
     sim.mic = "off";
+    sim.heardLocal = false;
     sim.room = null;
     sim.lines = [];
     sim.lineIds = new Set();
@@ -1546,6 +1644,7 @@
   S.on("signal", onSignal);
   S.on("rooms", () => dirty("rooms"));
   S.on("packs", (packs) => {
+    if (sim.refs && sim.room) dirty("live");
     const sel = sim.lobby && sim.lobby.root.isConnected && sim.lobby.root.querySelector("#sim-pack");
     if (!sel) return;
     const keep = sel.value || profile().pack;

@@ -197,9 +197,24 @@
     main.replaceChildren(el("div", { class: "page today-page" }, ...compact(nodes)));
   }
 
+  function heroPeriod() {
+    const hour = new Date().getHours();
+    return hour < 6 || hour >= 18 ? "night" : "day";
+  }
+
+  // Update just the decorative scene; keep focus and live dashboard data intact.
+  function syncHeroPeriod() {
+    const hero = document.querySelector(".today-page .today-hero");
+    if (hero) hero.dataset.period = heroPeriod();
+  }
+  setInterval(syncHeroPeriod, 60000);
+  document.addEventListener("visibilitychange", syncHeroPeriod);
+
   function todayHero(me, manager) {
-    return el("header", { class: "today-hero" },
-      el("img", { class: "today-landscape", src: "/static/dashboard-landscape.png", alt: "", width: "2172", height: "724", fetchpriority: "high" }),
+    return el("header", { class: "today-hero today-illustrated", "data-period": heroPeriod() },
+      el("div", { class: `today-scene portrait-${S.portraitFor(me)}`, "aria-hidden": "true" },
+        el("span", { class: "scene-art scene-day" }),
+        el("span", { class: "scene-art scene-night" })),
       el("div", { class: "today-hero-copy" },
         el("p", { class: "eyebrow", text: `A little better, every call · ${me.name.split(" ")[0]}` }),
         el("h1", { text: manager ? "Your team today" : `Today, ${me.name.split(" ")[0]}` }),
@@ -483,11 +498,13 @@
   function onboarding() {
     return el(
       "section",
-      { class: "welcome" },
-      el("p", { class: "eyebrow", text: "Set up" }),
-      el("h1", { text: "Who uses Sel here?" }),
-      el("p", { class: "lede", text: "Add yourself first. Sel keeps each rep's calls, follow-ups and coaching together. There is no login: each browser chooses who it is viewing as." }),
-      personForm((p) => S.setViewer(p.id), "Add and continue")
+      { class: "welcome welcome-setup" },
+      el("div", { class: "welcome-copy" },
+        el("p", { class: "eyebrow", text: "Set up" }),
+        el("h1", { text: "Who uses Sel here?" }),
+        el("p", { class: "lede", text: "Add yourself first. Sel keeps each rep's calls, follow-ups and coaching together. There is no login: each browser chooses who it is viewing as." })),
+      personForm((p) => S.setViewer(p.id), "Add and continue"),
+      S.lineArt("welcome")
     );
   }
 
@@ -528,10 +545,15 @@
       };
       name.addEventListener("change", save);
       role.addEventListener("change", save);
+      const face = el(
+        "button",
+        { type: "button", class: "portrait-btn", id: `portrait-${p.id}`, "aria-label": `Choose a portrait for ${p.name}`, title: "Choose a portrait", on: { click: () => portraitDialog(p) } },
+        S.personAvatar(p)
+      );
       return el(
         "li",
         { class: "page-row person-row" },
-        S.personAvatar(p),
+        face,
         name,
         role,
         el("span", { class: "person-row-action" }, me && me.id === p.id ? pill("neutral", "You") : el("button", { type: "button", class: "small", text: "View as", on: { click: () => S.setViewer(p.id) } })),
@@ -551,6 +573,50 @@
         )
       )
     );
+  }
+
+  // Someone's portrait is their choice, never guessed from a name. The dialog lives on the
+  // body, so the page can redraw beneath it; focus goes back to the portrait it came from.
+  function portraitDialog(p) {
+    const err = el("p", { class: "form-error", role: "alert", hidden: true });
+    const submit = el("button", { type: "submit", class: "primary", text: "Save portrait" });
+    const form = el(
+      "form",
+      { class: "dialog-form", novalidate: true },
+      el("p", { class: "muted", id: "portrait-desc", text: "The drawing beside their name on Today, Team and their calls. Automatic picks one for them." }),
+      S.portraitPicker("person-portrait", p.portrait, S.portraitOf(p.id)),
+      err,
+      el("div", { class: "row dialog-actions" }, el("button", { type: "button", text: "Cancel", on: { click: () => dialog.close() } }), submit)
+    );
+    const dialog = el(
+      "dialog",
+      { class: "dialog", "aria-labelledby": "portrait-title", "aria-describedby": "portrait-desc" },
+      el("div", { class: "dialog-head" }, el("h2", { id: "portrait-title", text: `Portrait for ${p.name}` }), el("button", { type: "button", class: "ghost small", "aria-label": "Close", on: { click: () => dialog.close() } }, icon("x", 18))),
+      form
+    );
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      const back = document.getElementById(`portrait-${p.id}`);
+      if (back) back.focus();
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submit.disabled = true;
+      try {
+        await api(`/api/people/${enc(p.id)}`, { method: "PUT", json: { portrait: S.pickedPortrait(form, "person-portrait") } });
+        await S.refreshPeople();
+        page.todayFor = undefined;
+        dialog.close();
+      } catch (ex) {
+        submit.disabled = false;
+        err.textContent = ex.message;
+        err.hidden = false;
+      }
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    const checked = form.querySelector("input:checked");
+    if (checked) checked.focus();
   }
 
   const playground = { tab: "practise", data: new Map(), pending: new Set(), objections: new Map(), exercise: null, busy: false, starting: null, error: null, result: null };
@@ -707,10 +773,13 @@
       !me || me.role !== "rep" ? el("p", { class: "muted small playground-notice", text: "Choose a rep using Viewing as to save exercises and see personal progress." }) : !data ? el("p", { class: "muted small playground-notice", text: "Loading your call drills…" }) : null,
       el("div", { class: "playground-grid" },
         el("section", { class: "card playground-conversation" },
-          el("div", {}, el("h2", { text: "Practise a conversation" }), el("p", { class: "muted", text: "Turn what you know into a better conversation. Start a call, invite a partner, and get feedback as you practise." })),
+          el("div", { class: "conversation-intro" },
+            el("div", {}, el("h2", { text: "Practise a conversation" }), el("p", { class: "muted", text: "Turn what you know into a better conversation. Start a call, invite a partner, and get feedback as you practise." })),
+            S.lineArt("conversation", me)),
           el("div", { class: "row" }, el("a", { class: "button primary", href: "#sim", text: "Start practice" }), el("span", { class: "muted small", text: "Talk or type · Share a call code" }))),
         sectionOf("list-card page-section playground-reading", "Read & practise", "Build confidence in your product knowledge.", "doc", "accent",
-          el("p", { class: "muted", text: "Explore your business documents, then practise explaining them to a buyer." }),
+          el("div", { class: "conversation-intro reading-intro" },
+            el("p", { class: "muted", text: "Explore your business documents, then practise explaining them to a buyer." }), S.lineArt("reading", me)),
           el("button", { type: "button", text: "Open Library", on: { click: () => { playground.tab = "library"; rerender(); } } })),
         objectionSection(id),
         sectionOf("list-card page-section playground-moments", "Retry a call moment", "Build on a conversation you have already had.", "target", "violet",
@@ -861,6 +930,8 @@
         )
       )
     );
+    const skillsCard = sectionOf("list-card page-section bento-anchor library-skills", "Skills", "The scorecard every call is graded on. Reps see these words when they fall short.", "target", "violet", skillsList);
+    skillsCard.querySelector(".section-head").append(S.lineArt("reading", S.viewer()));
     const facts = el(
       "ul",
       { class: "page-rows" },
@@ -876,7 +947,7 @@
         el(
           "div",
           { class: "bento" },
-          sectionOf("list-card page-section bento-anchor", "Skills", "The scorecard every call is graded on. Reps see these words when they fall short.", "target", "violet", skillsList),
+          skillsCard,
           el(
             "div",
             { class: "playbook-side" },

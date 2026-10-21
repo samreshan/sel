@@ -286,7 +286,16 @@
     if (inRoom) nodes.push(roomView(d));
     else if (judging || (last && last.status === "judging")) nodes.push(el("section", { class: "card is-loading", "aria-busy": "true", role: "status" }, el("p", { class: "strong", text: "Judging your practice call" }), muted("The debrief appears here in a moment.")));
     else if (last && last.debrief) nodes.push(debriefView(d, last));
-    if (!inRoom) nodes.push(scenario(d, !!(last && last.debrief)));
+    if (!inRoom) {
+      const card = scenario(d, !!(last && last.debrief));
+      if (d.status === "ready" && !judging && !last && !page.busy) {
+        const actions = card.querySelector(".focus-body > .row");
+        actions.classList.add("drill-start");
+        const rep = S.people().find((person) => person.id === d.person_id) || S.viewer();
+        actions.append(S.lineArt("rehearsal", rep));
+      }
+      nodes.push(card);
+    }
     if (attempts.length > 1 && !inRoom) nodes.push(history(attempts));
     main.replaceChildren(el("div", { class: "page" }, ...compact(nodes)));
     if (inRoom) {

@@ -391,6 +391,9 @@ class BrowserE2E(unittest.TestCase):
         rep.click("text=Open a call")
         rep.wait_for_url("**/#sim/*")
         code = rep.url.rsplit("/", 1)[1]
+        # Waiting: the empty tile is the invite; there is no transcript to show yet.
+        self.assertEqual(rep.inner_text(".person.is-invite .invite-code"), code)
+        self.assertTrue(rep.is_hidden(".sim-transcript"))
 
         cust.goto(f"{self.base}/#sim")
         cust.fill("#sim-name", "Ramesh")
@@ -401,9 +404,12 @@ class BrowserE2E(unittest.TestCase):
         for p in (rep, cust):
             p.click("text=Turn on microphone")
             p.wait_for_selector("text=Mute")
+        rep.wait_for_selector(".sim-ready:has-text('Ramesh is here')")
+        self.assertEqual(rep.locator(".person.is-invite").count(), 0)
         rep.click("text=Start the call")
         for p in (rep, cust):
             p.wait_for_selector(".sim-head .pill-bad:has-text('Live')")
+            p.wait_for_selector(".sim-transcript", state="visible")
             p.wait_for_selector("text=Audio link: connected", timeout=15000)
 
         script = [

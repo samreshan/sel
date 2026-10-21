@@ -19,6 +19,17 @@ from .files import read_json, write_json
 ROLES = ("rep", "manager")
 MAX_PEOPLE = 200
 MAX_NAME = 80
+PORTRAITS = 6  # cells in sel/web/team-portraits.png
+_UNSET = object()
+
+
+def clean_portrait(value: Any) -> int | None:
+    """A chosen portrait (0-5), or None to let the app pick one from the id."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < PORTRAITS:
+        raise ValueError(f"portrait must be a whole number from 0 to {PORTRAITS - 1}, or null")
+    return value
 
 
 def _slug(name: str) -> str:
@@ -77,7 +88,9 @@ class PeopleStore:
             self._save(people + [person])
             return person
 
-    def update(self, person_id: str, name: Any = None, role: Any = None) -> dict[str, Any]:
+    def update(self, person_id: str, name: Any = None, role: Any = None, portrait: Any = _UNSET) -> dict[str, Any]:
+        if portrait is not _UNSET:
+            portrait = clean_portrait(portrait)
         with self._lock:
             people = self.list()
             person = next((p for p in people if p["id"] == person_id), None)
@@ -88,5 +101,10 @@ class PeopleStore:
             if any(p["id"] != person_id and p["name"].casefold() == new_name.casefold() for p in people):
                 raise ValueError(f"{new_name} is already on the team")
             person.update(name=new_name, role=new_role)
+            if portrait is not _UNSET:
+                if portrait is None:
+                    person.pop("portrait", None)
+                else:
+                    person["portrait"] = portrait
             self._save(people)
             return person

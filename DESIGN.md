@@ -392,6 +392,16 @@ insets use 12 px corners. Navigation selection remains neutral; card selection
 is blue-grey and source evidence stays amber.
 The simulator workflow rail uses three columns when its own panel is narrow,
 and two on phones, keeping step labels readable beside the live review panel.
+Before the call starts, the room is laid out around what the people in it need
+to do. While someone is still missing, their tile becomes the invite: the call
+code in mono and a primary "Copy invite link" (shown first on phones). Your
+own tile checks the microphone ("Say something: the bars should move", then
+"Your microphone is working"). Meter bars only appear when there is a
+microphone to listen to. The side panel previews the pack's scorecard in the
+pack's own words, with the rep's coaching focus marked if it belongs to this
+pack. The transcript stays hidden until the call starts; a one-line tip takes
+its place. When both people have joined, a line above "Start the call" says
+they are here and whether the audio link is connected.
 
 The Perplexity parchment/teal reference and its later card and typography
 changes were reverted at the user's request. Switzer, Solar icons and the
@@ -537,8 +547,9 @@ to "what needs me?" first. Each part maps to one question a reviewer asks:
   it). The rep has their team portrait once **Whose call** is set; until
   then, and for the customer, the portrait is picked from the call's own
   ids (the lead's id when the call has a lead, so a lead's calls match).
-  Never from a name, so a portrait need not look like the name. The two
-  never share a drawing. Below about 1180 px the people stand above the
+  Never from a name, so a portrait need not look like the name: people
+  choose their own (below). The two never share a drawing; a chosen one
+  stays and an automatic one steps aside. Below about 1180 px the people stand above the
   words at 104 px, and at 88 px on a phone.
 - **Summary strip** (`.stat-strip.call-stats`): Today's strip, passive.
   Scorecard (score /100; met, partly, missed), To improve (moments; questions
@@ -560,6 +571,110 @@ to "what needs me?" first. Each part maps to one question a reviewer asks:
   of the column while it scrolls (a canvas ring hides cards passing under
   them). Scorecard rows put the play button beside the detail. On desktop
   the column reserves room under the progress dock.
-- The progress dock, transcript, tabs, cards and keyboard shortcuts are
-  unchanged.
+- **Review tabs** (21 October): every card plays its evidence from the
+  head (`cardHead(..., play)`, the time chip beside the title), so no card
+  spends a row on one button. Moments keep the order said, what fell short,
+  better line, then Endorse · Edit · Practise with Add note and Dismiss as
+  quiet actions. **Claims** split into "Needs a look" and "Supported by your
+  pack"; each card pairs **On the call** (the quote) with **Your pack says**
+  (the source), then the reason (rose inset when contradicted).
+  **Follow-ups** group "Waiting for you" (needs input first, then ready),
+  "Approved" and "The customer's promises"; due days read "8 Oct 2026"; a
+  draft opens with what is missing before approval, and a closed Approve
+  says why under it.
+- The progress dock, transcript, tabs and keyboard shortcuts are unchanged.
+- **Laptop-height screens** (wider than 1180 px and 960 px tall or less)
+  get a compact header so the recording, the review tabs and the first
+  transcript line are on screen at 1280×800 and 1366×768: the title at
+  `--text-hero-compact` (32 px), the sentence on one line, 96 px portraits,
+  provenance beside the pickers, and tighter strip, player and transcript
+  head. The work area starts about 430 px down instead of 580. Taller
+  screens keep the roomy header.
 - The design-system reference shows this page under `#patterns` (Call page).
+
+## Choosing a portrait · 21 October 2026
+
+Portraits are never guessed from a name, so people choose. On People, a
+person's portrait is a button ("Choose a portrait for …") that opens a
+`.dialog` with `.portrait-picker`: a fieldset of native radios, Automatic on
+its own row (the drawing the id picks, shown as it is) and the six drawings
+in the next, each labelled "Drawing 1" to "Drawing 6" for screen readers.
+Selected is the blue-grey border and ring; keyboard focus keeps its outline.
+The choice (`portrait`, 0 to 5, or none for Automatic) follows the person
+everywhere their portrait appears. A lead's **Edit details** has the same
+picker as "Customer portrait"; it is the customer on that lead's calls and
+the sage disc beside the lead's name (`.lead-portrait`).
+
+### Today illustration
+
+Today uses two generated PNG sheets: `dashboard-characters-day.png` and
+`dashboard-characters-night.png`. Each has six equal cells in the same 3 by 2
+order as `team-portraits.png`. Each character has a matching desk scene, with
+a sun by day and moon by night. No SVG or CSS-drawn scene pieces.
+The shared `portraitFor` helper selects the viewer's chosen drawing, falling
+back to their stable ID, exactly as for their avatar. Switching viewers or
+changing their portrait updates the scene. The artwork is decorative, not
+an indication of their real activity.
+Day runs from 06:00 to 18:00 in the browser's local time, refreshed each minute
+and when tab visibility changes. The workspace stays light. On phones the scene
+sits below the copy and actions. The scene is hidden from assistive technology.
+
+## People header on Lead, Prep and a rep · 21 October 2026
+
+Pages about people share the call page's header (`Sel.pageHero`,
+`Sel.pageToolbar`): the `.crumbs` trail, then one featured card with the
+eyebrow, the name as title, one sentence, the page's actions (one primary)
+and the people on discs (`castPair` keeps the call page's portrait rules).
+
+- **Lead**: "Asha Gurung's lead" (or "Lead"), the lead's name, how many calls
+  are on file; Prep for the next call and Edit details; the rep and the
+  customer facing each other. The phone, rep, status and updated strip stays.
+- **Prep**: "Before your next call", the lead's name, the brief's own
+  sentence with who wrote it; Rehearse this call; the same two people. Then
+  a strip: earlier calls, likely objections, to cover, promises.
+- **A rep**: "Team · Rep", the name, the focus and why; View as; the rep
+  alone, disc only (`.call-cast.is-single`, the title already names them).
+  Then a strip: reviewed calls, drills, checked since the focus, needs you.
+- Loading and failure keep the page's trail instead of a bare title.
+- Strips use Today's strip styles (`.hero-page .stat…`).
+
+## Supporting line-art assets · 21 October 2026
+
+`Sel.lineArt` serves decorative PNGs only. Recording preparation and conversation
+practice each have a 3 by 2 character sheet, ordered exactly as `team-portraits.png`.
+They use `portraitFor` for a selected person's choice or stable-ID fallback; with
+no viewer, the first drawing is a decorative default. New call follows the rep
+chosen in its form without resetting inputs; Playground follows the viewer.
+The setup ensemble includes all six characters. Empty Calls, empty Leads, and
+unmatched Leads searches use distinct shared object illustrations. Text and
+existing actions remain the accessible explanation and next step; artwork has
+empty alternative text or is hidden from assistive technology and never acts as
+a status or control. These scenes do not indicate microphone access or real
+activity. Portrait scenes are 160px in cards, 120px on phones (88px in the narrow
+recording header); empty states are 96–112px. The setup scene is 280px, 240px on
+phones. No day/night variants outside Today. Sources are locally served and work
+offline. The reference includes all supporting assets under `#line-art`.
+
+Generation direction: use the canonical six portraits, preserve faces and clothing,
+charcoal line work and white garments; recording uses headset and notebook,
+conversation uses a gentle gesture and empty speech bubbles. Shared transparent
+PNGs depict the welcoming team, a microphone and empty tray, a blank address book,
+and a magnifying glass over blank cards. Generated with the built-in image tool.
+
+### Practice preparation and reading · 21 October 2026
+
+`line-art-rehearsal.png` and `line-art-reading.png` complete the planned supporting
+placements. Both PNG sheets use the canonical 3 by 2 character order and the same
+`Sel.lineArt` / `portraitFor` mapping as recording and conversation artwork.
+Ready drills with no attempts show a compact rehearsal drawing beside the existing
+start button. It follows the drill's rep (viewer fallback) and disappears during
+a call, judging and after an attempt. The illustration is not the AI customer;
+AI persona labels and the original scenario, evidence and actions stay intact.
+Reading appears beside the existing Read & practise introduction and in the
+Library Skills header, following the viewer. Documents and Library controls keep
+their existing behavior. Supporting art is 120px, 88px below 700px, and decorative.
+
+Built-in image generation direction: preserve all six source faces, hair and
+clothing; rehearsal uses a blank cue card and notebook, reading uses an open
+blank book and an annotation notebook. White PNG sheets, charcoal line work,
+restrained grey shading, equal sprite cells. No letters or painted UI controls.

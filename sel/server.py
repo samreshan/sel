@@ -498,7 +498,8 @@ def make_handler(service: CallService, health=None, quiet: bool = False, hub: Si
 
         def update_person(self, q, person_id):
             b = self._json_body()
-            self._json(service.update_person(person_id, b.get("name"), b.get("role"), self._tab()))
+            extra = {"portrait": b["portrait"]} if "portrait" in b else {}
+            self._json(service.update_person(person_id, b.get("name"), b.get("role"), self._tab(), **extra))
 
         def today(self, q):
             self._json(service.today(q.get("person") or None))

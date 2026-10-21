@@ -116,7 +116,7 @@ def build_brief(lead: dict[str, Any], calls: list[tuple[dict[str, Any], dict[str
             parts.append(f"you promised {len(open_rep)} thing{'s' if len(open_rep) != 1 else ''}")
         summary = {"text": "; ".join(parts) + "." if last else f"No earlier calls with {lead['name']} yet.",
                    "by": "rules (no language model)"}
-    return {"lead": {k: lead.get(k) for k in ("id", "name", "phone", "rep_id", "notes")},
+    return {"lead": {k: lead.get(k) for k in ("id", "name", "phone", "rep_id", "notes", "portrait")},
             "calls": [{"call_id": c["id"], "started_at": c.get("started_at"), "overall": (r.get("score") or {}).get("overall")}
                       for c, r, _ in calls],
             "summary": summary, "likely_objections": picked_o, "gaps": picked_g,

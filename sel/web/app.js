@@ -228,7 +228,8 @@
   }
   const cardTag = (cls, label) => el("span", { class: `pill pill-${cls} card-tag`, text: label });
 
-  function cardHead(tone, iconName, summary, sub) {
+  // `play`: the card's evidence button, beside the title it plays rather than under the card.
+  function cardHead(tone, iconName, summary, sub, play) {
     return el(
       "div",
       { class: "card-head" },
@@ -238,7 +239,8 @@
         { class: "card-head-text" },
         el("p", { class: "summary", text: summary }),
         sub ? el("p", { class: "card-sub", text: sub }) : null
-      )
+      ),
+      play || null
     );
   }
 
@@ -861,12 +863,13 @@
   // ---------- bottom dock: review progress ----------
 
   // Which of Transcribe / Analyse / Review / Approve drafts are done, worked
-  // out from the call's status and its drafts.
+  // out from the call's status and its drafts. A call with no drafts has
+  // nothing waiting for approval, so it is complete.
   function stepState(call) {
     if (!call) return null;
     if (call.status === "done" && call.report) {
       const drafts = call.report.drafts || [];
-      const allApproved = drafts.length > 0 && drafts.every((d) => d.status === "approved");
+      const allApproved = drafts.every((d) => d.status === "approved");
       return allApproved ? { done: 4, current: null } : { done: 2, current: 2 };
     }
     if (call.status === "error") return { done: 0, current: null };
@@ -951,8 +954,59 @@
     return hash % 6;
   }
 
+  // The drawing someone chose (People, or a lead's Edit details), else the one their id picks.
+  const chosenPortrait = (x) => (x && Number.isInteger(x.portrait) && x.portrait >= 0 && x.portrait < 6 ? x.portrait : null);
+
+  function portraitFor(person) {
+    const known = state.people.find((p) => p.id === person.id);
+    const chosen = chosenPortrait(person) !== null ? chosenPortrait(person) : chosenPortrait(known);
+    return chosen !== null ? chosen : portraitOf(person.id);
+  }
+
+  // A lead stands for the customer: its own choice, else one picked from "lead:<id>".
+  const leadPortrait = (lead) => (chosenPortrait(lead) !== null ? chosenPortrait(lead) : portraitOf(`lead:${lead.id}`));
+
+  function avatarAt(at, size = "") {
+    return el("span", { class: `person-avatar portrait-${at}${size ? ` avatar-${size}` : ""}`, "aria-hidden": "true" });
+  }
+
   function personAvatar(person, size = "") {
-    return el("span", { class: `person-avatar portrait-${portraitOf(person.id)}${size ? ` avatar-${size}` : ""}`, "aria-hidden": "true" });
+    return avatarAt(portraitFor(person), size);
+  }
+
+  // Decorative PNG assets; character sheets share the avatar's six-cell mapping.
+  function lineArt(kind, person = viewer()) {
+    if (["recording", "conversation", "rehearsal", "reading"].includes(kind)) {
+      return el("span", { class: `line-art line-art-character line-art-${kind} portrait-${person ? portraitFor(person) : 0}`, "aria-hidden": "true" });
+    }
+    const files = { welcome: "welcome", calls: "empty-calls", leads: "empty-leads", search: "empty-search" };
+    return el("img", { class: `line-art line-art-${kind}`, src: `/static/line-art-${files[kind]}.png`, alt: "", "aria-hidden": "true", width: kind === "welcome" ? "1536" : "1280", height: kind === "welcome" ? "1024" : "1280", decoding: "async" });
+  }
+
+  // Choose a drawing: Automatic (the one the id picks, shown as it is) or one of the six.
+  // Native radios, so arrow keys move and the form reads the choice; null means Automatic.
+  function portraitPicker(name, value, autoAt, legend = "Portrait") {
+    const current = chosenPortrait({ portrait: value });
+    const option = (v, at, text, visible) =>
+      el(
+        "label",
+        { class: "portrait-option" },
+        el("input", { type: "radio", name, value: v, checked: (current === null ? "" : String(current)) === v }),
+        avatarAt(at, "large"),
+        el("span", { class: visible ? "portrait-option-text" : "sr-only", text })
+      );
+    return el(
+      "fieldset",
+      { class: "portrait-picker" },
+      el("legend", { text: legend }),
+      el("div", { class: "portrait-options is-auto" }, option("", autoAt, "Automatic", true)),
+      el("div", { class: "portrait-options" }, ...[0, 1, 2, 3, 4, 5].map((i) => option(String(i), i, `Drawing ${i + 1}`, false)))
+    );
+  }
+
+  function pickedPortrait(scope, name) {
+    const input = scope.querySelector(`input[name="${name}"]:checked`);
+    return input && input.value !== "" ? Number(input.value) : null;
   }
 
   function renderViewer() {
@@ -1092,8 +1146,8 @@
     if (!state.callsLoaded && !state.listError) {
       nodes.push(el("section", { class: "card is-loading", "aria-busy": "true" }, muted("Loading calls…")));
     } else if (state.callsLoaded && !state.calls.length) {
-      nodes.push(el("section", { class: "card is-empty" },
-        el("h2", { text: "No calls yet" }), muted("Choose New call to add a recording.")));
+      nodes.push(el("section", { class: "card is-empty illustrated-empty" },
+        lineArt("calls"), el("h2", { text: "No calls yet" }), muted("Choose New call to add a recording.")));
     } else if (state.calls.length) {
       const toggle = el("div", { class: "segmented", role: "group", "aria-label": "Calls view" });
       for (const [value, label] of [["table", "Table"], ["card", "Card"]]) {
@@ -1758,22 +1812,74 @@
     const rep = speakers.find((s) => s.role === "rep");
     const cust = speakers.find((s) => s.role === "customer");
     const owner = call.rep_id ? state.people.find((p) => p.id === call.rep_id) || null : null;
-    const repAt = portraitOf(owner ? owner.id : `${call.id}:${rep ? rep.id : "rep"}`);
-    let custAt = portraitOf(call.lead_id ? `lead:${call.lead_id}` : `${call.id}:${cust ? cust.id : "customer"}`);
-    if (custAt === repAt) custAt = (custAt + 1) % 6;
-    const seat = (role, at, name) =>
+    const lead = call.lead_id && state.leads ? state.leads.find((l) => l.id === call.lead_id) || null : null;
+    return castRow(
+      castPair({
+        owner,
+        repKey: `${call.id}:${rep ? rep.id : "rep"}`,
+        repName: owner ? owner.name : rep ? speakerLabel(rep) : ROLE_LABEL.rep,
+        lead,
+        custKey: call.lead_id ? `lead:${call.lead_id}` : `${call.id}:${cust ? cust.id : "customer"}`,
+        custName: call.customer_name || (cust && cust.name) || ROLE_LABEL.customer,
+      })
+    );
+  }
+
+  // The rep and the customer as seats: the rep's team portrait (or one from `repKey`),
+  // the lead's (or one from `custKey`). A drawing someone chose stays; an automatic one
+  // steps aside, so the two never share one. No rep name, no rep seat.
+  function castPair({ owner, repKey, repName, lead, custKey, custName }) {
+    let repAt = owner ? portraitFor(owner) : portraitOf(repKey);
+    let custAt = lead ? leadPortrait(lead) : portraitOf(custKey);
+    const repChosen = !!owner && chosenPortrait(state.people.find((p) => p.id === owner.id)) !== null;
+    const custChosen = !!lead && chosenPortrait(lead) !== null;
+    if (repName && custAt === repAt && !custChosen) custAt = (custAt + 1) % 6;
+    else if (repName && custAt === repAt && !repChosen) repAt = (repAt + 1) % 6;
+    return compact([repName ? { role: "rep", at: repAt, name: repName } : null, { role: "customer", at: custAt, name: custName }]);
+  }
+
+  // People on discs: two face each other across the call; one stands alone (a rep's page).
+  function castRow(seats) {
+    const out = [];
+    seats.forEach((st, i) => {
+      if (i) out.push(el("span", { class: "cast-link", "aria-hidden": "true" }, el("span", { class: "cast-link-mark" }, icon("phone", 16))));
+      out.push(
+        el(
+          "div",
+          { class: `cast-person role-${st.role}` },
+          el("span", { class: "cast-portrait" }, el("span", { class: `person-avatar avatar-call portrait-${st.at}`, "aria-hidden": "true" })),
+          el("span", { class: "cast-name", text: st.name, title: st.name }),
+          el("span", { class: "cast-role", text: st.label || ROLE_LABEL[st.role] })
+        )
+      );
+    });
+    return out;
+  }
+
+  // The dashboard header for pages about people (Lead, Prep, a rep): the trail, then
+  // Today's hero layout with the people where Today has its scene.
+  function pageToolbar(items, meta) {
+    return el("div", { class: "call-toolbar" }, crumbs(items), meta || null);
+  }
+
+  function pageHero({ eyebrow, tag, title, lede, actions, seats }) {
+    return el(
+      "header",
+      { class: "call-hero page-hero" },
       el(
         "div",
-        { class: `cast-person role-${role}` },
-        el("span", { class: "cast-portrait" }, el("span", { class: `person-avatar avatar-call portrait-${at}`, "aria-hidden": "true" })),
-        el("span", { class: "cast-name", text: name }),
-        el("span", { class: "cast-role", text: ROLE_LABEL[role] })
-      );
-    return [
-      seat("rep", repAt, owner ? owner.name : rep ? speakerLabel(rep) : ROLE_LABEL.rep),
-      el("span", { class: "cast-link", "aria-hidden": "true" }, el("span", { class: "cast-link-mark" }, icon("phone", 16))),
-      seat("customer", custAt, call.customer_name || (cust && cust.name) || ROLE_LABEL.customer),
-    ];
+        { class: "today-hero call-hero-main" },
+        el(
+          "div",
+          { class: "today-hero-copy" },
+          el("p", { class: "eyebrow" }, el("span", { text: eyebrow }), tag ? pill(tag[0], tag[1]) : null),
+          el("h1", { text: title }),
+          lede ? el("p", { class: "lede" }, ...[].concat(lede)) : null,
+          actions && compact(actions).length ? el("div", { class: "row today-hero-actions" }, ...compact(actions)) : null
+        ),
+        seats && seats.length ? el("div", { class: `call-cast${seats.length === 1 ? " is-single" : ""}`, role: "group", "aria-label": "People" }, ...castRow(seats)) : null
+      )
+    );
   }
 
   // Whose call this is, for Today and coaching. Changing it doesn't touch the transcript's speaker names.
@@ -1808,6 +1914,7 @@
     }
     fillLeadSelect($("#f-lead"));
     fillLeadSelect($("#call-lead"), state.call ? state.call.lead_id : null);
+    if (state.view === "call") renderCast();
   }
 
   function fillLeadSelect(sel, current) {
@@ -2572,7 +2679,7 @@
     const msg = state.momentMsg[m.id];
     const line = m.better_line;
     const endorsed = m.state === "endorsed";
-    const actions = [evidenceButton(segIds, m.id)];
+    const actions = [];
     if (m.kind === "weak" && !dismissed) {
       if (line && line.check === "ok") {
         actions.push(
@@ -2614,7 +2721,7 @@
       "article",
       { class: `card moment${dismissed ? " is-dismissed" : ""}`, dataset: { item: m.id, segs: segIds.join(" ") }, tabindex: "-1", "aria-busy": busy ? "true" : null },
       el("div", { class: "card-tags" }, cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label), statePill),
-      cardHead(dismissed ? "neutral" : tag.cls, tag.icon, m.title, saidBy(segIds)),
+      cardHead(dismissed ? "neutral" : tag.cls, tag.icon, m.title, saidBy(segIds), evidenceButton(segIds, m.id)),
       saidBlock(m),
       m.why ? labelled(m.kind === "weak" ? "What fell short" : "What worked", m.why) : null,
       m.kind === "weak" && !dismissed ? betterLine(m, coached) : null,
@@ -2682,13 +2789,12 @@
       "article",
       { class: `card finding${dismissed ? " is-dismissed" : ""}`, dataset: { item: f.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(dismissed ? "neutral" : tag.cls, dismissed ? "Dismissed" : tag.label),
-      cardHead(tag.cls, tag.icon, f.summary, sub),
+      cardHead(tag.cls, tag.icon, f.summary, sub, evidenceButton(segIds, f.id)),
       f.evidence.quote ? el("p", { class: "quote", text: quoted(f.evidence.quote) }) : null,
       f.suggestion ? labelled("Try next time", f.suggestion) : null,
       el(
         "div",
         { class: "card-actions" },
-        evidenceButton(segIds, f.id),
         segIds.length > 1 ? pill("neutral", plural(segIds.length, "line", "lines")) : null,
         el("button", {
           type: "button",
@@ -2734,11 +2840,17 @@
     // Problems first: contradicted, then unverified, then supported.
     const rank = (c) => (VERDICT[c.verdict] ? VERDICT[c.verdict].rank : 1);
     const ordered = report.claims.map((c, i) => ({ c, i })).sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i).map((o) => o.c);
+    const look = ordered.filter((c) => c.verdict !== "supported");
+    const backed = ordered.filter((c) => c.verdict === "supported");
+    const group = (title, sub, items) =>
+      items.length
+        ? el("section", { class: "group" }, el("div", {}, el("h3", { class: "group-title", text: `${title} (${items.length})` }), sub ? el("p", { class: "card-sub", text: sub }) : null), ...items.map(claimCard))
+        : null;
     return el(
       "div",
       { class: "stack" },
-      el("p", { class: "explain", text: "Each product claim from the call, checked against the pack's own documents. Problems first." }),
-      ...ordered.map(claimCard)
+      el("p", { class: "explain", text: "Each product claim from the call, checked against the pack's own documents." }),
+      ...compact([group("Needs a look", "What was said on the call, beside what your pack says.", look), group("Supported by your pack", null, backed)])
     );
   }
 
@@ -2749,11 +2861,16 @@
       "article",
       { class: "card claim", dataset: { item: c.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(v.cls, v.label),
-      cardHead(v.cls, v.icon, c.claim, saidBy(segIds)),
-      c.evidence.quote ? el("p", { class: "quote", text: quoted(c.evidence.quote) }) : null,
-      c.explanation ? el("p", { class: "explanation", text: c.explanation }) : null,
-      c.sources && c.sources.length ? el("div", { class: "sources" }, ...c.sources.map(sourceBlock)) : null,
-      segIds.length ? el("div", { class: "card-actions" }, evidenceButton(segIds, c.id)) : null
+      cardHead(v.cls, v.icon, c.claim, saidBy(segIds), evidenceButton(segIds, c.id)),
+      el(
+        "div",
+        { class: "claim-compare" },
+        c.evidence.quote ? el("div", { class: "compare-part" }, el("span", { class: "said-who", text: "On the call" }), el("p", { class: "quote", text: quoted(c.evidence.quote) })) : null,
+        c.sources && c.sources.length
+          ? el("div", { class: "compare-part" }, el("span", { class: "said-who", text: "Your pack says" }), el("div", { class: "sources" }, ...c.sources.map(sourceBlock)))
+          : null
+      ),
+      c.explanation ? el("p", { class: `explanation verdict-${c.verdict}`, text: c.explanation }) : null
     );
   }
 
@@ -2839,23 +2956,41 @@
       el("p", { class: "fine" }, icon("lock", 15), el("span", { text: "Sel never sends email or creates events. Approved drafts are for you to send." }))
     );
     if (!report.commitments.length) wrap.append(muted("No promises were found in this call."));
-    for (const c of report.commitments) {
-      wrap.append(commitmentCard(c, byId.get(c.owner) || null, drafts.get(c.id) || null));
+    const order = { needs_input: 0, ready_for_approval: 1 };
+    const items = report.commitments.map((c, i) => ({ c, i, owner: byId.get(c.owner) || null, draft: drafts.get(c.id) || null }));
+    const isRep = (x) => !!x.owner && x.owner.role === "rep";
+    const waiting = (x) => isRep(x) && (x.draft ? x.draft.status !== "approved" : !(x.c.due && x.c.due.status === "exact"));
+    const rank = (x) => (x.draft && x.draft.status in order ? order[x.draft.status] : 0);
+    const groups = [
+      ["Waiting for you", "Fill in what is missing, then approve. You send it yourself.", items.filter(waiting).sort((a, b) => rank(a) - rank(b) || a.i - b.i)],
+      ["Approved", null, items.filter((x) => isRep(x) && !waiting(x))],
+      ["The customer's promises", "Tracked so you can follow up. Sel drafts nothing for these.", items.filter((x) => !isRep(x))],
+    ];
+    for (const [title, sub, list] of groups) {
+      if (!list.length) continue;
+      wrap.append(
+        el(
+          "section",
+          { class: "group" },
+          el("div", {}, el("h3", { class: "group-title", text: `${title} (${list.length})` }), sub ? el("p", { class: "card-sub", text: sub }) : null),
+          ...list.map((x) => commitmentCard(x.c, x.owner, x.draft))
+        )
+      );
     }
     return wrap;
   }
 
   function dueLine(due) {
     if (due && due.status === "exact") {
-      const when = [due.date, due.time ? `at ${due.time}` : null, due.part_of_day || null].filter(Boolean).join(", ");
+      const when = [formatDay(due.date), due.time ? `at ${due.time}` : null, due.part_of_day || null].filter(Boolean).join(", ");
       return el("p", { class: "due" }, el("span", { class: "label", text: "Due: " }), when);
     }
     const parts = [el("p", { class: "due-reason" }, el("span", { class: "label", text: "No fixed date." }))];
     if (due && due.reason) parts.push(el("p", { class: "due-reason", text: `Reason: ${due.reason}` }));
     if (due && (due.window_start || due.window_end)) {
       const window = due.window_start && due.window_end
-        ? `${due.window_start} to ${due.window_end}`
-        : due.window_start ? `from ${due.window_start}` : `until ${due.window_end}`;
+        ? `${formatDay(due.window_start)} to ${formatDay(due.window_end)}`
+        : due.window_start ? `from ${formatDay(due.window_start)}` : `until ${formatDay(due.window_end)}`;
       parts.push(el("p", { class: "due-reason", text: `Window: ${window}` }));
     }
     return el("div", { class: "due-open" }, ...parts);
@@ -2888,9 +3023,8 @@
       "article",
       { class: "card commitment", dataset: { item: c.id, segs: segIds.join(" ") }, tabindex: "-1" },
       cardTag(tag.cls, tag.label),
-      cardHead(tone, iconName, action, `${who} · ${c.channel} · ${said}`),
+      cardHead(tone, iconName, action, `${who} · ${c.channel} · ${said}`, evidenceButton(segIds, c.id)),
       dueLine(c.due),
-      el("div", { class: "card-actions" }, evidenceButton(segIds, c.id)),
       tail
     );
   }
@@ -2983,6 +3117,8 @@
     } else if (msg) {
       statusText = msg.text;
       statusKind = msg.kind;
+    } else if (draft.status === "needs_input") {
+      statusText = "Approve opens once the missing details are saved.";
     }
     // Approving while the draft is on screen draws the check once.
     const justApproved = M.changed(`draft:${state.callId}:${draft.id}`, draft.status) && draft.status === "approved";
@@ -2991,13 +3127,13 @@
     form.append(
       ...compact([
         el("div", { class: "draft-head" }, el("h4", { text: isEmail ? "Email draft" : "Calendar draft" }), el("span", { class: "sr-only", text: status.label })),
+        missing.size
+          ? el("p", { class: "missing" }, icon("alert", 16), `Missing before you can approve: ${[...missing].map((k) => FIELD_LABEL[k] || k).join(", ")}`)
+          : null,
         draft.fields.review_note
           ? el("div", { class: "review-note", role: "note" }, el("strong", { text: "Review note: " }), draft.fields.review_note)
           : null,
         ...fieldNodes,
-        missing.size
-          ? el("p", { class: "missing", text: `Missing: ${[...missing].map((k) => FIELD_LABEL[k] || k).join(", ")}` })
-          : null,
         el("div", { class: "row actions" }, ...actions),
         el("p", { class: `form-status${statusKind ? ` is-${statusKind}` : ""}`, role: "status" }, approvedNote ? M.check(justApproved, 14) : null, statusText),
       ])
@@ -3026,9 +3162,24 @@
     } catch (e) {
       state.draftMsg[draftId] = { kind: "error", text: e.message };
     }
+    rerenderDraft(draftId);
+  }
+
+  // Saving or approving can move a draft's card (needs input → ready → approved).
+  // The page scrolls with it so the card stays where it was on screen, and focus
+  // returns to it instead of falling to the page.
+  function rerenderDraft(draftId) {
+    const draft = state.call.report.drafts.find((d) => d.id === draftId);
+    const card = () => (draft ? state.refs.panel.querySelector(`[data-item="${draft.commitment_id}"]`) : null);
+    const was = card();
+    const top = was ? was.getBoundingClientRect().top : null;
     renderPanel();
     renderSummary(state.refs.tiles);
     renderSteps();
+    const now = card();
+    if (!now) return;
+    if (top !== null) window.scrollBy({ top: now.getBoundingClientRect().top - top, behavior: "instant" });
+    now.focus({ preventScroll: true });
   }
 
   async function approveDraft(draftId) {
@@ -3041,9 +3192,7 @@
     } catch (e) {
       state.draftMsg[draftId] = { kind: "error", text: e.message };
     }
-    renderPanel();
-    renderSummary(state.refs.tiles);
-    renderSteps();
+    rerenderDraft(draftId);
   }
 
   function copyViaSelection(text) {
@@ -3384,6 +3533,10 @@
           el("div", {}, el("h2", { class: "section-title", text: title }), el("p", { class: "card-sub", text: sub }))
         )
       );
+    const recordingArt = el("div", { class: "upload-art" });
+    const updateRecordingArt = () => recordingArt.replaceChildren(lineArt("recording", state.people.find((p) => p.id === repSel.value) || viewer()));
+    updateRecordingArt();
+    repSel.addEventListener("change", updateRecordingArt);
     const form = el(
       "form",
       { class: "upload", id: "upload-form", novalidate: true },
@@ -3393,7 +3546,7 @@
         el(
           "section",
           { class: "list-card page-section bento-anchor upload-recording" },
-          sectionHead("Recording", "The file Sel will transcribe.", "mic"),
+          el("div", { class: "art-intro" }, sectionHead("Recording", "The file Sel will transcribe.", "mic"), recordingArt),
           el("div", { class: "page-section-body" }, fileInput, drop, voiceControls)
         ),
         el(
@@ -3661,6 +3814,17 @@
     setViewer,
     personName,
     personAvatar,
+    lineArt,
+    portraitOf,
+    portraitFor,
+    castPair,
+    pageHero,
+    pageToolbar,
+    portraitFor,
+    leadPortrait,
+    avatarAt,
+    portraitPicker,
+    pickedPortrait,
     skeleton,
     formField,
     coachRoute: () => ({ page: state.coachPage, arg: state.coachArg }),

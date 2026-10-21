@@ -18,7 +18,7 @@
   "use strict";
 
   const S = window.Sel;
-  const { el, icon, iconTile, crumbs, pill, muted, compact, plural, api, navigate, formatStarted, formatDay, quoted } = S;
+  const { el, icon, iconTile, pill, muted, compact, plural, api, navigate, formatStarted, formatDay, quoted } = S;
   const M = S.motion;
   const enc = encodeURIComponent;
   const STATUS ={ met: ["ok", "Met"], partial: ["warn", "Partly"], missed: ["bad", "Missed"] };
@@ -110,18 +110,26 @@
     );
   }
 
-  function loading(title, text) {
-    return el("div", { class: "page" }, header(null, title, null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted(text || "Loading…")));
+  function loading(title, text, trail) {
+    return el("div", { class: "page" }, trail ? S.pageToolbar(trail) : null, header(null, title, null), el("section", { class: "card is-loading", "aria-busy": "true" }, muted(text || "Loading…")));
   }
 
-  function failed(title, message, retryPath) {
+  function failed(title, message, retryPath, trail) {
     return el(
       "div",
       { class: "page" },
+      trail ? S.pageToolbar(trail) : null,
       header(null, title, null),
       el("section", { class: "card is-error", role: "alert" }, el("p", { class: "strong", text: `${title} could not be loaded.` }), muted(message), el("div", { class: "row" }, el("button", { type: "button", text: "Try again", on: { click: () => { page.errors.delete(retryPath); load(retryPath); } } })))
     );
   }
+
+  // A number in a page's summary strip, as on Today.
+  function statCell(label, value, iconName, tone, warn) {
+    return el("div", { class: `stat${warn ? " is-warn" : ""}` }, el("dt", {}, iconTile(tone, iconName), el("span", { text: label })), el("dd", {}, String(value)));
+  }
+
+  const personById = (id) => (id ? S.people().find((p) => p.id === id) || null : null);
 
   // Where an answer came from, labelled as on the Coaching tab.
   const answerLabel = (a) => (a.from === "team answer" ? ["info", "Team answer"] : S.lineOrigin(a));
@@ -311,9 +319,9 @@
     const toolbar =el("div", { class: "leads-toolbar" }, el("div", { class: "leads-search" }, search), el("div", { class: "leads-filter" }, filter), toggle);
     let body;
     if (!leads.length) {
-      body = el("div", { class: "leads-empty" }, el("p", { class: "strong", text: "No leads yet" }), muted("Add a lead, then choose it when you add a call."));
+      body = el("div", { class: "leads-empty illustrated-empty" }, S.lineArt("leads"), el("p", { class: "strong", text: "No leads yet" }), muted("Add a lead, then choose it when you add a call."));
     } else if (!shown.length) {
-      body = el("div", { class: "leads-empty" }, el("p", { class: "strong", text: "No leads match" }), muted("Try another name, or set the filter back to All."), el("button", { type: "button", text: "Show all", on: { click: () => { ui.q = ""; ui.status = "all"; rerender(); } } }));
+      body = el("div", { class: "leads-empty illustrated-empty" }, S.lineArt("search"), el("p", { class: "strong", text: "No leads match" }), muted("Try another name, or set the filter back to All."), el("button", { type: "button", text: "Show all", on: { click: () => { ui.q = ""; ui.status = "all"; rerender(); } } }));
     } else if (ui.layout === "card") {
       body = el("ul", { class: "lead-cards", "aria-label": "Leads" }, ...shown.map((l) => el("li", {},
         el("article", { class: "card lead-card" },
@@ -358,14 +366,14 @@
   }
 
   function openEditLead(lead) {
-    page.leadEdit = { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
+    page.leadEdit = { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "", portrait: lead.portrait };
     page.editingLead = lead.id;
     M.forget("dialog:edit-lead");
     rerender();
   }
 
   function editLeadDialog(lead, path) {
-    const draft = page.leadEdit && page.leadEdit.id === lead.id ? page.leadEdit : { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "" };
+    const draft = page.leadEdit && page.leadEdit.id === lead.id ? page.leadEdit : { id: lead.id, name: lead.name || "", phone: lead.phone || "", rep_id: lead.rep_id || "", portrait: lead.portrait };
     page.leadEdit = draft;
     const name = el("input", { id: "edit-lead-name", type: "text", required: true, maxlength: "80", autocomplete: "off", placeholder: "Lead or business name", autofocus: true, value: draft.name || "" });
     const phone = el("input", { id: "edit-lead-phone", type: "tel", maxlength: "30", autocomplete: "off", placeholder: "98XXXXXXXX", value: draft.phone || "" });
@@ -374,18 +382,22 @@
     rep.value = draft.rep_id && [...rep.options].some((o) => o.value === draft.rep_id) ? draft.rep_id : "";
     const err = el("p", { class: "form-error", role: "alert", hidden: true });
     const submit = el("button", { type: "submit", class: "primary", text: "Save details" });
+    // The customer's drawing on this lead's calls (and here); Automatic picks one from the lead.
+    const face = S.portraitPicker("edit-lead-portrait", draft.portrait, S.portraitOf(`lead:${lead.id}`), "Customer portrait");
     const remember = () => {
-      page.leadEdit = { id: lead.id, name: name.value, phone: phone.value, rep_id: rep.value };
+      page.leadEdit = { id: lead.id, name: name.value, phone: phone.value, rep_id: rep.value, portrait: S.pickedPortrait(face, "edit-lead-portrait") };
     };
     name.addEventListener("input", remember);
     phone.addEventListener("input", remember);
     rep.addEventListener("change", remember);
+    face.addEventListener("change", remember);
     const form = el(
       "form",
       { class: "dialog-form", novalidate: true },
       S.formField("edit-lead-name", "Name", name),
       S.formField("edit-lead-phone", "Phone", phone, "Optional."),
       S.formField("edit-lead-rep", "Rep", rep, reps.length ? "Whose lead this is." : "Add a rep under Manage people to assign one."),
+      face,
       err,
       el("div", { class: "row dialog-actions" }, el("button", { type: "button", text: "Cancel", on: { click: () => dialog.close() } }), submit)
     );
@@ -418,7 +430,7 @@
       err.hidden = true;
       submit.disabled = true;
       try {
-        const saved = await api(path, { method: "PUT", json: { name: name.value.trim(), phone: phone.value.trim(), rep_id: rep.value || null } });
+        const saved = await api(path, { method: "PUT", json: { name: name.value.trim(), phone: phone.value.trim(), rep_id: rep.value || null, portrait: S.pickedPortrait(face, "edit-lead-portrait") } });
         const pending = document.getElementById("lead-notes");
         if (pending && pending.value !== (saved.notes || "")) saved.notes = pending.value;
         page.data.set(path, saved);
@@ -440,8 +452,9 @@
   function renderLead(main, id) {
     const path = `/api/leads/${enc(id)}`;
     const lead = got(path);
-    if (page.errors.has(path)) return main.replaceChildren(failed("Lead", page.errors.get(path), path));
-    if (!lead) return main.replaceChildren(loading("Lead"));
+    const trail0 = [{ href: "#leads", text: "Leads" }, { text: "Lead" }];
+    if (page.errors.has(path)) return main.replaceChildren(failed("Lead", page.errors.get(path), path, trail0));
+    if (!lead) return main.replaceChildren(loading("Lead", null, trail0));
     const notes = el("textarea", { id: "lead-notes", class: "input", rows: "5", maxlength: "2000", placeholder: "What you know about this lead…", value: lead.notes || "" });
     const msg = el("p", { class: "form-status", role: "status" });
     const save = el("button", { type: "button", text: "Save notes" });
@@ -476,24 +489,21 @@
     const fact = (label, value, quiet) => el("div", { class: "stat" }, el("dt", { text: label }), el("dd", { class: quiet ? "is-quiet" : "" }, value));
     const edit = el("button", { type: "button", id: "edit-lead", on: { click: () => openEditLead(lead) } }, "Edit details");
     const prep = calls.length ? el("a", { class: "button primary", href: `#prep/${enc(lead.id)}`, text: "Prep for the next call" }) : null;
+    const owner = personById(lead.rep_id);
     const dialog = page.editingLead === lead.id ? editLeadDialog(lead, path) : null;
     const mem = focusMemory();
     main.replaceChildren(
       el(
         "div",
-        { class: "page lead-page" },
-        el(
-          "header",
-          { class: "page-head lead-head" },
-          el(
-            "div",
-            {},
-            crumbs([{ href: "#leads", text: "Leads" }, { text: lead.name }]),
-            el("h1", { text: lead.name }),
-            el("p", { class: "lede", text: calls.length ? `${plural(calls.length, "call", "calls")} on file. Prep reads them before the next one.` : "No calls yet. Link this lead from a call's page, then Prep can read it." })
-          ),
-          el("div", { class: "row lead-actions" }, edit, prep)
-        ),
+        { class: "page lead-page hero-page" },
+        S.pageToolbar([{ href: "#leads", text: "Leads" }, { text: lead.name }]),
+        S.pageHero({
+          eyebrow: owner ? `${owner.name}'s lead` : "Lead",
+          title: lead.name,
+          lede: calls.length ? `${plural(calls.length, "call", "calls")} on file. Prep reads them before the next one.` : "No calls yet. Link this lead from a call's page, then Prep can read it.",
+          actions: [prep, edit],
+          seats: S.castPair({ owner, repName: owner ? owner.name : null, lead, custKey: `lead:${lead.id}`, custName: lead.name }),
+        }),
         el(
           "dl",
           { class: "stat-strip", "aria-label": "About this lead" },
@@ -537,8 +547,9 @@
   function renderPrep(main, id) {
     const path = `/api/leads/${enc(id)}/prep`;
     const brief = got(path);
-    if (page.errors.has(path)) return main.replaceChildren(failed("Prep", page.errors.get(path), path));
-    if (!brief) return main.replaceChildren(loading("Prep", "Reading this lead's earlier calls…"));
+    const trail0 = [{ href: "#leads", text: "Leads" }, { href: `#lead/${enc(id)}`, text: "Lead" }, { text: "Prep" }];
+    if (page.errors.has(path)) return main.replaceChildren(failed("Prep", page.errors.get(path), path, trail0));
+    if (!brief) return main.replaceChildren(loading("Prep", "Reading this lead's earlier calls…", trail0));
     const rehearse = el("button", { type: "button", class: "primary", text: "Rehearse this call" });
     const rmsg = el("p", { class: "form-error", role: "alert", hidden: true });
     rehearse.addEventListener("click", async () => {
@@ -566,23 +577,28 @@
     );
     const gaps = brief.gaps.map((g) => el("li", { class: "page-row" }, icon(g.criterion ? "target" : "question", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: g.title || g.text }), el("span", { class: "muted small", text: g.criterion ? g.suggestion || g.detail || "" : "They asked this; check it was answered." }))));
     const promises = brief.promises.map((p) => el("li", { class: "page-row" }, icon(p.owner === "rep" ? "mail" : "user", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: `${p.owner === "rep" ? "You" : "They"}: ${p.action}` }), el("span", { class: "muted small", text: p.due && p.due.status === "exact" ? `Due ${formatDay(p.due.date)}` : p.due_text ? `${quoted(p.due_text)}: no fixed day` : "No day said" }))));
+    const owner = personById(brief.lead.rep_id);
     main.replaceChildren(
       el(
         "div",
-        { class: "page" },
-        el(
-          "header",
-          { class: "page-head" },
-          el(
-            "div",
-            {},
-            crumbs([{ href: "#leads", text: "Leads" }, { href: `#lead/${enc(id)}`, text: brief.lead.name }, { text: "Prep" }]),
-            el("h1", { text: `Before your call with ${brief.lead.name}` }),
-            el("p", { class: "lede", text: `${plural(brief.calls.length, "earlier call", "earlier calls")}. Read in about a minute.` })
-          ),
-          rehearse
-        ),
+        { class: "page hero-page" },
+        S.pageToolbar([{ href: "#leads", text: "Leads" }, { href: `#lead/${enc(id)}`, text: brief.lead.name }, { text: "Prep" }]),
+        S.pageHero({
+          eyebrow: "Before your next call",
+          title: brief.lead.name,
+          lede: [brief.summary.text, " ", aiPill(brief.summary.by)],
+          actions: [rehearse],
+          seats: S.castPair({ owner, repName: owner ? owner.name : null, lead: brief.lead, custKey: `lead:${id}`, custName: brief.lead.name }),
+        }),
         rmsg,
+        el(
+          "dl",
+          { class: "stat-strip", "aria-label": "This brief" },
+          statCell("Earlier calls", brief.calls.length, "phone", "accent"),
+          statCell("Likely objections", brief.likely_objections.length, "alert", "warn", brief.likely_objections.length > 0),
+          statCell("To cover", brief.gaps.length, "question", "info"),
+          statCell("Promises", brief.promises.length, "mail", "info")
+        ),
         el(
           "div",
           { class: "bento" },
@@ -592,7 +608,7 @@
             "What they raised before, with the best answer Sel has: the team's approved answer, else the better line.",
             "alert",
             "warn",
-            el("div", { class: "focus-body" }, el("p", {}, brief.summary.text, " ", aiPill(brief.summary.by)), brief.model_pending ? muted("The language model is reading these calls too; this brief updates by itself.") : null),
+            brief.model_pending ? el("div", { class: "focus-body" }, muted("The language model is reading these calls too; this brief updates by itself.")) : null,
             objections.length ? el("ul", { class: "skills" }, ...objections) : muted("No objections on earlier calls.")
           ),
           el(
@@ -792,8 +808,9 @@
   function renderRep(main, id) {
     const path = `/api/team/${enc(id)}`;
     const r = got(path);
-    if (page.errors.has(path)) return main.replaceChildren(failed("Rep", page.errors.get(path), path));
-    if (!r) return main.replaceChildren(loading("Rep", "Reading this rep's calls…"));
+    const trail0 = [{ href: "#team", text: "Team" }, { text: "Rep" }];
+    if (page.errors.has(path)) return main.replaceChildren(failed("Rep", page.errors.get(path), path, trail0));
+    if (!r) return main.replaceChildren(loading("Rep", "Reading this rep's calls…", trail0));
     const timelines = r.timelines.map((tl) =>
       el(
         "li",
@@ -819,15 +836,29 @@
       return el("li", { class: "page-row" }, icon("phone", 18), el("div", { class: "page-row-main" }, el("span", { class: "strong", text: x.quote ? quoted(x.quote) : x.why }), el("span", { class: "muted small", text: compact([x.customer_name, formatStarted(x.started_at), x.why]).join(" · ") })), pill(v[0], v[1]));
     });
     const brief = r.brief;
+    const me = S.viewer();
+    const reviewed = new Set(r.timelines.flatMap((tl) => tl.points.map((pt) => pt.call_id))).size;
+    const open = (r.escalations || []).filter((x) => x.status === "open").length;
+    const role = r.person.role === "manager" ? "Manager" : "Rep";
     main.replaceChildren(
       el(
         "div",
-        { class: "page" },
+        { class: "page hero-page" },
+        S.pageToolbar([{ href: "#team", text: "Team" }, { text: r.person.name }]),
+        S.pageHero({
+          eyebrow: `Team · ${role}`,
+          title: r.person.name,
+          lede: r.focus ? `Focus: ${r.focus.title}.${r.focus.reason ? ` ${r.focus.reason}` : ""}` : "No focus yet. Sel's coach sets one after a reviewed call.",
+          actions: [me && me.id === r.person.id ? null : el("button", { type: "button", text: `View as ${r.person.name.split(" ")[0]}`, on: { click: () => S.setViewer(r.person.id) } })],
+          seats: [{ role: "rep", at: S.portraitFor(r.person), name: r.person.name, label: role }],
+        }),
         el(
-          "header",
-          { class: "page-head page-head-person" },
-          S.personAvatar(r.person, "call"),
-          el("div", {}, crumbs([{ href: "#team", text: "Team" }, { text: r.person.name }]), el("h1", { text: r.person.name }), el("p", { class: "lede", text: r.focus ? `Focus: ${r.focus.title}` : "No focus yet" }))
+          "dl",
+          { class: "stat-strip", "aria-label": "This rep" },
+          statCell("Reviewed calls", reviewed, "phone", "accent"),
+          statCell("Drills", (r.drills || []).length, "target", "violet"),
+          statCell("Checked since the focus", (r.transfer || []).length, "check", "ok"),
+          statCell("Needs you", open, "alert", "warn", open > 0)
         ),
         el(
           "div",

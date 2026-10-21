@@ -89,6 +89,22 @@ class TodayApiTests(unittest.TestCase):
         self.assertEqual(self.req("POST", "/api/people", {"name": "X", "role": "boss"})[0], 400)
         self.assertEqual(self.req("PUT", "/api/people/nobody", {"name": "Y"})[0], 404)
 
+    def test_a_person_and_a_lead_can_choose_a_portrait(self):
+        p = self.person("Portrait Person")
+        status, body = self.req("PUT", f"/api/people/{p['id']}", {"portrait": 3})
+        self.assertEqual((status, body["portrait"], body["name"]), (200, 3, "Portrait Person"))
+        # A name change leaves the portrait alone; null goes back to the automatic one.
+        self.assertEqual(self.req("PUT", f"/api/people/{p['id']}", {"name": "Portrait P"})[1]["portrait"], 3)
+        self.assertNotIn("portrait", self.req("PUT", f"/api/people/{p['id']}", {"portrait": None})[1])
+        for bad in (6, -1, "2", True, 1.5):
+            self.assertEqual(self.req("PUT", f"/api/people/{p['id']}", {"portrait": bad})[0], 400, bad)
+        status, lead = self.req("POST", "/api/leads", {"name": "Portrait Lead"})
+        self.assertEqual(status, 201)
+        status, lead = self.req("PUT", f"/api/leads/{lead['id']}", {"portrait": 5})
+        self.assertEqual((status, lead["portrait"]), (200, 5))
+        self.assertEqual(self.req("PUT", f"/api/leads/{lead['id']}", {"portrait": 9})[0], 400)
+        self.assertIsNone(self.req("PUT", f"/api/leads/{lead['id']}", {"portrait": None})[1]["portrait"])
+
     def test_rep_assignment_and_today_for_a_rep(self):
         asha = self.person("Asha")
         status, summary = self.req("PUT", "/api/calls/example-solar-01/rep", {"rep_id": asha["id"]})

@@ -133,6 +133,9 @@ class CallService:
         self._analysis_llm_factory = analysis_llm_factory or (lambda: None)
         # The Coach: on the chat model when there is one, else rules.
         self._coach_factory = coach_factory or (lambda: ModelCoach(llm) if (llm := self._chat_factory()) else RuleCoach())
+        # Start the model probes now (background), so they have answered before the first page asks.
+        for factory in (self._chat_factory, self._analysis_llm_factory):
+            getattr(factory, "warm", lambda: None)()
         self._worker = threading.Thread(target=self._work, daemon=True)
         self._worker.start()
         self._agent_worker = threading.Thread(target=self._agent_work, daemon=True)
@@ -1109,8 +1112,9 @@ class CallService:
         return person
 
     def update_person(self, person_id: str, name: Any = None, role: Any = None,
-                      origin: str | None = None) -> dict[str, Any]:
-        person = self.people.update(person_id, name, role)
+                      origin: str | None = None, **portrait: Any) -> dict[str, Any]:
+        """`portrait=` (0-5, or None for the automatic one) only when it is being changed."""
+        person = self.people.update(person_id, name, role, **portrait)
         self.bus.publish("calls", "people", self.people.list(), origin=origin)
         return person
 
@@ -1244,7 +1248,7 @@ class CallService:
         return self._lead_out(lead)
 
     def update_lead(self, lead_id: str, changes: dict[str, Any], origin: str | None = None) -> dict[str, Any]:
-        allowed = {k: v for k, v in changes.items() if k in ("name", "phone", "notes", "rep_id")}
+        allowed = {k: v for k, v in changes.items() if k in ("name", "phone", "notes", "rep_id", "portrait")}
         if allowed.get("rep_id"):
             allowed["rep_id"], _ = self._rep(allowed["rep_id"], None)
         self.leads.update(lead_id, **allowed)
@@ -1667,40 +1671,76 @@ ONE_ON_ONE_SYSTEM = """You help a sales manager prepare a one-to-one with a sale
 the rep's calls, practice and checks. Write summary: two short sentences on where the rep stands and what to discuss,
 using only the points. Return only JSON."""
 
-_CHAT_HEALTH: dict[str, Any] = {"at": 0.0, "llm": None}
-_ANALYSIS_HEALTH: dict[str, Any] = {"at": 0.0, "llm": None}
+class _Probe:
+    """The last known answer to "is this model server up?", refreshed in the background.
+
+    A request never waits on the probe: ``get`` returns what the last probe found (None before the first
+    one finishes) and, when that is over ``ttl`` old, starts one probe on a daemon thread (one at a time).
+    With no server the probe can take seconds (Windows retries a refused local connection), which used to
+    hold up the Prep and 1:1 pages on every first view after the cache expired."""
+
+    def __init__(self, make, ttl: float = 60.0):
+        self._make, self._ttl = make, ttl
+        self._lock = threading.Lock()
+        self._llm = None
+        self._at: float | None = None
+        self._running = False
+
+    def get(self):
+        import time
+
+        with self._lock:
+            if not self._running and (self._at is None or time.monotonic() - self._at > self._ttl):
+                self._running = True
+                threading.Thread(target=self._probe, name="sel-llm-probe", daemon=True).start()
+            return self._llm
+
+    def _probe(self) -> None:
+        import time
+
+        from .llm import LLMError
+
+        try:
+            llm = self._make()
+            found = llm if llm.health().get("ok") else None
+        except LLMError:
+            found = None
+        except Exception:  # noqa: BLE001 - an unreachable model is the normal case, not an error
+            found = None
+        with self._lock:
+            self._llm, self._at, self._running = found, time.monotonic(), False
+
+
+def _chat_client():
+    from .llm import chat_client_from_env
+
+    return chat_client_from_env(temperature=0.3)
+
+
+def _analysis_client():
+    from .llm import client_from_env
+
+    return client_from_env()
+
+
+_CHAT_PROBE = _Probe(_chat_client)
+_ANALYSIS_PROBE = _Probe(_analysis_client)
 
 
 def default_chat_factory():
-    """The fast chat model (``SEL_CHAT_LLM_*``) when its server answers (checked at most once a minute), else None."""
-    import time
-
-    from .llm import LLMError, chat_client_from_env
-
-    if time.monotonic() - _CHAT_HEALTH["at"] > 60:
-        try:
-            llm = chat_client_from_env(temperature=0.3)
-            _CHAT_HEALTH["llm"] = llm if llm.health().get("ok") else None
-        except LLMError:
-            _CHAT_HEALTH["llm"] = None
-        _CHAT_HEALTH["at"] = time.monotonic()
-    return _CHAT_HEALTH["llm"]
+    """The fast chat model (``SEL_CHAT_LLM_*``) when its server last answered, else None. Never blocks:
+    the check runs in the background, at most once a minute."""
+    return _CHAT_PROBE.get()
 
 
 def default_analysis_llm():
-    """The analysis model (``SEL_LLM_*``) when its server answers (checked at most once a minute), else None."""
-    import time
+    """The analysis model (``SEL_LLM_*``) when its server last answered, else None. Never blocks."""
+    return _ANALYSIS_PROBE.get()
 
-    from .llm import LLMError, client_from_env
 
-    if time.monotonic() - _ANALYSIS_HEALTH["at"] > 60:
-        try:
-            llm = client_from_env()
-            _ANALYSIS_HEALTH["llm"] = llm if llm.health().get("ok") else None
-        except LLMError:
-            _ANALYSIS_HEALTH["llm"] = None
-        _ANALYSIS_HEALTH["at"] = time.monotonic()
-    return _ANALYSIS_HEALTH["llm"]
+# ``CallService`` calls ``warm`` once at start so the first probe is under way before the first page.
+default_chat_factory.warm = _CHAT_PROBE.get
+default_analysis_llm.warm = _ANALYSIS_PROBE.get
 
 
 def default_factory(call: dict[str, Any], speakers: list[Speaker]):

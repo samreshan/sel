@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .files import read_json, write_json
+from .people import clean_portrait
 
 MAX_LEADS = 5000
 MAX_NOTES = 2000
@@ -96,6 +97,8 @@ class LeadStore:
                 lead["phone"] = re.sub(r"[^\d+ -]", "", str(changes["phone"] or ""))[:30].strip() or None
             if "rep_id" in changes:
                 lead["rep_id"] = changes["rep_id"] or None
+            if "portrait" in changes:
+                lead["portrait"] = clean_portrait(changes["portrait"])
             lead["updated_at"] = _now()
             self.save(lead)
             return lead

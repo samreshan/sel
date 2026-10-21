@@ -149,8 +149,10 @@ picks who it is **viewing as** (`localStorage` `sel.viewer`); there is no
 login, so this is a convenience, not access control. UI follows DESIGN.md
 (see "Navigation, Today and the Playbook" there).
 
-- **People** (`people.json`, `sel/people.py`): name and role (`rep` or
-  `manager`). Calls carry `rep_id`: set from the upload form, from the
+- **People** (`people.json`, `sel/people.py`): name, role (`rep` or
+  `manager`) and an optional chosen `portrait` (0–5; absent means the app
+  picks one from the id; `PUT /api/people/<id> {portrait}`, `null` clears
+  it). Leads take the same optional `portrait` for the customer. Calls carry `rep_id`: set from the upload form, from the
   simulator (the rep's `person_id`), or later with "Whose call" on the call
   page (`PUT /api/calls/<id>/rep`). Example calls start with no rep.
 - **Today** (`GET /api/today?person=`): for a rep, their follow-up drafts
@@ -614,7 +616,7 @@ real calls, once a manager approves them, coach the next call.
   earlier objection gets the best answer Sel has: an approved team answer for
   that criterion that shares words with it, else the call's better line. Sel's
   rules answer at once; when the analysis model answers
-  (`default_analysis_llm`, health-checked once a minute) a model brief is
+  (`default_analysis_llm`, last health result, probed in the background once a minute) a model brief is
   built on the agent queue (it picks objections and gaps by id and writes a
   summary whose numbers must all be in the items), announced with a `lead`
   event, and cached in memory against a signature of the lead's calls (their
@@ -698,6 +700,23 @@ on qwen2.5 (no model server here; tested with scripted models).
   a person, AI-suggested).
 - The upload browser test had been failing since the restyle (customer name
   moved into the "More about this call" disclosure); it opens it now.
+- **The health probe blocked the Lead, Prep and rep pages for ~2 s.** With no
+  model server running (the usual case on the owner's Windows laptop),
+  `default_analysis_llm` and `default_chat_factory` ran `llm.health()` on the
+  request thread whenever their once-a-minute cache had expired; a refused
+  local connection takes about 2 s on Windows, so `GET /api/leads/<id>/prep`
+  and `GET /api/team/<person>` took 2.0 s on the first view after expiry and
+  5 ms otherwise. Now both factories go through `service._Probe`: `get()`
+  returns the last known answer (None before the first probe finishes) and,
+  when it is over 60 s old, starts one probe on a daemon thread (one at a
+  time). Requests never wait; `CallService.__init__` calls `warm` so the first
+  probe is already running at start. Cost: after a server comes up (or
+  goes down) the pages notice on the first view after the probe lands, not on
+  the view that triggered it, so a model brief starts one view later.
+  Measured with no model server: 20 rounds of both endpoints over 72 s (the
+  cache expired once), 40 requests, median 17 ms, slowest 62 ms.
+  `ProbeNeverBlocksTests` (`tests/test_team.py`) hangs the probe and checks
+  both pages still answer with the rules and one probe runs per model.
 
 ## Performance
 

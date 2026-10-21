@@ -6,6 +6,7 @@ Over the HTTP API, with scripted stand-ins for the analysis and chat models wher
 import json
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -20,6 +21,7 @@ from sel.models import Transcript
 from sel.pack import load_pack
 from sel.playbook import candidates
 from sel.server import serve
+from sel import service as service_mod
 from sel.service import CallService
 from sel.simulator import SimulatorHub
 
@@ -412,6 +414,81 @@ class LibrarianUnitTests(unittest.TestCase):
         self.assertEqual([c["call_id"] for c in candidates(calls, [], set())], ["c0"])
         on_file = [{"criterion": "discovery", "answer": "Before the price, how big is your monthly bill"}]
         self.assertEqual(candidates(calls, [], set(), on_file), [])
+
+
+class SlowModelServer:
+    """A model whose health check hangs until released: a server that never answers."""
+
+    name = "slow"
+
+    def __init__(self):
+        self.gate = threading.Event()
+        self.probes = 0
+
+    def health(self):
+        self.probes += 1
+        self.gate.wait(20)
+        return {"ok": True, "models": [], "error": None}
+
+
+class ProbeNeverBlocksTests(TeamApi):
+    """The health probe for the analysis and chat models runs in the background: a page request answers with
+    the rules at once, however long the probe takes (no server running: seconds on Windows)."""
+
+    def setUp(self):
+        super().setUp()
+        self.server = SlowModelServer()
+        self.old = (service_mod._ANALYSIS_PROBE, service_mod._CHAT_PROBE)
+        service_mod._ANALYSIS_PROBE = service_mod._Probe(lambda: self.server)
+        service_mod._CHAT_PROBE = service_mod._Probe(lambda: self.server)
+        self.service._analysis_llm_factory = service_mod.default_analysis_llm
+        self.service._chat_factory = service_mod.default_chat_factory
+
+    def tearDown(self):
+        self.server.gate.set()
+        service_mod._ANALYSIS_PROBE, service_mod._CHAT_PROBE = self.old
+        super().tearDown()
+
+    def timed(self, path):
+        t = time.perf_counter()
+        out = self.ok("GET", path)
+        return out, time.perf_counter() - t
+
+    def test_prep_and_the_one_to_one_answer_while_the_probe_hangs(self):
+        lead = self.ok("POST", "/api/leads", {"name": "Ramesh", "rep_id": self.rep}, 201)
+        self.assign()
+        self.ok("PUT", "/api/calls/example-solar-01/lead", {"lead_id": lead["id"]})
+        for _ in range(3):  # the probe is still hanging on every request
+            brief, took = self.timed(f"/api/leads/{lead['id']}/prep")
+            self.assertLess(took, 1.0)
+            self.assertEqual(brief["by"], "rules (no language model)")
+            self.assertNotIn("model_pending", brief)
+            view, took = self.timed(f"/api/team/{self.rep}")
+            self.assertLess(took, 1.0)
+            self.assertFalse(view["brief"]["model_pending"])
+        self.assertEqual(self.server.probes, 2)  # one probe per model, not one per request
+
+    def test_a_model_that_answers_is_used_from_the_next_view(self):
+        lead = self.ok("POST", "/api/leads", {"name": "Ramesh", "rep_id": self.rep}, 201)
+        self.ok("PUT", "/api/calls/example-solar-01/lead", {"lead_id": lead["id"]})
+        self.ok("GET", f"/api/leads/{lead['id']}/prep")
+        self.server.gate.set()
+        deadline = time.monotonic() + 5
+        while service_mod._ANALYSIS_PROBE.get() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(self.ok("GET", f"/api/leads/{lead['id']}/prep")["model_pending"])
+        self.service.wait_idle()
+
+    def test_an_expired_answer_is_served_while_it_is_refreshed(self):
+        probe = service_mod._Probe(lambda: self.server, ttl=0.0)
+        self.server.gate.set()
+        deadline = time.monotonic() + 5
+        while probe.get() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.server.gate.clear()
+        t = time.perf_counter()
+        self.assertIs(probe.get(), self.server)  # expired: last answer now, a new probe behind it
+        self.assertLess(time.perf_counter() - t, 0.5)
 
 
 if __name__ == "__main__":
